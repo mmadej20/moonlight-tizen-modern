@@ -138,11 +138,21 @@ Legacy build dependencies are isolated inside the Docker builder only; they are 
 ## Produced artifact
 
 - Path: `C:\Users\madej\Downloads\moonlight-tizen-master\Moonlight.wgt`
-- Size: 2,317,304 bytes
-- Timestamp (UTC): 2026-07-25 20:07:30
-- SHA-256: `A93C41CA698B8AB3C0725E1BB6B4B8F48B224EB1B9CBE4E55CB960CC0D4FCD40`
+- Size: 2,317,301 bytes
+- Timestamp (UTC): 2026-07-25 20:44:03
+- SHA-256: `86968C3DB957A6DAD53E01E81D284FF8D300BF08673482D3D5CE62B96F5251AC`
 
 The package contains signature files, Tizen `config.xml`, WASM/worker/platform assets, the curl CA bundle, icons, and `static/js/jquery-4.0.0.min.js`. It does not contain jQuery 2.2.0, `node_modules`, tests, Dockerfiles, SDK files, source files, or private keys.
+
+This is the final Task 10 artifact from committed source
+`7eff49d7a2118533c8081f3a2ad944f408514cf8`. It was produced by a clean,
+uncached default Docker build of `moonlight-tizen-9-reliability`, copied from
+a uniquely named container while its state was `created|false`, and inspected
+after extraction. All 12 native test executables passed with the documented
+warning, sanitizer, and pthread options; all 13 JavaScript suites passed; and
+the receiver integration test printed its PASS marker. Package inspection
+confirmed Tizen 9.0, both signatures, the required runtime/browser assets, and
+the absence of forbidden entries and unresolved old-jQuery references.
 
 ## Physical TV smoke checklist (not yet performed)
 
