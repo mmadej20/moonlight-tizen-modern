@@ -67,6 +67,7 @@ set_target_properties(moonlight-common-c
             "-s USE_CRYPTO=1 -s USE_SSL=1")
 
 add_library(libgamestream STATIC
+    libgamestream/hex_utils.c
     libgamestream/http.c
     libgamestream/mkcert.c
     libgamestream/pairing.c

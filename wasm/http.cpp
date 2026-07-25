@@ -2,6 +2,7 @@
 
 #include <http.h>
 #include <errors.h>
+#include <limits.h>
 #include <string.h>
 
 #include <mkcert.h>
@@ -17,24 +18,41 @@ char* g_CertHex;
 
 MessageResult MoonlightInstance::MakeCert() {
   CERT_KEY_PAIR certKeyPair = mkcert_generate();
+  if (!certKeyPair.x509 || !certKeyPair.pkey || !certKeyPair.p12) {
+    mkcert_free(certKeyPair);
+    return MessageResult::Reject(emscripten::val("Certificate generation failed"));
+  }
 
   BIO* bio = BIO_new(BIO_s_mem());
+  if (!bio || PEM_write_bio_X509(bio, certKeyPair.x509) != 1) {
+    BIO_free(bio);
+    mkcert_free(certKeyPair);
+    return MessageResult::Reject(emscripten::val("Certificate generation failed"));
+  }
 
-  PEM_write_bio_X509(bio, certKeyPair.x509);
   BUF_MEM* mem = NULL;
-  BIO_get_mem_ptr(bio, &mem);
+  if (BIO_get_mem_ptr(bio, &mem) <= 0 || !mem || !mem->data || mem->length == 0) {
+    BIO_free(bio);
+    mkcert_free(certKeyPair);
+    return MessageResult::Reject(emscripten::val("Certificate generation failed"));
+  }
 
   std::string cert(mem->data, mem->length);
 
   BIO_free(bio);
 
   BIO* biokey = BIO_new(BIO_s_mem());
-  PEM_write_bio_PrivateKey(biokey, certKeyPair.pkey, NULL, NULL, 0, NULL, NULL);
-  BIO_get_mem_ptr(biokey, &mem);
+  if (!biokey || PEM_write_bio_PrivateKey(biokey, certKeyPair.pkey, NULL, NULL, 0, NULL, NULL) != 1 ||
+      BIO_get_mem_ptr(biokey, &mem) <= 0 || !mem || !mem->data || mem->length == 0) {
+    BIO_free(biokey);
+    mkcert_free(certKeyPair);
+    return MessageResult::Reject(emscripten::val("Certificate generation failed"));
+  }
 
   std::string pkey(mem->data, mem->length);
 
   BIO_free(biokey);
+  mkcert_free(certKeyPair);
 
   emscripten::val ret = emscripten::val::object();
   ret.set("cert", emscripten::val(cert));
@@ -44,29 +62,62 @@ MessageResult MoonlightInstance::MakeCert() {
 }
 
 LoadResult MoonlightInstance::LoadCert(const char* certStr, const char* keyStr) {
-  char* _certStr = strdup(certStr);
-  char* _keyStr = strdup(keyStr);
-
-  BIO* bio = BIO_new_mem_buf(_certStr, -1);
-  if (!(g_Cert = PEM_read_bio_X509(bio, NULL, NULL, NULL))) {
+  if (!certStr || !keyStr) {
     return LoadResult::CertErr;
   }
-  BIO_free_all(bio);
 
-  bio = BIO_new_mem_buf(_keyStr, -1);
-  if (!(g_PrivateKey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL))) {
+  const size_t certLength = strlen(certStr);
+  const size_t keyLength = strlen(keyStr);
+  if (certLength > INT_MAX || keyLength > INT_MAX ||
+      certLength > (((size_t)-1) - 1) / 2) {
+    return LoadResult::CertErr;
+  }
+  BIO* bio = BIO_new_mem_buf(certStr, (int)certLength);
+  if (!bio) {
+    return LoadResult::CertErr;
+  }
+
+  X509* nextCert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+  BIO_free_all(bio);
+  if (!nextCert) {
+    return LoadResult::CertErr;
+  }
+
+  bio = BIO_new_mem_buf(keyStr, (int)keyLength);
+  if (!bio) {
+    X509_free(nextCert);
     return LoadResult::PrivateKeyErr;
   }
-  BIO_free_all(bio);
 
-  // Convert the PEM cert to hex
-  g_CertHex = reinterpret_cast<char*>(malloc((strlen(certStr) * 2) + 1));
-  for (size_t i = 0; i < strlen(certStr); i++) {
-    sprintf(&g_CertHex[i * 2], "%02x", certStr[i]);
+  EVP_PKEY* nextPrivateKey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
+  BIO_free_all(bio);
+  if (!nextPrivateKey) {
+    X509_free(nextCert);
+    return LoadResult::PrivateKeyErr;
   }
 
-  free(_certStr);
-  free(_keyStr);
+  // Convert the PEM cert to hex
+  char* nextCertHex = reinterpret_cast<char*>(malloc((certLength * 2) + 1));
+  if (!nextCertHex) {
+    X509_free(nextCert);
+    EVP_PKEY_free(nextPrivateKey);
+    return LoadResult::CertErr;
+  }
+
+  for (size_t i = 0; i < certLength; i++) {
+    sprintf(&nextCertHex[i * 2], "%02x", (unsigned char)certStr[i]);
+  }
+
+  X509* previousCert = g_Cert;
+  EVP_PKEY* previousPrivateKey = g_PrivateKey;
+  char* previousCertHex = g_CertHex;
+  g_Cert = nextCert;
+  g_PrivateKey = nextPrivateKey;
+  g_CertHex = nextCertHex;
+
+  X509_free(previousCert);
+  EVP_PKEY_free(previousPrivateKey);
+  free(previousCertHex);
 
   return LoadResult::Success;
 }

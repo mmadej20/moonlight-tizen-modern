@@ -21,6 +21,7 @@
 #include "mkcert.h"
 #include "pairing.h"
 #include "errors.h"
+#include "hex_utils.h"
 
 #include <sys/stat.h>
 #include <stdbool.h>
@@ -47,30 +48,59 @@ static int xml_search(char* data, size_t len, char* node, char** result) {
     char endTag[256];
     char* startOffset;
     char* endOffset;
+    char* copiedData;
+
+    if (data == NULL || node == NULL || result == NULL) {
+        return GS_INVALID;
+    }
+
+    *result = NULL;
+    if (len == (size_t)-1) {
+        return GS_INVALID;
+    }
+
+    copiedData = malloc(len + 1);
+    if (copiedData == NULL) {
+        return GS_OUT_OF_MEMORY;
+    }
+
+    memcpy(copiedData, data, len);
+    copiedData[len] = '\0';
+
+    if (snprintf(startTag, sizeof(startTag), "<%s>", node) >= sizeof(startTag) ||
+        snprintf(endTag, sizeof(endTag), "</%s>", node) >= sizeof(endTag)) {
+        free(copiedData);
+        return GS_INVALID;
+    }
     
-    data = strdup(data);
-    
-    sprintf(startTag, "<%s>", node);
-    sprintf(endTag, "</%s>", node);
-    
-    startOffset = strstr(data, startTag);
+    startOffset = strstr(copiedData, startTag);
     if (startOffset == NULL) {
-        free(data);
+        free(copiedData);
         return GS_FAILED;
     }
     
-    endOffset = strstr(data, endTag);
+    endOffset = strstr(copiedData, endTag);
+    if (endOffset == NULL || endOffset < startOffset) {
+        free(copiedData);
+        return GS_FAILED;
+    }
+
+    endOffset = strstr(startOffset + strlen(startTag), endTag);
     if (endOffset == NULL) {
-        free(data);
+        free(copiedData);
         return GS_FAILED;
     }
     
     *endOffset = 0;
     
     *result = malloc(strlen(startOffset + strlen(startTag)) + 1);
+    if (*result == NULL) {
+        free(copiedData);
+        return GS_OUT_OF_MEMORY;
+    }
     strcpy(*result, startOffset + strlen(startTag));
     
-    free(data);
+    free(copiedData);
     return GS_OK;
 }
 
@@ -89,7 +119,7 @@ static int sign_it(const unsigned char *msg, size_t mlen, unsigned char **sig, s
     
     EVP_MD_CTX *ctx = EVP_MD_CTX_create();
     if (ctx == NULL)
-        return GS_FAILED;
+        goto cleanup;
     
     const EVP_MD *md = EVP_get_digestbyname("SHA256");
     if (md == NULL)
@@ -126,6 +156,12 @@ static int sign_it(const unsigned char *msg, size_t mlen, unsigned char **sig, s
 cleanup:
     EVP_MD_CTX_destroy(ctx);
     ctx = NULL;
+
+    if (result != GS_OK) {
+        OPENSSL_free(*sig);
+        *sig = NULL;
+        *slen = 0;
+    }
     
     return result;
 }
@@ -146,21 +182,20 @@ static bool verifySignature(const unsigned char *data, int dataLength, unsigned 
 
 X509* get_cert(PHTTP_DATA data) {
     char *pemcerthex;
+    unsigned char* pemcert = NULL;
+    size_t pemcertLength = 0;
 
     if (xml_search(data->memory, data->size, "plaincert", &pemcerthex) != GS_OK)
         return NULL;
 
-    // Convert cert from hex string to the PEM string and null terminate
-    int hexstrlen = strlen(pemcerthex);
-    char *pemcert = malloc(hexstrlen / 2 + 1);
-    for (int count = 0; count < hexstrlen; count += 2) {
-        sscanf(&pemcerthex[count], "%2hhx", &pemcert[count / 2]);
+    if (gs_decode_hex_alloc(pemcerthex, strlen(pemcerthex), 16 * 1024,
+                            &pemcert, &pemcertLength) != GS_OK) {
+        free(pemcerthex);
+        return NULL;
     }
-    pemcert[hexstrlen / 2] = 0;
     free(pemcerthex);
 
-    // pemcert is referenced, but NOT copied!
-    BIO* bio = BIO_new_mem_buf(pemcert, -1);
+    BIO* bio = BIO_new_mem_buf(pemcert, (int)pemcertLength);
 
     if (bio) {
         X509* cert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
@@ -256,8 +291,13 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
   int ret = GS_OK;
   char* result = NULL;
   X509* server_cert = NULL;
+  unsigned char* signature = NULL;
+  size_t s_len = 0;
   char url[4096];
   unsigned short sanitizedHttpPort = sanitize_http_port(httpPort);
+  if (curl_ppk_string == NULL)
+    return GS_INVALID;
+  *curl_ppk_string = NULL;
   unsigned char salt_data[16];
   char salt_hex[33];
   RAND_bytes(salt_data, 16);
@@ -334,8 +374,11 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
 
   unsigned char challenge_response_data_enc[48];
   unsigned char challenge_response_data[48];
-  for (int count = 0; count < strlen(result); count += 2) {
-    sscanf(&result[count], "%2hhx", &challenge_response_data_enc[count / 2]);
+  if (gs_decode_hex_exact(result, strlen(result),
+                          challenge_response_data_enc,
+                          sizeof(challenge_response_data_enc)) != GS_OK) {
+    ret = GS_INVALID;
+    goto cleanup;
   }
 
   for (int i = 0; i < 48; i += 16) {
@@ -347,6 +390,12 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
 
   ASN1_BIT_STRING *asnSignature;
   X509_get0_signature(&asnSignature, NULL, g_Cert);
+  if (asnSignature == NULL ||
+      ASN1_STRING_length(asnSignature) != 256 ||
+      asnSignature->data == NULL) {
+    ret = GS_INVALID;
+    goto cleanup;
+  }
 
   unsigned char challenge_response[16 + 256 + 16];
   unsigned char challenge_response_hash[32];
@@ -387,8 +436,11 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
   }
 
   unsigned char pairing_secret[16 + 256];
-  for (int count = 0; count < strlen(result); count += 2) {
-    sscanf(&result[count], "%2hhx", &pairing_secret[count / 2]);
+  if (gs_decode_hex_exact(result, strlen(result),
+                          pairing_secret,
+                          sizeof(pairing_secret)) != GS_OK) {
+    ret = GS_INVALID;
+    goto cleanup;
   }
 
   if (!verifySignature(pairing_secret, 16, pairing_secret+16, 256, server_cert)) {
@@ -396,10 +448,12 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
     goto cleanup;
   }
 
-  unsigned char *signature = NULL;
-  size_t s_len;
   if (sign_it(client_secret_data, 16, &signature, &s_len, g_PrivateKey) != GS_OK) {
     ret = GS_FAILED;
+    goto cleanup;
+  }
+  if (s_len != 256) {
+    ret = GS_INVALID;
     goto cleanup;
   }
 
@@ -434,6 +488,9 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
 
   if (server_cert != NULL)
     X509_free(server_cert);
+
+  if (signature != NULL)
+    OPENSSL_free(signature);
 
   http_free_data(data);
 
