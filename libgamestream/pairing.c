@@ -272,22 +272,28 @@ static unsigned short sanitize_http_port(unsigned short httpPort) {
 int gs_unpair(const char* address, unsigned short httpPort) {
   int ret = GS_OK;
   char url[4096];
+  HTTP_REQUEST_CONTEXT request_context;
   unsigned short sanitizedHttpPort = sanitize_http_port(httpPort);
-  PHTTP_DATA data = http_create_data();
+  PHTTP_DATA data = http_create_data(HTTP_TEXT_MAX_BYTES);
   if (data == NULL)
     return GS_OUT_OF_MEMORY;
+
+  http_request_context_init(&request_context, 3000, 5000, 2, 1);
 
   char host_for_url[256];
   format_address_for_url(address, host_for_url, sizeof(host_for_url));
 
   snprintf(url, sizeof(url), "http://%s:%u/unpair?uniqueid=%s", host_for_url, sanitizedHttpPort, g_UniqueId);
-  ret = http_request(url, NULL, data);
+  ret = http_request(url, NULL, &request_context, data);
 
   http_free_data(data);
   return ret;
 }
 
-int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort, const char* pin, char** curl_ppk_string) {
+int gs_pair(int serverMajorVersion, const char* address,
+            unsigned short httpPort, const char* pin,
+            HTTP_REQUEST_CONTEXT* request_context,
+            char** curl_ppk_string) {
   int ret = GS_OK;
   char* result = NULL;
   X509* server_cert = NULL;
@@ -295,7 +301,7 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
   size_t s_len = 0;
   char url[4096];
   unsigned short sanitizedHttpPort = sanitize_http_port(httpPort);
-  if (curl_ppk_string == NULL)
+  if (request_context == NULL || curl_ppk_string == NULL)
     return GS_INVALID;
   *curl_ppk_string = NULL;
   unsigned char salt_data[16];
@@ -307,10 +313,10 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
   format_address_for_url(address, host_for_url, sizeof(host_for_url));
 
   snprintf(url, sizeof(url), "http://%s:%u/pair?uniqueid=%s&devicename=roth&updateState=1&phrase=getservercert&salt=%s&clientcert=%s", host_for_url, sanitizedHttpPort, g_UniqueId, salt_hex, g_CertHex);
-  PHTTP_DATA data = http_create_data();
+  PHTTP_DATA data = http_create_data(HTTP_TEXT_MAX_BYTES);
   if (data == NULL)
     return GS_OUT_OF_MEMORY;
-  else if ((ret = http_request(url, NULL, data)) != GS_OK)
+  else if ((ret = http_request(url, NULL, request_context, data)) != GS_OK)
     goto cleanup;
 
   if ((ret = xml_search(data->memory, data->size, "paired", &result)) != GS_OK)
@@ -352,7 +358,7 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
   bytes_to_hex(challenge_enc, challenge_hex, 16);
 
   snprintf(url, sizeof(url), "http://%s:%u/pair?uniqueid=%s&devicename=roth&updateState=1&clientchallenge=%s", host_for_url, sanitizedHttpPort, g_UniqueId, challenge_hex);
-  if ((ret = http_request(url, NULL, data)) != GS_OK)
+  if ((ret = http_request(url, NULL, request_context, data)) != GS_OK)
     goto cleanup;
 
   free(result);
@@ -415,7 +421,7 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
   bytes_to_hex(challenge_response_hash_enc, challenge_response_hex, 32);
 
   snprintf(url, sizeof(url), "http://%s:%u/pair?uniqueid=%s&devicename=roth&updateState=1&serverchallengeresp=%s", host_for_url, sanitizedHttpPort, g_UniqueId, challenge_response_hex);
-  if ((ret = http_request(url, NULL, data)) != GS_OK)
+  if ((ret = http_request(url, NULL, request_context, data)) != GS_OK)
     goto cleanup;
 
   free(result);
@@ -464,7 +470,7 @@ int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort
   bytes_to_hex(client_pairing_secret, client_pairing_secret_hex, 16 + 256);
 
   snprintf(url, sizeof(url), "http://%s:%u/pair?uniqueid=%s&devicename=roth&updateState=1&clientpairingsecret=%s", host_for_url, sanitizedHttpPort, g_UniqueId, client_pairing_secret_hex);
-  if ((ret = http_request(url, NULL, data)) != GS_OK)
+  if ((ret = http_request(url, NULL, request_context, data)) != GS_OK)
     goto cleanup;
 
   free(result);

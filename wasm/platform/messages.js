@@ -11,14 +11,14 @@ const SyncFunctions = {
   'startRequest': (...args) => Module.startStream(...args),
   // no parameters
   'stopRequest': (...args) => Module.stopStream(...args),
-  // no parameters
+  // requestId
   'cancelRequest': (...args) => Module.cancelRequest(...args),
   // no parameters
   'toggleStats': (...args) => Module.toggleStats(...args),
 };
 
 const AsyncFunctions = {
-  // url, ppk, binaryResponse
+  // url, ppk, binaryResponse, timeoutMs
   'openUrl': (...args) => Module.openUrl(...args),
   // no parameters
   'STUN': (...args) => Module.stun(...args),
@@ -28,42 +28,120 @@ const AsyncFunctions = {
   'wakeOnLan': (...args) => Module.wakeOnLan(...args),
 };
 
-var callbacks = {}
-var callbacks_ids = 1;
+var createMessageBridge = function(syncFunctions, asyncFunctions, logger) {
+  var callbacks = {};
+  var callbacks_ids = 1;
+  var bridgeLogger = logger || console;
 
-/**
- * var sendMessage - Sends a message with arguments to the Wasm module
- *
- * @param  {String} method A named method
- * @param  {(String|Array)} params An array of options or a single string
- * @return {void}        The Wasm module calls back through the handleMessage method
- */
-var sendMessage = function(method, params) {
-  if (SyncFunctions[method]) {
-    return new Promise(function(resolve, reject) {
-      const ret = SyncFunctions[method](...params);
-      if (ret.type === "resolve") {
-        resolve(ret.ret);
-      } else {
-        reject(ret.ret);
+  var pendingCount = function() {
+    return Object.keys(callbacks).length;
+  };
+
+  var settle = function(callbackId, type, msg) {
+    var callback = callbacks[callbackId];
+    if (!callback) {
+      if (bridgeLogger && typeof bridgeLogger.warn === 'function') {
+        bridgeLogger.warn(
+          '[messages.js] Ignoring response for settled callback ID ' +
+            callbackId,
+        );
       }
-    });
-  } else {
-    return new Promise(function(resolve, reject) {
-      const id = callbacks_ids++;
+      return false;
+    }
+
+    delete callbacks[callbackId];
+    if (type !== 'resolve' && type !== 'reject') {
+      callback.reject(new Error(
+        'Invalid response type for callback ID ' + callbackId,
+      ));
+      return false;
+    }
+
+    callback[type](msg);
+    return true;
+  };
+
+  /**
+   * Sends a message with arguments to the Wasm module.
+   *
+   * @param {String} method A named method
+   * @param {Array} params An array of arguments
+   * @return {Promise} The Wasm module calls back through handlePromiseMessage
+   */
+  var sendMessage = function(method, params) {
+    if (syncFunctions[method]) {
+      return new Promise(function(resolve, reject) {
+        const ret = syncFunctions[method](...params);
+        if (ret.type === 'resolve') {
+          resolve(ret.ret);
+        } else {
+          reject(ret.ret);
+        }
+      });
+    }
+
+    var id = callbacks_ids++;
+    var request = new Promise(function(resolve, reject) {
       callbacks[id] = {
-        'resolve': resolve,
-        'reject': reject
+        resolve: resolve,
+        reject: reject,
       };
 
-      AsyncFunctions[method](id, ...params);
+      try {
+        if (!asyncFunctions[method]) {
+          throw new Error('Unknown asynchronous method: ' + method);
+        }
+        asyncFunctions[method](id, ...params);
+      } catch (error) {
+        delete callbacks[id];
+        reject(error);
+      }
     });
+
+    request.requestId = id;
+    request.cancel = function() {
+      return sendMessage('cancelRequest', [id]);
+    };
+    return request;
+  };
+
+  return {
+    sendMessage: sendMessage,
+    resolve: function(callbackId, msg) {
+      return settle(callbackId, 'resolve', msg);
+    },
+    reject: function(callbackId, msg) {
+      return settle(callbackId, 'reject', msg);
+    },
+    settle: settle,
+    pendingCount: pendingCount,
+  };
+};
+
+var cancelledAsyncRequests = new WeakSet();
+var cancelAsyncRequest = function(promise) {
+  if (!promise || typeof promise.cancel !== 'function' ||
+      cancelledAsyncRequests.has(promise)) {
+    return false;
   }
-}
+
+  cancelledAsyncRequests.add(promise);
+  promise.cancel();
+  return true;
+};
+
+var messageBridge = createMessageBridge(SyncFunctions, AsyncFunctions, console);
+var sendMessage = messageBridge.sendMessage;
 
 var handlePromiseMessage = function(callbackId, type, msg) {
-  callbacks[callbackId][type](msg);
-  delete callbacks[callbackId];
+  return messageBridge.settle(callbackId, type, msg);
+};
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    cancelAsyncRequest: cancelAsyncRequest,
+    createMessageBridge: createMessageBridge,
+  };
 }
 
 /**

@@ -264,8 +264,8 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   PostToJs("Setting the Video resolution to: " + width + "x" + height);
   PostToJs("Setting the Video frame rate to: " + fps + " FPS");
   PostToJs("Setting the Video bitrate to: " + bitrate + " Kbps");
-  PostToJs("Setting the Remote input key to: " + rikey);
-  PostToJs("Setting the Remote input key ID to: " + rikeyid);
+  PostToJs("Configuring the remote input key.");
+  PostToJs("Configuring the remote input key ID.");
   PostToJs("Setting the App version to: " + appversion);
   PostToJs("Setting the GFE version to: " + gfeversion);
   PostToJs("Setting the RTSP session URL to: " + rtspurl);
@@ -416,12 +416,9 @@ MessageResult MoonlightInstance::StopStream() {
   return MessageResult::Resolve();
 }
 
-extern "C" void http_cancel_request();
-
-MessageResult MoonlightInstance::CancelRequest() {
-  ClLogMessage("%s: Canceling any ongoing HTTP request...\n", __func__);
-  // Begin canceling the HTTP request
-  http_cancel_request();
+MessageResult MoonlightInstance::CancelRequest(int callbackId) {
+  ClLogMessage("%s: Canceling HTTP callback ID %d\n", __func__, callbackId);
+  m_HttpRequests.Cancel(callbackId);
 
   return MessageResult::Resolve();
 }
@@ -442,22 +439,41 @@ void MoonlightInstance::STUN(int callbackId) {
   m_Dispatcher.post_job(std::bind(&MoonlightInstance::STUN_private, this, callbackId), false);
 }
 
-void MoonlightInstance::Pair_private(int callbackId, std::string serverMajorVersion, std::string address, int httpPort, std::string randomNumber) {
-  char* ppkstr;
-  int err = gs_pair(atoi(serverMajorVersion.c_str()), address.c_str(), (unsigned short)httpPort, randomNumber.c_str(), &ppkstr);
+void MoonlightInstance::Pair_private(
+    int callbackId, std::string serverMajorVersion, std::string address,
+    int httpPort, std::string randomNumber,
+    std::shared_ptr<HTTP_REQUEST_CONTEXT> requestContext) {
+  char* ppkstr = nullptr;
+  int err = gs_pair(atoi(serverMajorVersion.c_str()), address.c_str(),
+                    (unsigned short)httpPort, randomNumber.c_str(),
+                    requestContext.get(), &ppkstr);
 
-  ClLogMessage("Paired host address: %s:%d using PIN: %s with result: %d\n", address.c_str(), httpPort, randomNumber.c_str(), err);
+  ClLogMessage("Pair request for host address: %s:%d completed with result: %d\n",
+               address.c_str(), httpPort, err);
   if (err == 0) {
     PostPromiseMessage(callbackId, "resolve", ppkstr);
     free(ppkstr);
   } else {
     PostPromiseMessage(callbackId, "reject", std::to_string(err));
   }
+  m_HttpRequests.Remove(callbackId);
 }
 
 void MoonlightInstance::Pair(int callbackId, std::string serverMajorVersion, std::string address, int httpPort, std::string randomNumber) {
   ClLogMessage("%s with host address: %s:%d\n", __func__, address.c_str(), httpPort);
-  m_Dispatcher.post_job(std::bind(&MoonlightInstance::Pair_private, this, callbackId, serverMajorVersion, address, httpPort, randomNumber), false);
+  auto requestContext = m_HttpRequests.Create(callbackId, 3000, 5000);
+  if (!requestContext) {
+    PostPromiseMessage(callbackId, "reject", "Duplicate HTTP callback ID.");
+    return;
+  }
+
+  m_Dispatcher.post_job(
+    [this, callbackId, serverMajorVersion, address, httpPort, randomNumber,
+     requestContext]() {
+      Pair_private(callbackId, serverMajorVersion, address, httpPort,
+                   randomNumber, requestContext);
+    },
+    false);
 }
 
 void MoonlightInstance::WakeOnLan(int callbackId, std::string macAddress) {
@@ -577,8 +593,8 @@ MessageResult stopStream() {
   return g_Instance->StopStream();
 }
 
-MessageResult cancelRequest() {
-  return g_Instance->CancelRequest();
+MessageResult cancelRequest(int callbackId) {
+  return g_Instance->CancelRequest(callbackId);
 }
 
 void toggleStats() {

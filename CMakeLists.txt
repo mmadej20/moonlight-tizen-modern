@@ -68,6 +68,8 @@ set_target_properties(moonlight-common-c
 
 add_library(libgamestream STATIC
     libgamestream/hex_utils.c
+    libgamestream/http_buffer.c
+    libgamestream/http_context.c
     libgamestream/http.c
     libgamestream/mkcert.c
     libgamestream/pairing.c

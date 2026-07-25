@@ -920,7 +920,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     $('#cancelPairing').off('click');
     $('#cancelPairing').on('click', function() {
       console.log('%c[index.js, pairingDialog]', 'color: green;', 'Closing app dialog and returning.');
-      sendMessage('cancelRequest', []);
+      nvhttpHost.cancelPairingRequest();
       wasPairingCanceled = true;
       pairingOverlay.style.display = 'none';
       pairingDialog.close();
@@ -928,7 +928,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
       Navigation.pop();
     });
 
-    console.log('%c[index.js, pairingDialog]', 'color: green;', 'Sending pairing request to ' + nvhttpHost.hostname + ' with PIN ' + randomNumber);
+    console.log('%c[index.js, pairingDialog]', 'color: green;', 'Sending pairing request to ' + nvhttpHost.hostname);
     nvhttpHost.pair(randomNumber).then(function() {
       isPairingInProgress = false;
       snackbarLog('Successfully paired with ' + nvhttpHost.hostname);

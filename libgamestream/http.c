@@ -32,22 +32,29 @@ extern EVP_PKEY *g_PrivateKey;
 
 static size_t _write_curl(void *contents, size_t size, size_t nmemb, void *userp)
 {
-  size_t realsize = size * nmemb;
+  size_t next_size;
+  size_t append_size;
+  int result;
   PHTTP_DATA mem = (PHTTP_DATA)userp;
- 
-  mem->memory = realloc(mem->memory, mem->size + realsize + 1);
-  if(mem->memory == NULL)
+
+  result = http_data_checked_size(mem->size, size, nmemb, &next_size);
+  if (result != GS_OK) {
+    mem->error = result;
     return 0;
- 
-  memcpy(&(mem->memory[mem->size]), contents, realsize);
-  mem->size += realsize;
-  mem->memory[mem->size] = 0;
- 
-  return realsize;
+  }
+
+  append_size = next_size - mem->size;
+  result = http_data_append(mem, contents, append_size);
+  if (result != GS_OK)
+    return 0;
+
+  return append_size;
 }
 
 static CURLcode sslctx_function(CURL * curl, void * sslctx, void * parm)
 {
+    (void)curl;
+    (void)parm;
     SSL_CTX* ctx = (SSL_CTX*)sslctx;
     
     if(!SSL_CTX_use_certificate(ctx, g_Cert))
@@ -59,24 +66,17 @@ static CURLcode sslctx_function(CURL * curl, void * sslctx, void * parm)
     return CURLE_OK;
 }
 
-volatile int g_CancelHttpRequest = 0;
-
-void http_cancel_request() {
-  g_CancelHttpRequest = 1;
-}
-
-void http_reset_cancel() {
-  g_CancelHttpRequest = 0;
-}
-
 static int _progress_callback(void *clientp, double dltotal, double dlnow, double ultotal, double ulnow) {
-  if (g_CancelHttpRequest) {
-    return 1;
-  }
-  return 0;
+  PHTTP_REQUEST_CONTEXT context = (PHTTP_REQUEST_CONTEXT)clientp;
+  (void)dltotal;
+  (void)dlnow;
+  (void)ultotal;
+  (void)ulnow;
+  return http_request_is_cancelled(context) ? 1 : 0;
 }
 
-int http_request(const char* url, const char* ppkstr, PHTTP_DATA data) {
+int http_request(const char* url, const char* ppkstr,
+                 PHTTP_REQUEST_CONTEXT context, PHTTP_DATA data) {
   int ret;
   CURL *curl;
   const char* real_url = url;
@@ -84,21 +84,30 @@ int http_request(const char* url, const char* ppkstr, PHTTP_DATA data) {
   char* resolve_string = NULL;
   struct curl_slist *resolve_list = NULL;
 
-  http_reset_cancel();
+  if (url == NULL || context == NULL || data == NULL)
+    return GS_INVALID;
+  if (http_request_is_cancelled(context))
+    return GS_CANCELLED;
 
   curl = curl_easy_init();
+  if (curl == NULL)
+    return GS_OUT_OF_MEMORY;
 
   curl_easy_setopt(curl, CURLOPT_CAINFO, "/curl/ca-bundle.crt");
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _write_curl);
   curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
   curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
   curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, _progress_callback);
+  curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, context);
   curl_easy_setopt(curl, CURLOPT_SSL_CTX_FUNCTION, *sslctx_function);
   curl_easy_setopt(curl, CURLOPT_SSL_SESSIONID_CACHE, 0L);
   curl_easy_setopt(curl, CURLOPT_MAXCONNECTS, 0L);
   curl_easy_setopt(curl, CURLOPT_FRESH_CONNECT, 1L);
   curl_easy_setopt(curl, CURLOPT_FORBID_REUSE, 1L);
-  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 3L);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, context->connect_timeout_ms);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, context->total_timeout_ms);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, context->low_speed_time_seconds);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, context->low_speed_bytes_per_second);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
   curl_easy_setopt(curl, CURLOPT_SSL_ENABLE_ALPN, 0L);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, data);
@@ -151,21 +160,33 @@ int http_request(const char* url, const char* ppkstr, PHTTP_DATA data) {
   }
 
   if (data->size > 0) {
-    free(data->memory);
-    data->memory = malloc(1);
-    if(data->memory == NULL) {
+    char* empty_memory = malloc(1);
+    if (empty_memory == NULL) {
       ret = GS_OUT_OF_MEMORY;
       goto cleanup;
     }
 
+    empty_memory[0] = '\0';
+    free(data->memory);
+    data->memory = empty_memory;
     data->size = 0;
   }
+  data->error = GS_OK;
 
   CURLcode res = curl_easy_perform(curl);
 
-  printf("CURL: %s (PPK: '%s') -> %s\n", url, ppkstr ? ppkstr : "<NULL>", curl_easy_strerror(res));
+  printf("CURL request completed: %s\n", curl_easy_strerror(res));
   
-  if (res == CURLE_SSL_PINNEDPUBKEYNOTMATCH) {
+  if (data->error == GS_RESPONSE_TOO_LARGE) {
+    ret = GS_RESPONSE_TOO_LARGE;
+  } else if (data->error == GS_OUT_OF_MEMORY) {
+    ret = GS_OUT_OF_MEMORY;
+  } else if (res == CURLE_ABORTED_BY_CALLBACK &&
+             http_request_is_cancelled(context)) {
+    ret = GS_CANCELLED;
+  } else if (res == CURLE_OPERATION_TIMEDOUT) {
+    ret = GS_TIMEOUT;
+  } else if (res == CURLE_SSL_PINNEDPUBKEYNOTMATCH) {
     ret = GS_CERT_MISMATCH;
   } else if (res != CURLE_OK) {
     ret = GS_FAILED;
@@ -181,28 +202,4 @@ cleanup:
   if (resolve_list) curl_slist_free_all(resolve_list);
   curl_easy_cleanup(curl);
   return ret;
-}
-
-PHTTP_DATA http_create_data() {
-  PHTTP_DATA data = malloc(sizeof(HTTP_DATA));
-  if (data == NULL)
-    return NULL;
-
-  data->memory = malloc(1);
-  if(data->memory == NULL) {
-    free(data);
-    return NULL;
-  }
-  data->size = 0;
-
-  return data;
-}
-
-void http_free_data(PHTTP_DATA data) {
-  if (data != NULL) {
-    if (data->memory != NULL)
-      free(data->memory);
-
-    free(data);
-  }
 }

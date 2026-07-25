@@ -138,31 +138,38 @@ MessageResult MoonlightInstance::HttpInit(std::string cert, std::string privateK
   return MessageResult::Resolve();
 }
 
-void MoonlightInstance::OpenUrl_private(int callbackId, std::string url, std::string ppk, bool binaryResponse) {
+void MoonlightInstance::OpenUrl_private(
+    int callbackId, std::string url, std::string ppk, bool binaryResponse,
+    std::shared_ptr<HTTP_REQUEST_CONTEXT> requestContext) {
   // For launch/resume requests, append the additional query parameters
   if (url.find("/launch?") != std::string::npos || url.find("/resume?") != std::string::npos) {
     url += LiGetLaunchUrlQueryParameters();
   }
 
-  PHTTP_DATA data = http_create_data();
+  PHTTP_DATA data = http_create_data(
+    binaryResponse ? HTTP_BINARY_MAX_BYTES : HTTP_TEXT_MAX_BYTES);
   int err;
 
   if (data == NULL) {
     PostPromiseMessage(callbackId, "reject", "Error when creating data buffer.");
+    m_HttpRequests.Remove(callbackId);
     return;
   }
 
-  err = http_request(url.c_str(), ppk.empty() ? NULL : ppk.c_str(), data);
+  err = http_request(url.c_str(), ppk.empty() ? NULL : ppk.c_str(),
+                     requestContext.get(), data);
   if (err) {
     http_free_data(data);
     PostPromiseMessage(callbackId, "reject", std::to_string(err));
+    m_HttpRequests.Remove(callbackId);
     return;
   }
 
   if (binaryResponse) {
     std::vector<uint8_t> response;
     response.resize(data->size);
-    memcpy(response.data(), data->memory, data->size);
+    if (data->size != 0)
+      memcpy(response.data(), data->memory, data->size);
     http_free_data(data);
     PostPromiseMessage(callbackId, "resolve", response);
   } else {
@@ -170,10 +177,23 @@ void MoonlightInstance::OpenUrl_private(int callbackId, std::string url, std::st
     http_free_data(data);
     PostPromiseMessage(callbackId, "resolve", response);
   }
+  m_HttpRequests.Remove(callbackId);
 }
 
-void MoonlightInstance::OpenUrl(int callbackId, std::string url, std::string ppk, bool binaryResponse) {
-  m_Dispatcher.post_job(std::bind(&MoonlightInstance::OpenUrl_private, this, callbackId, url, ppk, binaryResponse), false);
+void MoonlightInstance::OpenUrl(int callbackId, std::string url,
+                                std::string ppk, bool binaryResponse,
+                                int timeoutMs) {
+  auto requestContext = m_HttpRequests.Create(callbackId, 3000, timeoutMs);
+  if (!requestContext) {
+    PostPromiseMessage(callbackId, "reject", "Duplicate HTTP callback ID.");
+    return;
+  }
+
+  m_Dispatcher.post_job(
+    [this, callbackId, url, ppk, binaryResponse, requestContext]() {
+      OpenUrl_private(callbackId, url, ppk, binaryResponse, requestContext);
+    },
+    false);
 }
 
 MessageResult makeCert() {
@@ -184,12 +204,13 @@ MessageResult httpInit(std::string cert, std::string privateKey, std::string myU
   return g_Instance->HttpInit(cert, privateKey, myUniqueId);
 }
 
-void openUrl(int callbackId, std::string url, emscripten::val ppk, bool binaryResponse) {
+void openUrl(int callbackId, std::string url, emscripten::val ppk,
+             bool binaryResponse, int timeoutMs) {
   std::string ppkstr = "";
   if (ppk != emscripten::val::null()) {
     ppkstr = ppk.as<std::string>();
   }
-  g_Instance->OpenUrl(callbackId, url, ppkstr, binaryResponse);
+  g_Instance->OpenUrl(callbackId, url, ppkstr, binaryResponse, timeoutMs);
 }
 
 EMSCRIPTEN_BINDINGS(http) {

@@ -13,6 +13,7 @@
 #include <opus_multistream.h>
 
 #include "lib.hpp"
+#include "request_registry.hpp"
 
 #include "samsung/wasm/elementary_media_stream_source.h"
 #include "samsung/wasm/elementary_media_stream_source_listener.h"
@@ -92,7 +93,7 @@ class MoonlightInstance {
     bool disableWarnings, bool performanceStats);
   MessageResult StopStream();
 
-  MessageResult CancelRequest();
+  MessageResult CancelRequest(int callbackId);
 
   void STUN(int callbackId);
   void Pair(int callbackId, std::string serverMajorVersion, std::string address, int httpPort, std::string randomNumber);
@@ -162,7 +163,8 @@ class MoonlightInstance {
   MessageResult MakeCert();
 
   MessageResult HttpInit(std::string cert, std::string privateKey, std::string myUniqueId);
-  void OpenUrl(int callbackId, std::string url, std::string ppk, bool binaryResponse);
+  void OpenUrl(int callbackId, std::string url, std::string ppk,
+               bool binaryResponse, int timeoutMs);
 
   LoadResult LoadCert(const char* certStr, const char* keyStr);
 
@@ -202,9 +204,14 @@ class MoonlightInstance {
 
   void WaitFor(std::condition_variable* variable, std::function<bool()> condition);
 
-  void OpenUrl_private(int callbackId, std::string url, std::string ppk, bool binaryResponse);
+  void OpenUrl_private(
+    int callbackId, std::string url, std::string ppk, bool binaryResponse,
+    std::shared_ptr<HTTP_REQUEST_CONTEXT> requestContext);
   void STUN_private(int callbackId);
-  void Pair_private(int callbackId, std::string serverMajorVersion, std::string address, int httpPort, std::string randomNumber);
+  void Pair_private(
+    int callbackId, std::string serverMajorVersion, std::string address,
+    int httpPort, std::string randomNumber,
+    std::shared_ptr<HTTP_REQUEST_CONTEXT> requestContext);
 
   void LockMouse();
   void UnlockMouse();
@@ -255,6 +262,7 @@ class MoonlightInstance {
   uint32_t m_HttpThreadPoolSequence;
 
   Dispatcher m_Dispatcher;
+  HttpRequestRegistry m_HttpRequests;
 
   std::mutex m_Mutex;
   std::condition_variable m_EmssStateChanged;
@@ -288,7 +296,8 @@ void PostPromiseMessage(int callbackId, const std::string& type, const std::vect
 MessageResult makeCert();
 
 MessageResult httpInit(std::string cert, std::string privateKey, std::string myUniqueId);
-void openUrl(int callbackId, std::string url, emscripten::val ppk, bool binaryResponse);
+void openUrl(int callbackId, std::string url, emscripten::val ppk,
+             bool binaryResponse, int timeoutMs);
 
 MessageResult startStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
@@ -297,7 +306,7 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   bool disableWarnings, bool performanceStats);
 MessageResult stopStream();
 
-MessageResult cancelRequest();
+MessageResult cancelRequest(int callbackId);
 
 void toggleStats();
 void stun(int callbackId);

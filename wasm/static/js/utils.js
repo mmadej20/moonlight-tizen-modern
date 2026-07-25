@@ -111,6 +111,7 @@ function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   this._pollCount = 0;
   this._consecutivePollFailures = 0;
   this._pollCompletionCallbacks = [];
+  this._pairingRequest = null;
   this.paired = false;
   this.online = false;
   this.numofapps = 0;
@@ -156,33 +157,24 @@ NvHTTP.prototype = {
     return this.isNvidiaServerSoftware ? '0123456789ABCDEF' : this.clientUid;
   },
 
-  _openUrlWithTimeout: function(url, ppkstr) {
-    return Promise.race([
-      sendMessage('openUrl', [url, ppkstr, false]),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout retrieving server info')), 5000))
-    ]).catch(error => {
-      if (error && error.message === 'Timeout retrieving server info') {
-        sendMessage('cancelRequest', []);
-        throw -1;
-      }
-      throw error;
-    });
+  _openUrlWithTimeout: function(url, ppkstr, timeoutMs) {
+    return sendMessage('openUrl', [url, ppkstr, false, timeoutMs]);
   },
 
   // Refreshes the server info using the base URL. This is useful for testing whether we can successfully ping a host at the base URL
   refreshServerInfo: function() {
     if (this.ppkstr == null) {
       // Use HTTP if we have no pinned cert
-      return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
+      return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(retHttp) {
         this._parseServerInfo(retHttp);
       }.bind(this));
     }
     // Try HTTPS first
-    return this._openUrlWithTimeout(this._baseUrlHttps + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(ret) {
+    return this._openUrlWithTimeout(this._baseUrlHttps + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(ret) {
       if (!this._parseServerInfo(ret)) { // If that fails
         console.error('%c[utils.js, refreshServerInfo]', 'color: gray;', 'Error: Failed to parse server info from HTTPS, falling back to HTTP...');
         // Try HTTP as a failover. Useful to clients who aren't paired yet
-        return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
+        return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(retHttp) {
           if (!this._parseServerInfo(retHttp)) {
             return Promise.reject("Failed to parse server info from HTTP");
           }
@@ -191,7 +183,7 @@ NvHTTP.prototype = {
     }.bind(this), function(error) {
       if (error == -100) { // GS_CERT_MISMATCH
         console.warn('%c[utils.js, refreshServerInfo]', 'color: gray;', 'Warning: Certificate mismatch. Retrying over HTTP...', this);
-        return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
+        return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(retHttp) {
           if (!this._parseServerInfo(retHttp)) {
             return Promise.reject("Failed to parse server info from HTTP");
           }
@@ -206,18 +198,18 @@ NvHTTP.prototype = {
     var urlAddr = formatAddressForUrl(givenAddress);
     if (this.ppkstr == null) {
       // Use HTTP if we have no pinned cert
-      return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
+      return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(retHttp) {
         var parsed = this._parseServerInfo(retHttp);
         if (!parsed) return Promise.reject("Failed to parse server info from HTTP");
         return parsed;
       }.bind(this));
     }
     // Try HTTPS first
-    return this._openUrlWithTimeout('https://' + urlAddr + ':' + this.httpsPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(ret) {
+    return this._openUrlWithTimeout('https://' + urlAddr + ':' + this.httpsPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(ret) {
       if (!this._parseServerInfo(ret)) { // If that fails
         console.error('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Error: Failed to parse server info from HTTPS, falling back to HTTP...');
         // Try HTTP as a failover. Useful to clients who aren't paired yet
-        return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
+        return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(retHttp) {
           var parsed = this._parseServerInfo(retHttp);
           if (!parsed) return Promise.reject("Failed to parse server info from HTTP");
           return parsed;
@@ -226,7 +218,7 @@ NvHTTP.prototype = {
     }.bind(this), function(error) {
       if (error == -100) { // GS_CERT_MISMATCH
         console.warn('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Warning: Certificate mismatch. Retrying over HTTP...', this);
-        return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
+        return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(retHttp) {
           var parsed = this._parseServerInfo(retHttp);
           if (!parsed) return Promise.reject("Failed to parse server info from HTTP");
           return parsed;
@@ -489,18 +481,9 @@ NvHTTP.prototype = {
   },
 
   getAppListWithCacheFlush: function() {
-    return Promise.race([
-      sendMessage('openUrl', [
-        this._baseUrlHttps + '/applist?' + this._buildUidStr(), this.ppkstr, false
-      ]),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout retrieving app list')), 10000))
-    ]).catch(error => {
-      // If it's our timeout error, instruct the C++ layer to abort the hung network request
-      if (error.message === 'Timeout retrieving app list') {
-        sendMessage('cancelRequest', []);
-      }
-      throw error;
-    }).then(function(ret) {
+    return sendMessage('openUrl', [
+      this._baseUrlHttps + '/applist?' + this._buildUidStr(), this.ppkstr, false, 10000
+    ]).then(function(ret) {
       $xml = this._parseXML(ret);
       $root = $xml.find('root');
 
@@ -565,7 +548,7 @@ NvHTTP.prototype = {
         console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Cannot find or read box art from internal storage: ', readError);
         // Fetch the new box art from the network
         return sendMessage('openUrl', [
-          this._baseUrlHttps + '/appasset?' + this._buildUidStr() + '&appid=' + appId + '&AssetType=2&AssetIdx=0', this.ppkstr, true
+          this._baseUrlHttps + '/appasset?' + this._buildUidStr() + '&appid=' + appId + '&AssetType=2&AssetIdx=0', this.ppkstr, true, 10000
         ]).then(function(boxArtBuffer) {
           var reader = new FileReader();
           reader.onloadend = function() {
@@ -615,7 +598,7 @@ NvHTTP.prototype = {
       this._baseUrlHttps + '/launch?' + this._buildUidStr() + '&appid=' + appId + '&mode=' + mode +
       '&additionalStates=1&sops=' + sops + '&rikey=' + rikey + '&rikeyid=' + rikeyid + '&hdrMode=' + enableHdr +
       '&localAudioPlayMode=' + localAudio + '&surroundAudioInfo=' + surroundAudioInfo +
-      '&remoteControllersBitmap=' + gamepadMask + '&gcmap=' + gamepadMask, this.ppkstr, false
+      '&remoteControllersBitmap=' + gamepadMask + '&gcmap=' + gamepadMask, this.ppkstr, false, 10000
     ]);
   },
 
@@ -624,14 +607,14 @@ NvHTTP.prototype = {
       this._baseUrlHttps + '/resume?' + this._buildUidStr() + '&mode=' + mode +
       '&additionalStates=1&sops=' + sops + '&rikey=' + rikey + '&rikeyid=' + rikeyid + '&hdrMode=' + enableHdr +
       '&localAudioPlayMode=' + localAudio + '&surroundAudioInfo=' + surroundAudioInfo +
-      '&remoteControllersBitmap=' + gamepadMask + '&gcmap=' + gamepadMask, this.ppkstr, false
+      '&remoteControllersBitmap=' + gamepadMask + '&gcmap=' + gamepadMask, this.ppkstr, false, 10000
     ]);
   },
 
   quitApp: function() {
     // Refresh server info after quitting because it may silently fail if the session belongs to a different client
     return sendMessage('openUrl', [
-      this._baseUrlHttps + '/cancel?' + this._buildUidStr(), this.ppkstr, false
+      this._baseUrlHttps + '/cancel?' + this._buildUidStr(), this.ppkstr, false, 10000
     ]).then(this.refreshServerInfo());
     // TODO: We should probably bubble this up to our caller.
   },
@@ -648,31 +631,39 @@ NvHTTP.prototype = {
     }.bind(this))
   },
 
+  cancelPairingRequest: function() {
+    return cancelAsyncRequest(this._pairingRequest);
+  },
+
   pair: function(randomNumber) {
     return this.refreshServerInfo().then(function() {
       if (this.paired && this.ppkstr) {
         return true;
       }
-      return sendMessage('pair', [
+      var nativePairingRequest = sendMessage('pair', [
         this.serverMajorVersion.toString(), this.address, this.httpPort, randomNumber, this.getUid()
-      ]).then(function(ppkstr) {
+      ]);
+      this._pairingRequest = nativePairingRequest;
+
+      var pairingFlow = nativePairingRequest.then(function(ppkstr) {
         this.ppkstr = ppkstr;
-        return Promise.race([
-          sendMessage('openUrl', [
-            this._baseUrlHttps + '/pair?uniqueid=' + this.getUid() + '&devicename=roth&updateState=1&phrase=pairchallenge', this.ppkstr, false
-          ]),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout during pairchallenge')), 5000))
-        ]).catch(function(error) {
-          if (error.message === 'Timeout during pairchallenge') {
-            console.warn('%c[utils.js, pair]', 'color: gray;', 'Warning: HTTPS request timed out, canceling C++ HTTP request');
-            sendMessage('cancelRequest', []);
-          }
-          throw error;
-        }.bind(this)).then(function(ret) {
+        var challengeRequest = sendMessage('openUrl', [
+          this._baseUrlHttps + '/pair?uniqueid=' + this.getUid() + '&devicename=roth&updateState=1&phrase=pairchallenge', this.ppkstr, false, 5000
+        ]);
+        this._pairingRequest = challengeRequest;
+        return challengeRequest.then(function(ret) {
           $xml = this._parseXML(ret);
           this.paired = $xml.find('paired').html() == '1';
           return this.paired;
         }.bind(this));
+      }.bind(this));
+
+      return pairingFlow.then(function(result) {
+        this._pairingRequest = null;
+        return result;
+      }.bind(this), function(error) {
+        this._pairingRequest = null;
+        throw error;
       }.bind(this));
     }.bind(this));
   },

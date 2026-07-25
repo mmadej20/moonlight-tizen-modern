@@ -26,5 +26,8 @@
 #define GS_WRONG_STATE -4
 #define GS_IO_ERROR -5
 #define GS_NOT_SUPPORTED_4K -6
+#define GS_CANCELLED -7
+#define GS_RESPONSE_TOO_LARGE -8
+#define GS_TIMEOUT -9
 
 #define GS_CERT_MISMATCH -100

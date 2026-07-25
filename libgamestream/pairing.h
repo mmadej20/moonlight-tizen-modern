@@ -19,11 +19,16 @@
 
 #pragma once
 
+#include "http_context.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-int gs_pair(int serverMajorVersion, const char* address, unsigned short httpPort, const char* pin, char** server_cert_der_string);
+int gs_pair(int serverMajorVersion, const char* address,
+            unsigned short httpPort, const char* pin,
+            HTTP_REQUEST_CONTEXT* request_context,
+            char** server_cert_der_string);
 
 #ifdef __cplusplus
 }
