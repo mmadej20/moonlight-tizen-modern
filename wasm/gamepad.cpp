@@ -173,7 +173,6 @@ void MoonlightInstance::PollGamepads() {
 
   // Iterate through connected gamepads and process their input
   for (int gamepadID = 0; gamepadID < numGamepads; ++gamepadID) {
-    emscripten_sample_gamepad_data();
     EmscriptenGamepadEvent gamepad;
     // See logic in getConnectedGamepadMask() (utils.js)
     // These must stay in sync!

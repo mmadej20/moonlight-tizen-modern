@@ -1,111 +1,182 @@
-const Controller = (function() {
-  let pollingInterval = null;
-  const gamepads = {};
+function createGamepadController(environment) {
+  var rafId = null;
+  var watching = false;
+  var listenersInstalled = false;
+  var snapshots = Object.create(null);
+  var axisEpsilon = 0.001;
 
-  class Button {
-    constructor(button) {
-      this.value = button.value;
-      this.pressed = button.pressed;
+  function createSnapshot(gamepad) {
+    return {
+      buttons: gamepad.buttons.map(function(button) { return button.pressed; }),
+      axes: gamepad.axes.slice(),
+    };
+  }
+
+  function updateSnapshot(snapshot, buttons, axes) {
+    snapshot.buttons.length = buttons.length;
+    snapshot.axes.length = axes.length;
+
+    for (var i = 0; i < buttons.length; i++) {
+      snapshot.buttons[i] = buttons[i].pressed;
+    }
+    for (var j = 0; j < axes.length; j++) {
+      snapshot.axes[j] = axes[j];
     }
   }
 
-  class Gamepad {
-    constructor(gamepad) {
-      this.buttons = gamepad.buttons.map((button) => new Button(button));
-      this.axes = gamepad.axes.slice(); // Store initial axis values
+  function dispatchChanges(changes) {
+    environment.dispatchEvent(new environment.CustomEvent('gamepadinputchanged', {
+      detail: { changes: changes },
+    }));
+  }
+
+  function analyzeGamepad(gamepad) {
+    var snapshot = snapshots[gamepad.index];
+    if (!snapshot) {
+      snapshots[gamepad.index] = createSnapshot(gamepad);
+      return;
     }
 
-    analyzeButtonsAndAxes(newButtons, newAxes) {
-      if (this.buttons.length !== newButtons.length || this.axes.length !== newAxes.length) {
-        console.error('%c[gamepad.js, analyzeButtonsAndAxes]', 'color: gray;', 'Error: New buttons or axes layout does not match the saved one!');
-        return;
-      }
+    var changes = [];
+    var buttons = gamepad.buttons;
+    var axes = gamepad.axes;
 
-      const changes = [];
-
-      for (let i = 0; i < newButtons.length; ++i) {
-        if (this.buttons[i].pressed !== newButtons[i].pressed) {
-          changes.push({
-            type: 'button',
-            index: i,
-            pressed: newButtons[i].pressed,
-          });
+    if (snapshot.buttons.length === buttons.length && snapshot.axes.length === axes.length) {
+      for (var i = 0; i < buttons.length; i++) {
+        if (snapshot.buttons[i] !== buttons[i].pressed) {
+          changes.push({ type: 'button', index: i, pressed: buttons[i].pressed });
         }
       }
 
-      for (let i = 0; i < newAxes.length; i++) {
-        if (this.axes[i] !== newAxes[i]) {
-          changes.push({
-            type: 'axis',
-            index: i,
-            value: newAxes[i]
-          });
+      for (var j = 0; j < axes.length; j++) {
+        if (Math.abs(snapshot.axes[j] - axes[j]) > axisEpsilon) {
+          changes.push({ type: 'axis', index: j, value: axes[j] });
         }
       }
+    }
 
-      if (changes.length > 0) {
-        window.dispatchEvent(new CustomEvent('gamepadinputchanged', {
-            detail: { changes },
-          })
-        );
-      }
-
-      this.buttons = newButtons.map((button) => new Button(button));
-      this.axes = newAxes.slice(); // Update stored axis values
+    updateSnapshot(snapshot, buttons, axes);
+    if (changes.length > 0) {
+      dispatchChanges(changes);
     }
   }
 
   function gamepadConnected(gamepad) {
-    gamepads[gamepad.index] = new Gamepad(gamepad);
+    snapshots[gamepad.index] = createSnapshot(gamepad);
   }
 
   function gamepadDisconnected(gamepad) {
-    delete gamepads[gamepad.index];
+    delete snapshots[gamepad.index];
   }
 
-  function analyzeGamepad(gamepad) {
-    const index = gamepad.index;
-    const pGamepad = gamepads[index];
-
-    if (pGamepad) {
-      pGamepad.analyzeButtonsAndAxes(gamepad.buttons, gamepad.axes);
+  function readGamepads() {
+    var navigator = environment.navigator;
+    if (!navigator) {
+      return null;
     }
+
+    try {
+      if (typeof navigator.getGamepads === 'function') {
+        return navigator.getGamepads.call(navigator);
+      }
+      if (typeof navigator.webkitGetGamepads === 'function') {
+        return navigator.webkitGetGamepads.call(navigator);
+      }
+    } catch (error) {
+      return null;
+    }
+
+    return null;
   }
 
-  function pollGamepads() {
-    const gamepads = navigator.getGamepads
-      ? navigator.getGamepads()
-      : navigator.webkitGetGamepads
-      ? navigator.webkitGetGamepads
-      : [];
-    for (const gamepad of gamepads) {
+  function poll() {
+    var gamepads = readGamepads();
+    if (!gamepads) {
+      return;
+    }
+    var seen = Object.create(null);
+
+    for (var i = 0; i < gamepads.length; i++) {
+      var gamepad = gamepads[i];
       if (gamepad) {
+        seen[gamepad.index] = true;
         analyzeGamepad(gamepad);
       }
     }
+
+    Object.keys(snapshots).forEach(function(index) {
+      if (!seen[index]) {
+        delete snapshots[index];
+      }
+    });
   }
 
-  function startWatching() {
-    if (!pollingInterval) {
-      window.addEventListener('gamepadconnected', function(e) {
-        gamepadConnected(e.gamepad);
+  function schedule() {
+    if (watching && !environment.document.hidden && rafId === null) {
+      rafId = environment.requestAnimationFrame(function() {
+        rafId = null;
+        if (watching && !environment.document.hidden) {
+          try {
+            poll();
+          } finally {
+            schedule();
+          }
+        }
       });
-      window.addEventListener('gamepaddisconnected', function(e) {
-        gamepadDisconnected(e.gamepad);
-      });
-      pollingInterval = setInterval(pollGamepads, 5);
     }
   }
 
+  function onVisibilityChange() {
+    if (environment.document.hidden) {
+      if (rafId !== null) {
+        environment.cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      return;
+    }
+    schedule();
+  }
+
+  function installListeners() {
+    if (listenersInstalled) {
+      return;
+    }
+
+    environment.addEventListener('gamepadconnected', function(event) {
+      gamepadConnected(event.gamepad);
+    });
+    environment.addEventListener('gamepaddisconnected', function(event) {
+      gamepadDisconnected(event.gamepad);
+    });
+    environment.addEventListener('visibilitychange', onVisibilityChange);
+    listenersInstalled = true;
+  }
+
+  function startWatching() {
+    installListeners();
+    if (watching) {
+      return;
+    }
+    watching = true;
+    schedule();
+  }
+
   function stopWatching() {
-    if (pollingInterval) {
-      clearInterval(pollingInterval);
-      pollingInterval = null;
+    watching = false;
+    if (rafId !== null) {
+      environment.cancelAnimationFrame(rafId);
+      rafId = null;
     }
   }
 
   return {
-    startWatching,
-    stopWatching 
+    startWatching: startWatching,
+    stopWatching: stopWatching,
   };
-})();
+}
+
+const Controller = typeof window !== 'undefined' ? createGamepadController(window) : null;
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { createGamepadController: createGamepadController };
+}
