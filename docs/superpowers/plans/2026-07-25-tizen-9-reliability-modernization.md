@@ -1658,10 +1658,18 @@ exit 0.
 
 - [ ] **Step 5: Extract the exact WGT**
 
-Create one uniquely named container from `moonlight-tizen-9-reliability`, copy
-`/home/moonlight/Moonlight.wgt` to the workspace as `Moonlight.wgt`, and remove
-only that exact temporary container. Verify the copied timestamp is from this
-build.
+Create one uniquely named stopped container from
+`moonlight-tizen-9-reliability` with `docker create` and a nonexecuted
+placeholder command, for example:
+
+```powershell
+rtk docker create --name moonlight-tizen-artifact-<unique-id> moonlight-tizen-9-reliability artifact-only
+rtk docker cp moonlight-tizen-artifact-<unique-id>:/home/moonlight/Moonlight.wgt .\Moonlight.wgt
+rtk docker rm moonlight-tizen-artifact-<unique-id>
+```
+
+Do not start the container. Remove only that exact temporary container, and
+verify the copied timestamp is from this build.
 
 - [ ] **Step 6: Inspect package contents**
 

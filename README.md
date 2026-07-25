@@ -13,7 +13,7 @@ This application allows you to stream your collection of games, programs, or you
 
 ## ✨ Features
 
-- Compatible with all supported Tizen versions (5.5 or higher).
+- Targets Tizen 9.0, with Samsung UE43CU7172UXXH as the primary validation target (physical-device validation pending).
 - Supports streaming using NVIDIA GameStream or Sunshine (including popular forks).
 - Modern UI & UX with a clean interface and smooth navigation.
 - Up to 4K 120 FPS HDR streaming with Stereo sound.
@@ -38,7 +38,7 @@ This application allows you to stream your collection of games, programs, or you
 ## ⚙️ Prerequisites
 
 Before proceeding with the installation, please take a moment to ensure that your current hardware, network, and input setup fully meet the necessary requirements described below:
-- **Client:** Samsung Smart TV running Tizen OS version 5.5 or newer (model year 2020 onwards).
+- **Client:** Samsung UE43CU7172UXXH or another Samsung Smart TV running Tizen OS version 9.0. Physical-device validation is pending.
 - **Host:** Gaming PC with a GPU capable of hardware encoding that meets the [system requirements](https://docs.lizardbyte.dev/projects/sunshine/latest/index.html#%EF%B8%8F-system-requirements) for optimal streaming performance.
 - **Network:** Mid-range or high-end wireless router with a stable wireless connection (Wi-Fi 5/6) for the TV and a wired gigabit Ethernet connection (CAT5e or better) for the host PC are strongly recommended.
 - **Input:** [Supported gamepad](https://github.com/brightcraft/moonlight-tizen/wiki/Frequently-Asked-Questions#what-gamepad-controllers-are-supported-on-samsung-tv) connected to your TV or directly connected to a nearby PC is highly recommended for the best streaming experience.

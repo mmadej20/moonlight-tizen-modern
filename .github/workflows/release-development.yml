@@ -119,18 +119,18 @@ jobs:
             done
             echo "Cleanup completed."
           fi
-      # Runs the Docker container in detached mode to extract the build artifact.
-      - name: Run Docker container
+      # Creates a stopped container so the scratch image artifact can be copied without execution.
+      - name: Create Docker container for artifact extraction
         run: |
-          docker run -d --name temp_container $IMAGE_TAG
+          docker create --name temp_container $IMAGE_TAG artifact-only
       # Copies the built Moonlight.wgt file from the Docker container.
       - name: Copy artifacts from Docker container
         run: |
           docker cp temp_container:/home/moonlight/Moonlight.wgt .
-      # Stops and removes the temporary Docker container to clean up resources.
-      - name: Stop and remove Docker container
+      # Removes the temporary stopped container to clean up resources.
+      - name: Remove Docker container
         run: |
-          docker stop temp_container && docker rm temp_container
+          docker rm temp_container
       # Creates a new GitHub pre-release using the extracted version and includes a detailed description.
       - name: Create GitHub pre-release
         id: create_prerelease

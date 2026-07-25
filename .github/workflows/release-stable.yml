@@ -72,18 +72,18 @@ jobs:
       # Sets the full Docker image tag using the output from the 'build-and-push-image' job.
       - name: Set up image tag
         run: echo "IMAGE_TAG=${{ needs.build-and-push-image.outputs.image_tag }}" >> $GITHUB_ENV
-      # Runs the Docker container in detached mode to extract the build artifact.
-      - name: Run Docker container
+      # Creates a stopped container so the scratch image artifact can be copied without execution.
+      - name: Create Docker container for artifact extraction
         run: |
-          docker run -d --name temp_container $IMAGE_TAG
+          docker create --name temp_container $IMAGE_TAG artifact-only
       # Copies the built Moonlight.wgt file from the Docker container.
       - name: Copy artifacts from Docker container
         run: |
           docker cp temp_container:/home/moonlight/Moonlight.wgt .
-      # Stops and removes the temporary Docker container to clean up resources.
-      - name: Stop and remove Docker container
+      # Removes the temporary stopped container to clean up resources.
+      - name: Remove Docker container
         run: |
-          docker stop temp_container && docker rm temp_container
+          docker rm temp_container
       # Creates a new GitHub release using the extracted version and includes a detailed description.
       - name: Create GitHub release
         id: create_release

@@ -1,4 +1,9 @@
-FROM ubuntu:22.04 AS base
+FROM node:24.18.0-alpine AS frontend-dependencies
+WORKDIR /frontend
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+
+FROM ubuntu:22.04 AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
@@ -89,6 +94,9 @@ COPY --chown=moonlight res/ ./moonlight-tizen/res/
 COPY --chown=moonlight wasm/index.html ./moonlight-tizen/wasm/
 COPY --chown=moonlight wasm/platform/ ./moonlight-tizen/wasm/platform/
 COPY --chown=moonlight wasm/static/ ./moonlight-tizen/wasm/static/
+COPY --from=frontend-dependencies \
+	/frontend/node_modules/jquery/dist/jquery.min.js \
+	/home/moonlight/moonlight-tizen/wasm/static/js/jquery-4.0.0.min.js
 
 RUN cmake --install build --prefix build
 RUN cp moonlight-tizen/res/icon.png build/widget/
@@ -105,26 +113,5 @@ RUN echo \
 | expect
 RUN mv build/widget/Moonlight.wgt .
 
-# Clean up unnecessary files to reduce image size
-RUN rm -rf \
-	build \
-	moonlight-tizen \
-	web-cli_Tizen_Studio_6.1_ubuntu-64.bin \
-	tizen-package-expect.sh \
-	.package-manager \
-	emscripten-1.39.4.7-linux64.zip \
-	emscripten-release-bundle \
-	.emscripten \
-	.emscripten_cache \
-	.emscripten_cache.lock \
-	.emscripten_ports \
-	.emscripten_sanity
-
-# Use a multi-stage build to reclaim space from deleted files
-FROM ubuntu:22.04
-COPY --from=base / /
-USER moonlight
-WORKDIR /home/moonlight
-
-# Add Tizen Studio tools to PATH environment variable
-ENV PATH=/home/moonlight/tizen-studio/tools/ide/bin:/home/moonlight/tizen-studio/tools:${PATH}
+FROM scratch AS artifact
+COPY --from=builder /home/moonlight/Moonlight.wgt /home/moonlight/Moonlight.wgt

@@ -1,0 +1,69 @@
+const assert = require('assert');
+const fs = require('fs');
+
+const pkg = require('../package.json');
+const lock = require('../package-lock.json');
+const html = fs.readFileSync('wasm/index.html', 'utf8');
+const config = fs.readFileSync('res/config.xml', 'utf8');
+const dockerfile = fs.readFileSync('Dockerfile', 'utf8');
+const developmentWorkflow = fs.readFileSync('.github/workflows/release-development.yml', 'utf8');
+const stableWorkflow = fs.readFileSync('.github/workflows/release-stable.yml', 'utf8');
+
+const expectedJavaScriptSuites = [
+  'tests/common_log_capture_wiring_tests.js',
+  'tests/connection_wiring_tests.js',
+  'tests/dependency_manifest_tests.js',
+  'tests/diagnostic_log_manager_tests.js',
+  'tests/diagnostic_logs_js_tests.js',
+  'tests/gamepad_polling_tests.js',
+  'tests/http_bridge_tests.js',
+  'tests/media_ownership_wiring_tests.js',
+  'tests/operation_guard_tests.js',
+  'tests/pairing_ownership_wiring_tests.js',
+  'tests/subnet_scanner_tests.js',
+  'tests/ui_reliability_behavior_tests.js',
+  'tests/ui_reliability_wiring_tests.js',
+];
+
+const discoveredJavaScriptSuites = fs.readdirSync('tests')
+  .filter((name) => name.endsWith('_tests.js'))
+  .map((name) => `tests/${name}`)
+  .sort();
+
+assert.deepStrictEqual(discoveredJavaScriptSuites, expectedJavaScriptSuites);
+const referencedJavaScriptSuites = Array.from(
+  pkg.scripts['test:js'].matchAll(/node (tests\/[^&\s]+_tests\.js)/g),
+  (match) => match[1]
+).sort();
+assert.deepStrictEqual(referencedJavaScriptSuites, expectedJavaScriptSuites);
+
+for (const workflow of [developmentWorkflow, stableWorkflow]) {
+  assert.match(workflow, /docker create --name temp_container \$IMAGE_TAG artifact-only/);
+  assert.doesNotMatch(workflow, /docker run(?:\s|$)/);
+  assert.doesNotMatch(workflow, /docker (?:start|stop) temp_container/);
+  assert.match(workflow, /docker cp temp_container:\/home\/moonlight\/Moonlight\.wgt \./);
+  assert.match(workflow, /docker rm temp_container/);
+}
+
+assert.strictEqual(pkg.engines.node, '24.18.0');
+assert.strictEqual(pkg.dependencies.jquery, '4.0.0');
+assert.strictEqual(lock.lockfileVersion, 3);
+assert.strictEqual(lock.packages[''].dependencies.jquery, '4.0.0');
+assert.strictEqual(lock.packages['node_modules/jquery'].version, '4.0.0');
+assert.strictEqual(
+  lock.packages['node_modules/jquery'].resolved,
+  'https://registry.npmjs.org/jquery/-/jquery-4.0.0.tgz'
+);
+assert.strictEqual(
+  lock.packages['node_modules/jquery'].integrity,
+  'sha512-TXCHVR3Lb6TZdtw1l3RTLf8RBWVGexdxL6AC8/e0xZKEpBflBsjh9/8LXw+dkNFuOyW9B7iB3O1sP7hS0Kiacg=='
+);
+assert(html.includes('static/js/jquery-4.0.0.min.js'));
+assert(!html.includes('jquery-2.2.0'));
+assert(config.includes('required_version="9.0"'));
+assert(dockerfile.includes('FROM node:24.18.0-alpine AS frontend-dependencies'));
+assert(dockerfile.includes('npm ci --omit=dev --ignore-scripts'));
+assert(dockerfile.includes('AS builder'));
+assert(dockerfile.includes('FROM scratch AS artifact'));
+assert(dockerfile.includes('COPY --from=builder /home/moonlight/Moonlight.wgt /home/moonlight/Moonlight.wgt'));
+console.log('dependency_manifest_tests: PASS');
