@@ -29,7 +29,11 @@ using HTMLAsyncResult = samsung::wasm::OperationResult;
 using TimeStamp = samsung::wasm::Seconds;
 
 static constexpr TimeStamp kFrameTimeMargin = 0.5ms;
-static constexpr std::chrono::microseconds kPacingSpinWindow(500);
+static constexpr uint32_t kPacingDiscontinuityThresholdMs = 250;
+static constexpr std::chrono::microseconds kInitialPacingSpinWindow(200);
+static constexpr std::chrono::microseconds kMinimumPacingSpinWindow(50);
+static constexpr std::chrono::microseconds kMaximumPacingSpinWindow(300);
+static constexpr double kPacingSpinWindowAlpha = 0.25;
 static constexpr uint32_t kSampleRate = 48000;
 
 static uint32_t s_VideoFormat = 0;
@@ -41,6 +45,12 @@ static std::vector<unsigned char> s_DecodeBuffer;
 
 static TimeStamp s_frameDuration;
 static VideoTimestampState s_TimestampState;
+static AdaptiveSpinWindow s_AdaptiveSpinWindow(
+  kInitialPacingSpinWindow,
+  kMinimumPacingSpinWindow,
+  kMaximumPacingSpinWindow,
+  kPacingSpinWindowAlpha
+);
 
 static std::chrono::time_point<std::chrono::steady_clock> s_firstAppend;
 
@@ -389,6 +399,12 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 
   // Reset timestamp state for the new stream.
   s_TimestampState = {};
+  s_AdaptiveSpinWindow = AdaptiveSpinWindow(
+    kInitialPacingSpinWindow,
+    kMinimumPacingSpinWindow,
+    kMaximumPacingSpinWindow,
+    kPacingSpinWindowAlpha
+  );
 
   // Flag indicating whether this is the first frame of video to be decoded
   s_hasFirstFrame = false;
@@ -437,7 +453,7 @@ void MoonlightInstance::VidDecCleanup(void) {
 }
 
 int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
-  if (!g_Instance->m_VideoStarted.load()) {
+  if (!g_Instance->m_VideoStarted.load() || g_Instance->m_ConnectionCancelled.load()) {
     return DR_OK;
   }
 
@@ -462,33 +478,66 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   const auto assemblyEnd = std::chrono::steady_clock::now();
 
   VideoTimestampState candidateTimestampState = s_TimestampState;
-  const double packetPtsSeconds = RebasePresentationTimestamp(
+  const VideoTimestampUpdate timestampUpdate = UpdatePresentationTimestamp(
     decodeUnit->presentationTimeMs,
-    candidateTimestampState
+    candidateTimestampState,
+    kPacingDiscontinuityThresholdMs
   );
+  const double packetPtsSeconds = timestampUpdate.seconds;
   const TimeStamp packetPts(packetPtsSeconds);
 
+  AdaptiveSpinWindow candidateAdaptiveSpinWindow = s_AdaptiveSpinWindow;
   auto candidateFirstAppend = s_firstAppend;
-  if (!s_hasFirstFrame) {
-    candidateFirstAppend = std::chrono::steady_clock::now();
+  const auto pacingStart = std::chrono::steady_clock::now();
+  if (!s_hasFirstFrame || timestampUpdate.discontinuity) {
+    candidateFirstAppend = pacingStart
+      - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+          std::chrono::duration<double>(packetPtsSeconds));
   }
 
-  const auto pacingStart = std::chrono::steady_clock::now();
   if (s_FramePacingEnabled) {
     const auto targetTime = candidateFirstAppend
       + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
           std::chrono::duration<double>(packetPtsSeconds))
       - std::chrono::duration_cast<std::chrono::steady_clock::duration>(kFrameTimeMargin);
-    const auto remaining = std::chrono::duration_cast<std::chrono::microseconds>(
-      targetTime - std::chrono::steady_clock::now()
-    );
-    const PacingWait wait = CalculatePacingWait(remaining, kPacingSpinWindow);
-    if (wait.sleep > std::chrono::microseconds::zero()) {
-      std::this_thread::sleep_for(wait.sleep);
+
+    while (!g_Instance->m_ConnectionCancelled.load()) {
+      const auto now = std::chrono::steady_clock::now();
+      const auto remaining = std::chrono::duration_cast<std::chrono::microseconds>(targetTime - now);
+      const auto spinWindow = candidateAdaptiveSpinWindow.value();
+      if (remaining <= spinWindow) {
+        break;
+      }
+
+      const auto sleepDuration = std::min(
+        remaining - spinWindow,
+        std::chrono::duration_cast<std::chrono::microseconds>(2ms)
+      );
+      const auto sleepStart = std::chrono::steady_clock::now();
+      std::this_thread::sleep_for(sleepDuration);
+      const auto sleepEnd = std::chrono::steady_clock::now();
+      const auto expectedWake = sleepStart
+        + std::chrono::duration_cast<std::chrono::steady_clock::duration>(sleepDuration);
+      const auto overshoot = std::chrono::duration_cast<std::chrono::microseconds>(
+        sleepEnd - expectedWake
+      );
+      candidateAdaptiveSpinWindow.ObserveOvershoot(std::max(
+        overshoot,
+        std::chrono::microseconds::zero()
+      ));
     }
-    while (std::chrono::steady_clock::now() < targetTime) {
-      // Spin only for the final sub-millisecond window.
+
+    const auto spinWindow = candidateAdaptiveSpinWindow.value();
+    const auto spinStart = std::chrono::steady_clock::now();
+    while (!g_Instance->m_ConnectionCancelled.load()
+        && std::chrono::steady_clock::now() < targetTime) {
+      if (std::chrono::steady_clock::now() - spinStart > spinWindow) {
+        std::this_thread::yield();
+      }
     }
+  }
+  if (g_Instance->m_ConnectionCancelled.load()) {
+    return DR_OK;
   }
   const auto pacingEnd = std::chrono::steady_clock::now();
 
@@ -553,25 +602,39 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   };
 
   const auto submitStart = std::chrono::steady_clock::now();
-  const auto appendResult = g_Instance->m_VideoTrack.AppendPacket(pkt);
-  const auto submitEnd = std::chrono::steady_clock::now();
-  if (!appendResult) {
+  auto submitEnd = submitStart;
+  const PacingCommitOutcome pacingCommitOutcome = AppendAndCommitPacingState(
+    g_Instance->m_ConnectionCancelled,
+    [&] {
+      const auto appendResult = g_Instance->m_VideoTrack.AppendPacket(pkt);
+      submitEnd = std::chrono::steady_clock::now();
+      return static_cast<bool>(appendResult);
+    },
+    [&] {
+      s_TimestampState = candidateTimestampState;
+      s_AdaptiveSpinWindow = candidateAdaptiveSpinWindow;
+      if (!s_hasFirstFrame || timestampUpdate.discontinuity) {
+        s_firstAppend = candidateFirstAppend;
+      }
+      if (!s_hasFirstFrame) {
+        s_hasFirstFrame = true;
+      }
+      if (includeVideoConfig) {
+        s_HasSubmittedVideoConfig = true;
+      }
+      m_ActiveWndVideoStats.submittedFrames++;
+      m_ActiveWndVideoStats.totalSubmitTimeUs += std::chrono::duration_cast<std::chrono::microseconds>(
+        submitEnd - submitStart
+      ).count();
+    }
+  );
+  if (pacingCommitOutcome == PacingCommitOutcome::AppendFailed) {
     ClLogMessage("Append video packet failed\n");
     return DR_NEED_IDR;
   }
-
-  s_TimestampState = candidateTimestampState;
-  if (!s_hasFirstFrame) {
-    s_firstAppend = candidateFirstAppend;
-    s_hasFirstFrame = true;
+  if (pacingCommitOutcome == PacingCommitOutcome::Cancelled) {
+    return DR_OK;
   }
-  if (includeVideoConfig) {
-    s_HasSubmittedVideoConfig = true;
-  }
-  m_ActiveWndVideoStats.submittedFrames++;
-  m_ActiveWndVideoStats.totalSubmitTimeUs += std::chrono::duration_cast<std::chrono::microseconds>(
-    submitEnd - submitStart
-  ).count();
 
   const uint64_t nowMs = LiGetMillis();
   const uint64_t windowDurationMs = nowMs - m_ActiveWndVideoStats.measurementStartTimestamp;
