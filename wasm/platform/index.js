@@ -36,6 +36,9 @@ var isInGame = false; // Flag indicating whether the game has started, initial v
 var isDialogOpen = false; // Flag indicating whether the dialog is open, initial value is false
 var isPairingInProgress = false; // Flag indicating whether a pairing process is in progress, initial value is false
 var wasPairingCanceled = false; // Flag indicating whether the current pairing process was canceled by the user, initial value is false
+var addHostGenerationGate = OperationGuard.createGenerationGate();
+var pairingGenerationGate = OperationGuard.createGenerationGate();
+var appsGenerationGate = OperationGuard.createGenerationGate();
 var isGamepadActive = false; // Flag indicating whether the gamepad input is active, initial value is false
 var isClickPrevented = false; // Flag indicating whether the click event should be prevented, initial value is false
 var resFpsWarning = false; // Flag indicating whether the video resolution and frame rate warning message has shown, initial value is false
@@ -530,7 +533,7 @@ function hostChosen(host) {
         Navigation.switch();
         // Switch to Apps view
         Navigation.change(Views.Apps);
-      }).catch(console.error);
+      }, handleShowAppsNavigationFailure);
     }, function() {
       // Start polling the host after pairing flow
       startPollingHosts();
@@ -543,7 +546,7 @@ function hostChosen(host) {
       Navigation.switch();
       // Switch to Apps view
       Navigation.change(Views.Apps);
-    }).catch(console.error);
+    }, handleShowAppsNavigationFailure);
   }
 }
 
@@ -744,6 +747,19 @@ function addHostDialog() {
   // Find the existing overlay and dialog elements
   var addHostOverlay = document.querySelector('#addHostDialogOverlay');
   var addHostDialog = document.querySelector('#addHostDialog');
+
+  function resetAddHostControls() {
+    $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
+    $('#ipAddressTextInput').val('');
+    updateIpAddressInputValidationState();
+    initIpAddressFields();
+  }
+
+  function finishAddHostOperation(generation) {
+    if (addHostGenerationGate.isCurrent(generation)) {
+      resetAddHostControls();
+    }
+  }
   
   // Show the dialog and push the view
   addHostOverlay.style.display = 'flex';
@@ -758,16 +774,12 @@ function addHostDialog() {
   $('#cancelAddHost').off('click');
   $('#cancelAddHost').on('click', function() {
     console.log('%c[index.js, addHostDialog]', 'color: green;', 'Closing app dialog and returning.');
+    addHostGenerationGate.cancel();
     addHostOverlay.style.display = 'none';
     addHostDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    // Re-enable the Continue button after canceling the operation
-    $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
-    // Clear the input field after canceling the operation
-    $('#ipAddressTextInput').val('');
-    updateIpAddressInputValidationState();
-    initIpAddressFields();
+    resetAddHostControls();
   });
 
   // Send a connection request if the Continue button is pressed
@@ -798,22 +810,17 @@ function addHostDialog() {
       snackbarLog(parsedHostInput.error);
       return;
     }
-    // Disable the Continue button to prevent multiple connection requests
-    setTimeout(() => {
-      // Add disabled state after 2 seconds
-      $('#continueAddHost').addClass('mdl-button--disabled').prop('disabled', true);
-      Navigation.switch();
-      // Re-enable the Continue button after 12 seconds
-      setTimeout(() => {
-        $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
-        Navigation.switch();
-      }, 12000);
-    }, 2000);
+    var addHostGeneration = addHostGenerationGate.begin();
+    $('#continueAddHost').addClass('mdl-button--disabled').prop('disabled', true);
+    Navigation.switch();
     // Send a connection request to the Host object based on the given IP address
     var _nvhttpHost = new NvHTTP(parsedHostInput.addr, myUniqueid, parsedHostInput.addr);
     _nvhttpHost.httpPort = parsedHostInput.port;
     console.log('%c[index.js, addHostDialog]', 'color: green;', 'Sending connection request to host address ' + _nvhttpHost.hostname);
-    _nvhttpHost.refreshServerInfoAtAddress(parsedHostInput.addr).then(function(success) {
+    Promise.resolve().then(function() {
+      return _nvhttpHost.refreshServerInfoAtAddress(parsedHostInput.addr);
+    }).then(function(success) {
+      if (!addHostGenerationGate.isCurrent(addHostGeneration)) return;
       snackbarLog('Connecting to ' + _nvhttpHost.hostname + '...');
       // Close the dialog if the user has provided the IP address
       console.log('%c[index.js, addHostDialog]', 'color: green;', 'Closing app dialog and returning.');
@@ -840,22 +847,18 @@ function addHostDialog() {
           saveHosts();
         });
       }
-      // Re-enable the Continue button after successful processing
-      $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
-      // Clear the input field after successful processing
-      $('#ipAddressTextInput').val('');
-      updateIpAddressInputValidationState();
-      initIpAddressFields();
     }.bind(this), function(failure) {
+      if (!addHostGenerationGate.isCurrent(addHostGeneration)) return;
       console.error('%c[index.js, addHostDialog]', 'color: green;', 'Error: Failed API object:\n', _nvhttpHost, '\n' + _nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
       snackbarLogLong('Failed to connect to ' + (_nvhttpHost.hostname || 'the host') + '. Ensure Sunshine is running on your PC or GameStream is enabled in GeForce Experience SHIELD settings.');
-      // Re-enable the Continue button after failure processing
-      $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
-      // Clear the input field after failure processing
-      $('#ipAddressTextInput').val('');
-      updateIpAddressInputValidationState();
-      initIpAddressFields();
-    }.bind(this));
+    }.bind(this)).then(function() {
+      finishAddHostOperation(addHostGeneration);
+    }, function(error) {
+      if (addHostGenerationGate.isCurrent(addHostGeneration)) {
+        console.error('%c[index.js, addHostDialog]', 'color: green;', 'Error: Add Host processing failed unexpectedly:', error);
+      }
+      finishAddHostOperation(addHostGeneration);
+    });
   });
 }
 
@@ -864,6 +867,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
   if (!onFailure) {
     onFailure = function() {}
   }
+  var pairingGeneration = pairingGenerationGate.begin();
 
   if (!pairingCert) {
     console.warn('%c[index.js, pairingDialog]', 'color: green;', 'Warning: Pairing certificate is not generated yet. Please ensure Wasm is initialized properly!');
@@ -873,7 +877,9 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
   }
 
   nvhttpHost.pollServer(function(returnedNvHTTPHost) {
+    if (!pairingGenerationGate.isCurrent(pairingGeneration)) return;
     if (!returnedNvHTTPHost.online) {
+      if (!pairingGenerationGate.isCurrent(pairingGeneration)) return;
       console.error('%c[index.js, pairingDialog]', 'color: green;', 'Error: Failed to connect to ' + nvhttpHost.hostname + '. Ensure your host PC is online!', nvhttpHost, '\n' + nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
       snackbarLogLong('Failed to connect to ' + nvhttpHost.hostname + '. Ensure Sunshine is running on your host PC or GameStream is enabled in the GeForce Experience SHIELD settings.');
       onFailure();
@@ -881,15 +887,18 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     }
 
     if (nvhttpHost.paired) {
+      if (!pairingGenerationGate.isCurrent(pairingGeneration)) return;
       onSuccess();
       return;
     }
 
     if (nvhttpHost.currentGame != 0) {
+      if (!pairingGenerationGate.isCurrent(pairingGeneration)) return;
       snackbarLogLong(nvhttpHost.hostname + ' is currently in a game session. Please quit the running app or restart the computer, then try again.');
       onFailure();
       return;
     }
+    if (!pairingGenerationGate.isCurrent(pairingGeneration)) return;
 
     // Find the existing overlay and dialog elements
     var pairingOverlay = document.querySelector('#pairingDialogOverlay');
@@ -920,8 +929,10 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     $('#cancelPairing').off('click');
     $('#cancelPairing').on('click', function() {
       console.log('%c[index.js, pairingDialog]', 'color: green;', 'Closing app dialog and returning.');
+      pairingGenerationGate.cancel();
       nvhttpHost.cancelPairingRequest();
       wasPairingCanceled = true;
+      isPairingInProgress = false;
       pairingOverlay.style.display = 'none';
       pairingDialog.close();
       isDialogOpen = false;
@@ -929,7 +940,9 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     });
 
     console.log('%c[index.js, pairingDialog]', 'color: green;', 'Sending pairing request to ' + nvhttpHost.hostname);
+    if (!pairingGenerationGate.isCurrent(pairingGeneration)) return;
     nvhttpHost.pair(randomNumber).then(function() {
+      if (!pairingGenerationGate.isCurrent(pairingGeneration)) return;
       isPairingInProgress = false;
       snackbarLog('Successfully paired with ' + nvhttpHost.hostname);
       // Close the dialog if the pairing was successful
@@ -940,6 +953,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
       Navigation.pop();
       onSuccess();
     }, function(failedPairing) {
+      if (!pairingGenerationGate.isCurrent(pairingGeneration)) return;
       isPairingInProgress = false;
       if (wasPairingCanceled) {
         console.log('%c[index.js, pairingDialog]', 'color: green;', 'Ignored pairing failure due to cancellation.');
@@ -2089,14 +2103,22 @@ function exitAppDialog() {
 // this requires a hot-off-the-host `api`, and the appId we're going to stylize
 // the function was made like this so that we can remove duplicated code, but
 // not do N*N stylization of the box art, or make the code not flow very well
-function stylizeBoxArt(freshApi, appIdToStylize) {
+function stylizeBoxArt(freshApi, appIdToStylize, appsGeneration) {
+  if (!appsGenerationGate.isCurrent(appsGeneration)) {
+    return Promise.resolve();
+  }
   // Refresh server info and apply the CSS style to the current running game
-  freshApi.refreshServerInfo().then(function(ret) {
+  return Promise.resolve().then(function() {
+    if (!appsGenerationGate.isCurrent(appsGeneration)) return;
+    return freshApi.refreshServerInfo();
+  }).then(function(ret) {
+    if (!appsGenerationGate.isCurrent(appsGeneration)) return;
     var appBox = document.querySelector('#game-container-' + appIdToStylize);
     if (!appBox) {
       console.warn('%c[index.js, stylizeBoxArt]', 'color: green;', 'Warning: No box art found for appId: ' + appIdToStylize);
       return;
     }
+    if (!appsGenerationGate.isCurrent(appsGeneration)) return;
     // If the game is currently running, then apply CSS stylization
     if (freshApi.currentGame === appIdToStylize) {
       appBox.classList.add('current-game-active');
@@ -2105,8 +2127,10 @@ function stylizeBoxArt(freshApi, appIdToStylize) {
       appBox.classList.remove('current-game-active');
       appBox.title = appBox.title.replace(' (Running)', ''); // TODO: Replace with localized string so make it e.title = game_title
     }
-  }, function(failedRefreshInfo) {
-    console.error('%c[index.js, stylizeBoxArt]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo + '!');
+  }).catch(function(failedRefreshInfo) {
+    if (appsGenerationGate.isCurrent(appsGeneration)) {
+      console.error('%c[index.js, stylizeBoxArt]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo + '!');
+    }
   });
 }
 
@@ -2171,8 +2195,15 @@ function showAppsMode() {
   Navigation.start();
 }
 
+function handleShowAppsNavigationFailure(error) {
+  if (!OperationGuard.isStaleOperationError(error)) {
+    console.error('%c[index.js, showApps]', 'color: green;', 'Error: Failed to load the app list before navigation:', error);
+  }
+}
+
 // Show the Apps grid
 function showApps(host) {
+  var appsGeneration = appsGenerationGate.begin();
   return new Promise((resolve, reject) => {
     // Safety checking should happen before attempting to show the app list
     if (!host || !host.paired) {
@@ -2200,8 +2231,16 @@ function showApps(host) {
     $('#game-grid').empty();
     $('div.game-container').remove();
 
-    setTimeout(() => {
-      host.getAppList().then(function(appList) {
+    Promise.resolve().then(function() {
+      return host.getAppList();
+    }).then(function(appList) {
+        if (!appsGenerationGate.isCurrent(appsGeneration)) {
+          reject(OperationGuard.createStaleOperationError());
+          return;
+        }
+        if (!Array.isArray(appList)) {
+          throw new TypeError('Host returned an invalid app list');
+        }
         // Hide the spinner after the host has successfully retrieved the app list
         $('#wasmSpinner').hide();
 
@@ -2218,6 +2257,9 @@ function showApps(host) {
           emptyAppListImg.src = 'static/res/applist_empty.svg';
           $('#game-grid').html(emptyAppListImg);
           snackbarLogLong('Your list is currently empty. Please add your favorite apps to the list.');
+          Views.Apps.view.reset();
+          showAppsMode();
+          resolve([]);
           return;
         }
 
@@ -2296,23 +2338,42 @@ function showApps(host) {
             $('#game-grid').append(gameContainer);
 
             // Apply style to the game container to indicate whether the game is active or not
-            setTimeout(() => stylizeBoxArt(host, app.id), 100);
+            setTimeout(() => {
+              if (appsGenerationGate.isCurrent(appsGeneration)) {
+                stylizeBoxArt(host, app.id, appsGeneration);
+              }
+            }, 100);
           }
           // Load box art
           var boxArtPlaceholderImg = new Image();
-          host.getBoxArt(app.id).then(function(resolvedPromise) {
+          Promise.resolve(host.getBoxArt(app.id)).then(function(resolvedPromise) {
+            if (!appsGenerationGate.isCurrent(appsGeneration)) return;
             boxArtPlaceholderImg.src = resolvedPromise;
-          }, function(failedPromise) {
+          }).catch(function(failedPromise) {
+            if (!appsGenerationGate.isCurrent(appsGeneration)) return;
             console.error('%c[index.js, showApps]', 'color: green;', 'Error: Failed to retrieve box art for app ID: ' + app.id + '. Returned value was: ' + failedPromise + '. Host object: ', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-            boxArtPlaceholderImg.src = 'static/res/placeholder_error.svg';
+            try {
+              boxArtPlaceholderImg.src = 'static/res/placeholder_error.svg';
+            } catch (imageError) {
+              console.error('%c[index.js, showApps]', 'color: green;', 'Error: Failed to apply the box art error placeholder:', imageError);
+            }
           });
-          boxArtPlaceholderImg.onload = e => boxArtPlaceholderImg.classList.add('fade-in');
+          boxArtPlaceholderImg.onload = function() {
+            if (appsGenerationGate.isCurrent(appsGeneration)) {
+              boxArtPlaceholderImg.classList.add('fade-in');
+            }
+          };
           $(gameContainer).append(boxArtPlaceholderImg);
         });
         // Navigate to the Apps view
+        Views.Apps.view.reset();
         showAppsMode();
-        resolve();
-      }, function(failedAppList) {
+        resolve(sortedAppList);
+      }).catch(function(failedAppList) {
+        if (!appsGenerationGate.isCurrent(appsGeneration)) {
+          reject(OperationGuard.createStaleOperationError());
+          return;
+        }
         // Hide the spinner if the host has failed to retrieve the app list
         $('#wasmSpinner').hide();
 
@@ -2327,10 +2388,10 @@ function showApps(host) {
         snackbarLogLong('Unable to retrieve your list of apps at this time. Please refresh the list of apps or try again later!');
 
         // Navigate to the Apps view
+        Views.Apps.view.reset();
         showAppsMode();
         reject(failedAppList);
       });
-    }, 500);
   });
 }
 
@@ -2374,9 +2435,10 @@ function quitAppDialog() {
         quitAppDialog.close();
         isDialogOpen = false;
         Navigation.pop();
-        stopGame(api, function() {
-          // After stopping the game, set focus back to the 'Quit Running App' button
-          setTimeout(() => Navigation.switch(), 3000);
+        stopGame(api).then(function() {
+          Navigation.switch();
+        }).catch(function(error) {
+          console.error('%c[index.js, quitAppDialog]', 'color: green;', 'Error: Failed to stop the running app!', error);
         });
       });
     });
@@ -2468,15 +2530,12 @@ function startGame(host, appID) {
           $('#continueQuitApp').off('click');
           $('#continueQuitApp').on('click', function() {
             console.log('%c[index.js, startGame]', 'color: green;', 'Quitting game, closing app dialog, and returning.');
-            stopGame(host, function() {
-              setTimeout(() => {
-                // Scroll to the current game row
-                Navigation.switch();
-                // Switch to Apps view
-                Navigation.change(Views.Apps);
-              }, 1500);
-              // Please, don't infinite loop with recursion
-              setTimeout(() => startGame(host, appID), 3000);
+            stopGame(host).then(function() {
+              Navigation.switch();
+              Navigation.change(Views.Apps);
+              startGame(host, appID);
+            }).catch(function(error) {
+              console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to stop the running app before starting another!', error);
             });
             quitAppOverlay.style.display = 'none';
             quitAppDialog.close();
@@ -2568,7 +2627,7 @@ function startGame(host, appID) {
               Navigation.switch();
               // Switch to Apps view
               Navigation.change(Views.Apps);
-            });
+            }, handleShowAppsNavigationFailure);
             return;
           }
           // Start stream request
@@ -2588,7 +2647,7 @@ function startGame(host, appID) {
             Navigation.switch();
             // Switch to Apps view
             Navigation.change(Views.Apps);
-          });
+          }, handleShowAppsNavigationFailure);
           return;
         });
       }
@@ -2621,7 +2680,7 @@ function startGame(host, appID) {
             Navigation.switch();
             // Switch to Apps view
             Navigation.change(Views.Apps);
-          });
+          }, handleShowAppsNavigationFailure);
           return;
         }
         // Start stream request
@@ -2641,7 +2700,7 @@ function startGame(host, appID) {
           Navigation.switch();
           // Switch to Apps view
           Navigation.change(Views.Apps);
-        });
+        }, handleShowAppsNavigationFailure);
         return;
       });
     });
@@ -2651,39 +2710,28 @@ function startGame(host, appID) {
 }
 
 // Stop the running app title, refresh the server info, and then return to Apps grid
-function stopGame(host, callbackFunction) {
+function stopGame(host) {
   isInGame = false;
 
-  if (!host.paired) {
-    return;
+  if (!host || !host.paired) {
+    return Promise.reject(new Error('Host is not paired'));
   }
 
-  host.refreshServerInfo().then(function(ret) {
-    host.getAppById(host.currentGame).then(function(runningApp) {
+  return host.refreshServerInfo().then(function() {
+    return host.getAppById(host.currentGame);
+  }).then(function(runningApp) {
       if (!runningApp) {
         snackbarLog('No app is currently running.');
-        return;
+        return showApps(host);
       }
       var appTitle = runningApp.title;
       snackbarLog('Quitting ' + appTitle + '...');
-      host.quitApp().then(function(ret2) {
+      return host.quitApp().then(function() {
         snackbarLog('Successfully quit ' + appTitle);
-        host.refreshServerInfo().then(function(ret3) {
-          // Refresh to show no app is currently running
-          showApps(host).finally(() => {
-            if (typeof(callbackFunction) === "function") callbackFunction();
-          });
-        }, function(failedRefreshInfo2) {
-          console.error('%c[index.js, stopGame]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo2 + '! Failed server was: ' + '\n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-        });
-      }, function(failedQuitApp) {
-        console.error('%c[index.js, stopGame]', 'color: green;', 'Error: Failed to quit app! Returned error was: ' + failedQuitApp + '!');
+        return host.refreshServerInfo();
+      }).then(function() {
+        return showApps(host);
       });
-    }, function(failedGetApp) {
-      console.error('%c[index.js, stopGame]', 'color: green;', 'Error: Failed to get app ID! Returned error was: ' + failedGetApp + '!');
-    });
-  }, function(failedRefreshInfo) {
-    console.error('%c[index.js, stopGame]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo + '!');
   });
 }
 
@@ -2709,7 +2757,7 @@ function createObjectStore(dataBase) {
 function openIndexDB(callback) {
   if (db) {
     // Database already opened
-    callback();
+    callback(true);
     return;
   }
 
@@ -2730,11 +2778,24 @@ function openIndexDB(callback) {
     indexedDB = self.indexedDB || self.webkitIndexedDB || self.mozIndexedDB || self.OIndexedDB || self.msIndexedDB;
   }
 
-  // Create/open database
-  const request = indexedDB.open(dbName, dbVersion);
+  if (!indexedDB) {
+    console.error('%c[index.js, openIndexDB]', 'color: green;', 'Error: IndexedDB is unavailable.');
+    callback(false);
+    return;
+  }
+
+  let request;
+  try {
+    request = indexedDB.open(dbName, dbVersion);
+  } catch (error) {
+    console.error('%c[index.js, openIndexDB]', 'color: green;', 'Error: Cannot open the IndexedDB database: ', error);
+    callback(false);
+    return;
+  }
 
   request.onerror = function(e) {
     console.error('%c[index.js, openIndexDB]', 'color: green;', 'Error: Cannot create or access the IndexedDB database: ', e);
+    callback(false);
   };
 
   request.onsuccess = function(e) {
@@ -2750,10 +2811,13 @@ function openIndexDB(callback) {
       const setVersion = db.setVersion(dbVersion);
       setVersion.onsuccess = function() {
         createObjectStore(db);
-        callback();
+        callback(true);
+      };
+      setVersion.onerror = function() {
+        callback(false);
       };
     } else {
-      callback();
+      callback(true);
     }
   };
 
@@ -2769,7 +2833,18 @@ function callCb(key, value, callbackFunction) {
 }
 
 function getData(key, callbackFunction) {
-  let cb = function() {
+  let settled = false;
+  let finish = function(value) {
+    if (settled) return;
+    settled = true;
+    callCb(key, value, callbackFunction);
+  };
+  let cb = function(opened) {
+    if (opened === false || !db) {
+      finish(null);
+      return;
+    }
+    let value = null;
     try {
       // Open a transaction to the database
       const transaction = db.transaction(storeName, 'readonly');
@@ -2778,32 +2853,54 @@ function getData(key, callbackFunction) {
       // Retrieve the data that was stored
       readRequest.onsuccess = function(e) {
         console.log('%c[index.js, getData]', 'color: green;', 'Reading data from DB key: ' + key + ' with value: ' + readRequest.result);
-        let value = null;
         if (readRequest.result) {
-          value = JSON.parse(readRequest.result);
+          value = OperationGuard.parseStoredJson(readRequest.result, function(error) {
+            console.error('%c[index.js, getData]', 'color: green;', 'Error: Unable to parse data at the key: ' + key + ' from IndexedDB: ', error);
+          });
         }
-        callCb(key, value, callbackFunction);
+        finish(value);
+      };
+
+      readRequest.onerror = function(e) {
+        console.error('%c[index.js, getData]', 'color: green;', 'Error: Unable to read data at the: ' + key + ' from IndexedDB: ' + e);
+        finish(null);
       };
 
       transaction.onerror = function(e) {
         console.error('%c[index.js, getData]', 'color: green;', 'Error: Unable to read data at the: ' + key + ' from IndexedDB: ' + e);
-        callCb(key, value, callbackFunction);
+        finish(null);
+      };
+      transaction.onabort = function(e) {
+        console.error('%c[index.js, getData]', 'color: green;', 'Error: IndexedDB read transaction was aborted at the key: ' + key + ': ' + e);
+        finish(null);
       };
     } catch (err) {
       console.error('%c[index.js, getData]', 'color: green;', 'Error: Something went wrong while reading data at the key: ' + key + ' from IndexedDB: ' + err);
-      callCb(key, value, callbackFunction);
+      finish(null);
     }
   };
 
   if (db) {
-    cb();
+    cb(true);
   } else {
     openIndexDB(cb);
   }
 }
 
 function storeData(key, data, callbackFunction) {
-  let cb = function() {
+  let settled = false;
+  let finish = function(success) {
+    if (settled) return;
+    settled = true;
+    if (callbackFunction) {
+      callbackFunction(success);
+    }
+  };
+  let cb = function(opened) {
+    if (opened === false || !db) {
+      finish(false);
+      return;
+    }
     try {
       // Open a transaction to the database
       const transaction = db.transaction(storeName, 'readwrite');
@@ -2812,21 +2909,25 @@ function storeData(key, data, callbackFunction) {
 
       transaction.oncomplete = function(e) {
         console.log('%c[index.js, storeData]', 'color: green;', 'Storing data at key: ' + key + ' with data: ' + JSON.stringify(data));
-        if (callbackFunction) {
-          callbackFunction();
-        }
+        finish(true);
       };
 
       transaction.onerror = function(e) {
         console.error('%c[index.js, storeData]', 'color: green;', 'Error: Unable to store data in IndexedDB: ' + e);
+        finish(false);
+      };
+      transaction.onabort = function(e) {
+        console.error('%c[index.js, storeData]', 'color: green;', 'Error: IndexedDB write transaction was aborted: ' + e);
+        finish(false);
       };
     } catch (err) {
       console.error('%c[index.js, storeData]', 'color: green;', 'Error: Something went wrong while storing data at the key: ' + key + ' from IndexedDB: ' + err);
+      finish(false);
     }
   };
 
   if (db) {
-    cb();
+    cb(true);
   } else {
     openIndexDB(cb);
   }

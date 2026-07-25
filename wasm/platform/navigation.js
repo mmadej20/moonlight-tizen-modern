@@ -95,6 +95,7 @@ function clickElement(target) {
 
 // Mark an element based on various target types
 function mark(target) {
+  if (target === undefined || target === null) return;
   const element = resolveElement(target);
   // Check if the element exists before marking
   if (element) {
@@ -108,6 +109,7 @@ function mark(target) {
 
 // Unmark an element based on various target types
 function unmark(target) {
+  if (target === undefined || target === null) return;
   const element = resolveElement(target);
   // Check if the element exists before un-marking
   if (element) {
@@ -132,6 +134,7 @@ function elementId(target) {
 
 // Safely add focus to an element
 function focusElement(target) {
+  if (target === undefined || target === null) return;
   const element = resolveElement(target);
   const listener = document.getElementById('listener');
   // Remove focus from the currently focused element first
@@ -157,6 +160,7 @@ function focusElement(target) {
 
 // Safely remove focus from an element
 function blurElement(target) {
+  if (target === undefined || target === null) return;
   const element = resolveElement(target);
   // Check if the element exists before removing focus
   if (!element) {
@@ -261,12 +265,23 @@ class ListView {
   }
 
   current() {
-    const array = this.func();
+    const array = this.normalize();
     return array[this.index];
   }
 
+  normalize() {
+    const array = this.func() || [];
+    if (array.length === 0) {
+      this.index = 0;
+      return array;
+    }
+    this.index = Math.max(0, Math.min(this.index, array.length - 1));
+    return array;
+  }
+
   prev() {
-    const array = this.func();
+    const array = this.normalize();
+    if (array.length === 0) return undefined;
     if (this.index > 0) {
       unmark(array[this.index]);
       --this.index;
@@ -276,7 +291,8 @@ class ListView {
   }
 
   next() {
-    const array = this.func();
+    const array = this.normalize();
+    if (array.length === 0) return undefined;
     if (this.index < array.length - 1) {
       unmark(array[this.index]);
       ++this.index;
@@ -286,7 +302,8 @@ class ListView {
   }
 
   prevCategory() {
-    const array = this.func();
+    const array = this.normalize();
+    if (array.length === 0) return false;
     if (this.index > 0) {
       unmark(array[this.index]);
       --this.index;
@@ -299,7 +316,8 @@ class ListView {
   }
 
   nextCategory() {
-    const array = this.func();
+    const array = this.normalize();
+    if (array.length === 0) return false;
     if (this.index < array.length - 1) {
       unmark(array[this.index]);
       ++this.index;
@@ -312,7 +330,8 @@ class ListView {
   }
 
   prevOption() {
-    const array = this.func();
+    const array = this.normalize();
+    if (array.length === 0) return undefined;
     unmark(array[this.index]);
     this.index = (this.index - 1 + array.length) % array.length;
     mark(array[this.index]);
@@ -320,7 +339,8 @@ class ListView {
   }
 
   nextOption() {
-    const array = this.func();
+    const array = this.normalize();
+    if (array.length === 0) return undefined;
     unmark(array[this.index]);
     this.index = (this.index + 1) % array.length;
     mark(array[this.index]);
@@ -328,7 +348,8 @@ class ListView {
   }
 
   prevCard(cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
+    if (array.length === 0) return undefined;
     const currentRow = Math.floor(this.index / cardsPerRow);
     // Check if a previous card exists
     if (this.index > 0) {
@@ -344,7 +365,8 @@ class ListView {
   }
 
   nextCard(cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
+    if (array.length === 0) return undefined;
     const currentRow = Math.floor(this.index / cardsPerRow);
     // Check if a next card exists
     if (this.index < array.length - 1) {
@@ -360,7 +382,7 @@ class ListView {
   }
 
   currentCardRow(cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
     // Check if there are any card in the current row
     if (!array || array.length === 0) {
       return;
@@ -372,7 +394,8 @@ class ListView {
   }
 
   prevCardRow(cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
+    if (array.length === 0) return false;
     const currentRow = Math.floor(this.index / cardsPerRow);
     // Check if a previous card row exists
     if (currentRow > 0) {
@@ -388,7 +411,8 @@ class ListView {
   }
 
   nextCardRow(cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
+    if (array.length === 0) return false;
     const rows = Math.ceil(array.length / cardsPerRow);
     const currentRow = Math.floor(this.index / cardsPerRow);
     // Check if a next card row exists
@@ -405,7 +429,7 @@ class ListView {
   }
 
   scrollToCardRow(row, cardsPerRow) {
-    const array = this.func();
+    const array = this.normalize();
     const targetCard = array[row * cardsPerRow];
     if (targetCard) {
       requestAnimationFrame(() => {
@@ -421,6 +445,10 @@ class ListView {
     this.index = 0;
   }
 };
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { ListView: ListView };
+}
 
 const Views = {
   Hosts: {

@@ -186,15 +186,18 @@ function handleMessage(msg) {
         break;
     }
     // Return to the app list with new current game
-    showApps(api);
-    setTimeout(() => {
+    showApps(api).then(function() {
       // Scroll to the current game row
       Navigation.switch();
       // Switch to Apps view
       if (!window.isDialogOpen) {
         Navigation.change(Views.Apps);
       }
-    }, 1500);
+    }, function(error) {
+      if (!OperationGuard.isStaleOperationError(error)) {
+        console.error('%c[messages.js, handleMessage]', 'color: gray;', 'Error: Failed to reload the app list after stream termination:', error);
+      }
+    });
   } else if (msg === 'Connection Established') {
     // Prepare the screen for video stream
     $('#loadingSpinner').css('display', 'none');
