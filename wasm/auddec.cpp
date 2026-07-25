@@ -99,12 +99,24 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   // Calculate the frame duration based on the samples per frame (240) and sample rate (48000)
   s_frameDuration = FrameDuration(opusConfig->samplesPerFrame, opusConfig->sampleRate);
 
+  if (g_Instance->m_OpusDecoder) {
+    opus_multistream_decoder_destroy(g_Instance->m_OpusDecoder);
+    g_Instance->m_OpusDecoder = nullptr;
+  }
+
   // Create the Opus decoder with the provided configuration parameters
   g_Instance->m_OpusDecoder = opus_multistream_decoder_create(
     opusConfig->sampleRate, opusConfig->channelCount,
     opusConfig->streams, opusConfig->coupledStreams,
     opusConfig->mapping, &rc
   );
+  if (rc != OPUS_OK || !g_Instance->m_OpusDecoder) {
+    if (g_Instance->m_OpusDecoder) {
+      opus_multistream_decoder_destroy(g_Instance->m_OpusDecoder);
+    }
+    g_Instance->m_OpusDecoder = nullptr;
+    return -1;
+  }
 
   // Initialize the estimated audio end time
   s_estimatedAudioEnd = 0s;
@@ -119,6 +131,11 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
 }
 
 void MoonlightInstance::AudDecCleanup(void) {
+  if (g_Instance->m_OpusDecoder) {
+    opus_multistream_decoder_destroy(g_Instance->m_OpusDecoder);
+    g_Instance->m_OpusDecoder = nullptr;
+  }
+
   // Clear the decode buffer
   s_DecodeBuffer.clear();
 
@@ -128,7 +145,7 @@ void MoonlightInstance::AudDecCleanup(void) {
 
 void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLength) {
   // Check if audio playback has not started
-  if (!g_Instance->m_AudioStarted) {
+  if (!g_Instance->m_AudioStarted || !g_Instance->m_OpusDecoder) {
     return;
   }
 

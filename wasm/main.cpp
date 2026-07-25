@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <errors.h>
 #include <pairing.h>
 #include <iostream>
@@ -33,6 +34,7 @@ extern char* g_UniqueId;
 
 using EmssLatencyMode = samsung::wasm::ElementaryMediaStreamSource::LatencyMode;
 using EmssRenderingMode = samsung::wasm::ElementaryMediaStreamSource::RenderingMode;
+using std::chrono_literals::operator""s;
 
 MoonlightInstance* g_Instance;
 
@@ -48,22 +50,19 @@ MoonlightInstance::MoonlightInstance()
     m_HttpThreadPoolSequence(0),
     m_Dispatcher("Curl"),
     m_Mutex(),
-    m_EmssStateChanged(),
-    m_EmssAudioStateChanged(),
-    m_EmssVideoStateChanged(),
     m_EmssReadyState(EmssReadyState::kDetached),
     m_AudioStarted(false),
     m_VideoStarted(false),
     m_AudioSessionId(0),
     m_VideoSessionId(0),
+    m_MediaOperationEpoch(),
+    m_MediaCallbackListenerOwners(),
+    m_StreamMediaContext(),
+    m_CurrentMediaListeners(nullptr),
     m_MediaElement("wasm_module"),
     m_Source(nullptr),
-    m_SourceListener(this),
-    m_AudioTrackListener(this),
-    m_VideoTrackListener(this),
     m_AudioTrack(),
-    m_VideoTrack(),
-    m_SourceClosed(false) {
+    m_VideoTrack() {
       m_Dispatcher.start();
     }
 
@@ -97,9 +96,12 @@ void MoonlightInstance::StopConnection(int errorCode) {
 
   m_StopErrorCode.store(errorCode);
   m_ConnectionCancelled.store(true);
-  m_EmssStateChanged.notify_all();
-  m_EmssAudioStateChanged.notify_all();
-  m_EmssVideoStateChanged.notify_all();
+  m_InitialSourceCloseLatch.Notify();
+  m_SourceOpenLatch.Notify();
+  m_AudioTrackOpenLatch.Notify();
+  m_VideoTrackOpenLatch.Notify();
+  m_PlayLatch.Notify();
+  m_SourceCloseLatch.Notify();
 
   // Interrupt pending startup before the stop owner waits for the connection
   // thread. LiStopConnection() remains owned solely by StopThreadFunc().
@@ -161,32 +163,11 @@ void* MoonlightInstance::StopThreadFunc(void* context) {
   // Stop the connection
   LiStopConnection();
 
-  // Task 4 integration seam: replace this existing unbounded close/wait block
-  // with the bounded CloseMediaSource() routine.
-  // Close the media source and release tracks to ensure WebKit garbage collection
-  if (me->m_Source) {
-    me->m_Source->Close([me](samsung::wasm::OperationResult) {
-      me->m_AudioTrack = samsung::wasm::ElementaryMediaTrack();
-      me->m_VideoTrack = samsung::wasm::ElementaryMediaTrack();
-      
-      std::unique_lock<std::mutex> lock(me->m_Mutex);
-      me->m_SourceClosed.store(true);
-      me->m_SourceClosedCV.notify_all();
-    });
-    
-    // Synchronously wait for the source to close before exiting,
-    // which prevents the next StartStream from stomping on our teardown.
-    std::unique_lock<std::mutex> lock(me->m_Mutex);
-    me->m_SourceClosedCV.wait(lock, [me] {
-      return me->m_SourceClosed.load();
-    });
-    
-    // Reset EMSS state variables for the next stream
-    me->m_EmssReadyState = EmssReadyState::kDetached;
-    me->m_AudioStarted.store(false);
-    me->m_VideoStarted.store(false);
-    me->m_AudioSessionId.store(0);
-    me->m_VideoSessionId.store(0);
+  const OperationOutcome closeOutcome = me->CloseMediaSource();
+  if (closeOutcome == OperationOutcome::Timeout) {
+    ClLogMessage("EMSS close timed out\n");
+  } else if (closeOutcome == OperationOutcome::Failure) {
+    ClLogMessage("EMSS close failed\n");
   }
 
   const int stopErrorCode = me->m_StopErrorCode.load();
@@ -197,6 +178,46 @@ void* MoonlightInstance::StopThreadFunc(void* context) {
   }
 
   return nullptr;
+}
+
+OperationOutcome MoonlightInstance::CloseMediaSource() {
+  const auto closeContext = m_MediaOperationEpoch.Begin(m_Source.get());
+  m_SourceCloseLatch.Reset();
+  OperationOutcome outcome = OperationOutcome::Success;
+
+  if (m_Source) {
+    const auto closeResult = m_Source->Close(
+      [this, closeContext](samsung::wasm::OperationResult result) {
+        m_MediaOperationEpoch.RunIfActive(closeContext, [this, result] {
+          if (result == samsung::wasm::OperationResult::kSuccess) {
+            m_SourceCloseLatch.Succeed();
+          } else {
+            m_SourceCloseLatch.Fail();
+          }
+        });
+      });
+    if (!closeResult) {
+      m_SourceCloseLatch.Fail();
+    }
+
+    outcome = m_SourceCloseLatch.WaitFor(3s, m_ConnectionCancelled);
+  }
+
+  m_MediaOperationEpoch.Clear(closeContext);
+  m_CurrentMediaListeners = nullptr;
+  m_AudioTrack = samsung::wasm::ElementaryMediaTrack();
+  m_VideoTrack = samsung::wasm::ElementaryMediaTrack();
+  {
+    std::lock_guard<std::mutex> lock(m_Mutex);
+    m_EmssReadyState = EmssReadyState::kDetached;
+    m_AudioStarted.store(false);
+    m_VideoStarted.store(false);
+    m_AudioSessionId.store(0);
+    m_VideoSessionId.store(0);
+  }
+  m_Source.reset();
+
+  return outcome;
 }
 
 void* MoonlightInstance::InputThreadFunc(void* context) {
@@ -325,7 +346,14 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_ConnectionCancelled.store(false);
   m_TerminationReported.store(false);
   m_StopErrorCode.store(0);
-  m_SourceClosed.store(false);
+  m_StreamMediaContext = m_MediaOperationEpoch.Begin(nullptr);
+  m_CurrentMediaListeners = nullptr;
+  m_InitialSourceCloseLatch.Reset();
+  m_SourceOpenLatch.Reset();
+  m_AudioTrackOpenLatch.Reset();
+  m_VideoTrackOpenLatch.Reset();
+  m_PlayLatch.Reset();
+  m_SourceCloseLatch.Reset();
 
   PostToJs("Setting the Host address to: " + host + ":" + std::to_string(httpPort));
   PostToJs("Setting the Video resolution to: " + width + "x" + height);
@@ -440,8 +468,13 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
     selectedLatencyMode,
     EmssRenderingMode::kMediaElement
   );
-  // Set the source listener to the media source
-  m_Source->SetListener(&m_SourceListener);
+  m_StreamMediaContext = m_MediaOperationEpoch.Begin(m_Source.get());
+  auto mediaListeners =
+    std::make_unique<MediaCallbackListeners>(this, m_StreamMediaContext);
+  m_CurrentMediaListeners = mediaListeners.get();
+  // EMSS owns raw listener pointers and may dispatch callbacks after teardown.
+  // Retain each immutable epoch-bound listener set for the instance lifetime.
+  m_MediaCallbackListenerOwners.push_back(std::move(mediaListeners));
 
   // Store the parameters from the start message
   m_Host = host;

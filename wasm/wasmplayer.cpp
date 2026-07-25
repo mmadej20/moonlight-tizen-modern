@@ -60,75 +60,116 @@ static VIDEO_STATS m_GlobalVideoStats;
 static std::mutex s_VideoStatsMutex;
 
 MoonlightInstance::SourceListener::SourceListener(
-  MoonlightInstance* instance
-) : m_Instance(instance) {}
+  MoonlightInstance* instance,
+  MediaOperationEpoch::Context mediaContext
+) : m_Instance(instance),
+    m_MediaContext(mediaContext) {}
 
 void MoonlightInstance::SourceListener::OnSourceOpen() {
-  ClLogMessage("EMSS::OnOpen\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_EmssReadyState = EmssReadyState::kOpen;
-  m_Instance->m_EmssStateChanged.notify_all();
+  m_Instance->m_MediaOperationEpoch.RunIfActive(m_MediaContext, [this] {
+    ClLogMessage("EMSS::OnOpen\n");
+    {
+      std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
+      m_Instance->m_EmssReadyState = EmssReadyState::kOpen;
+    }
+    m_Instance->m_SourceOpenLatch.Succeed();
+  });
 }
 
 void MoonlightInstance::SourceListener::OnSourceOpenPending() {
-  ClLogMessage("EMSS::OnOpenPending\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_EmssReadyState = EmssReadyState::kOpenPending;
-  m_Instance->m_EmssStateChanged.notify_all();
+  m_Instance->m_MediaOperationEpoch.RunIfActive(m_MediaContext, [this] {
+    ClLogMessage("EMSS::OnOpenPending\n");
+    std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
+    m_Instance->m_EmssReadyState = EmssReadyState::kOpenPending;
+  });
 }
 
 void MoonlightInstance::SourceListener::OnSourceClosed() {
-  ClLogMessage("EMSS::OnClosed\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_EmssReadyState = EmssReadyState::kClosed;
-  m_Instance->m_EmssStateChanged.notify_all();
+  m_Instance->m_MediaOperationEpoch.RunIfActive(m_MediaContext, [this] {
+    ClLogMessage("EMSS::OnClosed\n");
+    {
+      std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
+      m_Instance->m_EmssReadyState = EmssReadyState::kClosed;
+    }
+    m_Instance->m_InitialSourceCloseLatch.Succeed();
+  });
 }
 
 MoonlightInstance::AudioTrackListener::AudioTrackListener(
-  MoonlightInstance* instance
-) : m_Instance(instance) {}
+  MoonlightInstance* instance,
+  MediaOperationEpoch::Context mediaContext
+) : m_Instance(instance),
+    m_MediaContext(mediaContext) {}
 
 void MoonlightInstance::AudioTrackListener::OnTrackOpen() {
-  ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackOpen\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_AudioStarted = true;
-  m_Instance->m_EmssAudioStateChanged.notify_all();
+  m_Instance->m_MediaOperationEpoch.RunIfActive(m_MediaContext, [this] {
+    ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackOpen\n");
+    {
+      std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
+      m_Instance->m_AudioStarted = true;
+    }
+    m_Instance->m_AudioTrackOpenLatch.Succeed();
+  });
 }
 
 void MoonlightInstance::AudioTrackListener::OnTrackClosed(samsung::wasm::ElementaryMediaTrack::CloseReason) {
-  ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackClosed\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_AudioStarted = false;
+  m_Instance->m_MediaOperationEpoch.RunIfActive(m_MediaContext, [this] {
+    ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackClosed\n");
+    {
+      std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
+      m_Instance->m_AudioStarted = false;
+    }
+    m_Instance->m_AudioTrackOpenLatch.Fail();
+  });
 }
 
 void MoonlightInstance::AudioTrackListener::OnSessionIdChanged(samsung::wasm::SessionId new_session_id) {
-  ClLogMessage("AUDIO ElementaryMediaTrack::OnSessionIdChanged\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_AudioSessionId.store(new_session_id);
+  m_Instance->m_MediaOperationEpoch.RunIfActive(
+    m_MediaContext,
+    [this, new_session_id] {
+      ClLogMessage("AUDIO ElementaryMediaTrack::OnSessionIdChanged\n");
+      std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
+      m_Instance->m_AudioSessionId.store(new_session_id);
+    });
 }
 
 MoonlightInstance::VideoTrackListener::VideoTrackListener(
-  MoonlightInstance* instance
-) : m_Instance(instance) {}
+  MoonlightInstance* instance,
+  MediaOperationEpoch::Context mediaContext
+) : m_Instance(instance),
+    m_MediaContext(mediaContext) {}
 
 void MoonlightInstance::VideoTrackListener::OnTrackOpen() {
-  ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackOpen\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_VideoStarted = true;
-  m_Instance->m_EmssVideoStateChanged.notify_all();
-  LiRequestIdrFrame();
+  m_Instance->m_MediaOperationEpoch.RunIfActive(m_MediaContext, [this] {
+    ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackOpen\n");
+    {
+      std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
+      m_Instance->m_VideoStarted = true;
+    }
+    m_Instance->m_VideoTrackOpenLatch.Succeed();
+    LiRequestIdrFrame();
+  });
 }
 
 void MoonlightInstance::VideoTrackListener::OnTrackClosed(samsung::wasm::ElementaryMediaTrack::CloseReason) {
-  ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackClosed\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_VideoStarted = false;
+  m_Instance->m_MediaOperationEpoch.RunIfActive(m_MediaContext, [this] {
+    ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackClosed\n");
+    {
+      std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
+      m_Instance->m_VideoStarted = false;
+    }
+    m_Instance->m_VideoTrackOpenLatch.Fail();
+  });
 }
 
 void MoonlightInstance::VideoTrackListener::OnSessionIdChanged(samsung::wasm::SessionId new_session_id) {
-  ClLogMessage("VIDEO ElementaryMediaTrack::OnSessionIdChanged\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_VideoSessionId.store(new_session_id);
+  m_Instance->m_MediaOperationEpoch.RunIfActive(
+    m_MediaContext,
+    [this, new_session_id] {
+      ClLogMessage("VIDEO ElementaryMediaTrack::OnSessionIdChanged\n");
+      std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
+      m_Instance->m_VideoSessionId.store(new_session_id);
+    });
 }
 
 void MoonlightInstance::DidChangeFocus(bool got_focus) {
@@ -143,23 +184,53 @@ bool MoonlightInstance::InitializeRenderingSurface(int width, int height) {
   return true;
 }
 
-int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height, int redrawRate, void* context, int drFlags) {
-  // Bind the media source to the media element
-  g_Instance->m_MediaElement.SetSrc(g_Instance->m_Source.get());
-  ClLogMessage("Waiting to close\n");
+bool MoonlightInstance::WaitForMediaStage(const char* stage, OperationLatch& latch) {
+  const OperationOutcome outcome = latch.WaitFor(10s, m_ConnectionCancelled);
+  if (outcome == OperationOutcome::Success) {
+    ClLogMessage("EMSS %s succeeded\n", stage);
+    return true;
+  }
+  if (outcome == OperationOutcome::Timeout) {
+    ClLogMessage("EMSS %s timed out after 10 seconds\n", stage);
+  } else if (outcome == OperationOutcome::Cancelled) {
+    ClLogMessage("EMSS %s cancelled\n", stage);
+  } else {
+    ClLogMessage("EMSS %s failed\n", stage);
+  }
+  return false;
+}
 
-  g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, [] {
-    return g_Instance->m_EmssReadyState == EmssReadyState::kClosed;
-  });
-  if (g_Instance->m_ConnectionCancelled) {
-    ClLogMessage("Connection cancelled during initial close wait\n");
+int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height, int redrawRate, void* context, int drFlags) {
+  MoonlightInstance* instance = g_Instance;
+  if (!instance->m_Source || !instance->m_Source->IsValid()) {
+    ClLogMessage("EMSS source is unavailable or invalid during setup\n");
     return -1;
   }
-  ClLogMessage("Closed\n");
+
+  if (!instance->m_CurrentMediaListeners) {
+    ClLogMessage("EMSS callback listeners are unavailable during setup\n");
+    return -1;
+  }
+
+  const auto sourceListenerResult =
+    instance->m_Source->SetListener(&instance->m_CurrentMediaListeners->source);
+  if (!sourceListenerResult) {
+    ClLogMessage("Failed to set EMSS source listener\n");
+    return -1;
+  }
+
+  const auto setSourceResult = instance->m_MediaElement.SetSrc(instance->m_Source.get());
+  if (!setSourceResult) {
+    ClLogMessage("Failed to bind EMSS source to media element\n");
+    return -1;
+  }
+  if (!instance->WaitForMediaStage("initial source close", instance->m_InitialSourceCloseLatch)) {
+    return -1;
+  }
 
   {
     samsung::wasm::ChannelLayout channelLayout; // Selected audio channel layout from audio config
-    switch (CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(g_Instance->m_AudioConfig)) {
+    switch (CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(instance->m_AudioConfig)) {
       case 2:
         channelLayout = samsung::wasm::ChannelLayout::kStereo; // Audio Channel: Stereo
         ClLogMessage("Selected channel layout for Stereo audio\n");
@@ -174,10 +245,10 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
         break;
       default:
         ClLogMessage("Unable to select channel layout from audio configuration\n");
-        break;
+        return -1;
     }
 
-    auto add_track_result = g_Instance->m_Source->AddTrack(
+    auto add_track_result = instance->m_Source->AddTrack(
       samsung::wasm::ElementaryAudioTrackConfig {
         "audio/webm; codecs=\"pcm\"", // Audio Codec: Pulse Code Modulation (PCM) Profile
         {}, // Extradata: Empty
@@ -187,9 +258,16 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
         kSampleRate, // Sample Rate: 48 kHz (48000 Hz)
       }
     );
-    if (add_track_result) {
-      g_Instance->m_AudioTrack = std::move(*add_track_result);
-      g_Instance->m_AudioTrack.SetListener(&g_Instance->m_AudioTrackListener);
+    if (!add_track_result) {
+      ClLogMessage("Failed to add EMSS audio track\n");
+      return -1;
+    }
+    instance->m_AudioTrack = std::move(*add_track_result);
+    const auto audioListenerResult =
+      instance->m_AudioTrack.SetListener(&instance->m_CurrentMediaListeners->audio);
+    if (!audioListenerResult) {
+      ClLogMessage("Failed to set EMSS audio track listener\n");
+      return -1;
     }
   }
 
@@ -226,7 +304,7 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
     }
 
     ClLogMessage("Using mimeType %s\n", mimetype);
-    auto add_track_result = g_Instance->m_Source->AddTrack(
+    auto add_track_result = instance->m_Source->AddTrack(
       samsung::wasm::ElementaryVideoTrackConfig {
         mimetype, // MIME-type: Selected Video Format
         {}, // Extradata: Empty
@@ -237,41 +315,56 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
         1, // Framerate: Denominator
       }
     );
-    if (add_track_result) {
-      g_Instance->m_VideoTrack = std::move(*add_track_result);
-      g_Instance->m_VideoTrack.SetListener(&g_Instance->m_VideoTrackListener);
+    if (!add_track_result) {
+      ClLogMessage("Failed to add EMSS video track\n");
+      return -1;
+    }
+    instance->m_VideoTrack = std::move(*add_track_result);
+    const auto videoListenerResult =
+      instance->m_VideoTrack.SetListener(&instance->m_CurrentMediaListeners->video);
+    if (!videoListenerResult) {
+      ClLogMessage("Failed to set EMSS video track listener\n");
+      return -1;
     }
   }
 
-  ClLogMessage("Inb4 source open\n");
-  g_Instance->m_Source->Open([](EmssOperationResult){});
-  g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, [] {
-    return g_Instance->m_EmssReadyState == EmssReadyState::kOpenPending || 
-           g_Instance->m_EmssReadyState == EmssReadyState::kOpen;
-  });
-  if (g_Instance->m_ConnectionCancelled) {
-    ClLogMessage("Connection cancelled during open wait\n");
+  const auto mediaContext = instance->m_StreamMediaContext;
+  const auto openResult = instance->m_Source->Open(
+    [instance, mediaContext](EmssOperationResult result) {
+      instance->m_MediaOperationEpoch.RunIfActive(mediaContext, [instance, result] {
+        if (result != EmssOperationResult::kSuccess) {
+          ClLogMessage("EMSS source open callback failed\n");
+          instance->m_SourceOpenLatch.Fail();
+        }
+      });
+    });
+  if (!openResult) {
+    ClLogMessage("Failed to start EMSS source open\n");
+    instance->m_SourceOpenLatch.Fail();
+    return -1;
+  }
+  if (!instance->WaitForMediaStage("source open", instance->m_SourceOpenLatch)) {
     return -1;
   }
 
-  ClLogMessage("Source ready to open\n");
-  g_Instance->m_MediaElement.Play([](EmssOperationResult err) {
-    if (err != EmssOperationResult::kSuccess) {
-      ClLogMessage("Play error\n");
-    } else {
-      ClLogMessage("Play success\n");
-    }
-  });
-
-  ClLogMessage("Waiting to start\n");
-  g_Instance->WaitFor(&g_Instance->m_EmssAudioStateChanged, [] {
-    return g_Instance->m_AudioStarted.load();
-  });
-  g_Instance->WaitFor(&g_Instance->m_EmssVideoStateChanged, [] {
-    return g_Instance->m_VideoStarted.load();
-  });
-  if (g_Instance->m_ConnectionCancelled) {
-    ClLogMessage("Connection cancelled during audio/video wait\n");
+  const auto playResult = instance->m_MediaElement.Play(
+    [instance, mediaContext](EmssOperationResult result) {
+      instance->m_MediaOperationEpoch.RunIfActive(mediaContext, [instance, result] {
+        if (result == EmssOperationResult::kSuccess) {
+          instance->m_PlayLatch.Succeed();
+        } else {
+          instance->m_PlayLatch.Fail();
+        }
+      });
+    });
+  if (!playResult) {
+    ClLogMessage("Failed to start media element playback\n");
+    instance->m_PlayLatch.Fail();
+    return -1;
+  }
+  if (!instance->WaitForMediaStage("media element play", instance->m_PlayLatch) ||
+      !instance->WaitForMediaStage("audio track open", instance->m_AudioTrackOpenLatch) ||
+      !instance->WaitForMediaStage("video track open", instance->m_VideoTrackOpenLatch)) {
     return -1;
   }
 
@@ -711,11 +804,6 @@ void MoonlightInstance::TogglePerformanceStats() {
   } else {
     PostToJs(std::string("NoStatMsg: "));
   }
-}
-
-void MoonlightInstance::WaitFor(std::condition_variable* variable, std::function<bool()> condition) {
-  std::unique_lock<std::mutex> lock(m_Mutex);
-  variable->wait(lock, [&]() { return m_ConnectionCancelled.load() || condition(); });
 }
 
 DECODER_RENDERER_CALLBACKS MoonlightInstance::s_DrCallbacks = {

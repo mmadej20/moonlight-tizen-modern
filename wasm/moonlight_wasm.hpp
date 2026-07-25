@@ -1,6 +1,7 @@
 #include <atomic>
 #include <memory>
 #include <queue>
+#include <vector>
 
 #include <emscripten/bind.h>
 #include <emscripten/html5.h>
@@ -14,6 +15,8 @@
 
 #include "connection_lifecycle.hpp"
 #include "lib.hpp"
+#include "media_operation_epoch.hpp"
+#include "operation_latch.hpp"
 #include "owned_pthread.hpp"
 #include "request_registry.hpp"
 
@@ -123,6 +126,7 @@ class MoonlightInstance {
   void OnConnectionStopped(int errorCode);
   void OnConnectionStarted(uint32_t error);
   void StopConnection(int errorCode);
+  OperationOutcome CloseMediaSource();
 
   static uint32_t ProfilerGetPackedMillis();
   static uint64_t ProfilerGetMillis();
@@ -176,35 +180,56 @@ class MoonlightInstance {
   class SourceListener
     : public samsung::wasm::ElementaryMediaStreamSourceListener {
   public:
-    SourceListener(MoonlightInstance* instance);
+    SourceListener(
+      MoonlightInstance* instance,
+      MediaOperationEpoch::Context mediaContext);
     void OnSourceOpen() override;
     void OnSourceOpenPending() override;
     void OnSourceClosed() override;
   private:
     MoonlightInstance* m_Instance;
+    const MediaOperationEpoch::Context m_MediaContext;
   };
   class AudioTrackListener
     : public samsung::wasm::ElementaryMediaTrackListener {
   public:
-    AudioTrackListener(MoonlightInstance* instance);
+    AudioTrackListener(
+      MoonlightInstance* instance,
+      MediaOperationEpoch::Context mediaContext);
     void OnTrackOpen() override;
     void OnTrackClosed(EmssTrackCloseReason) override;
     void OnSessionIdChanged(samsung::wasm::SessionId new_session_id) override;
   private:
     MoonlightInstance* m_Instance;
+    const MediaOperationEpoch::Context m_MediaContext;
   };
   class VideoTrackListener
     : public samsung::wasm::ElementaryMediaTrackListener {
   public:
-    VideoTrackListener(MoonlightInstance* instance);
+    VideoTrackListener(
+      MoonlightInstance* instance,
+      MediaOperationEpoch::Context mediaContext);
     void OnTrackOpen() override;
     void OnTrackClosed(EmssTrackCloseReason) override;
     void OnSessionIdChanged(samsung::wasm::SessionId new_session_id) override;
   private:
     MoonlightInstance* m_Instance;
+    const MediaOperationEpoch::Context m_MediaContext;
+  };
+  struct MediaCallbackListeners {
+    MediaCallbackListeners(
+      MoonlightInstance* instance,
+      MediaOperationEpoch::Context mediaContext)
+      : source(instance, mediaContext),
+        audio(instance, mediaContext),
+        video(instance, mediaContext) {}
+
+    SourceListener source;
+    AudioTrackListener audio;
+    VideoTrackListener video;
   };
 
-  void WaitFor(std::condition_variable* variable, std::function<bool()> condition);
+  bool WaitForMediaStage(const char* stage, OperationLatch& latch);
 
   void OpenUrl_private(
     int callbackId, std::string url, std::string ppk, bool binaryResponse,
@@ -273,23 +298,26 @@ class MoonlightInstance {
   HttpRequestRegistry m_HttpRequests;
 
   std::mutex m_Mutex;
-  std::condition_variable m_EmssStateChanged;
-  std::condition_variable m_EmssAudioStateChanged;
-  std::condition_variable m_EmssVideoStateChanged;
   EmssReadyState m_EmssReadyState;
   std::atomic<bool> m_AudioStarted;
   std::atomic<bool> m_VideoStarted;
   std::atomic<samsung::wasm::SessionId> m_AudioSessionId;
   std::atomic<samsung::wasm::SessionId> m_VideoSessionId;
+  MediaOperationEpoch m_MediaOperationEpoch;
+  std::vector<std::unique_ptr<MediaCallbackListeners>>
+    m_MediaCallbackListenerOwners;
+  MediaOperationEpoch::Context m_StreamMediaContext;
+  MediaCallbackListeners* m_CurrentMediaListeners;
   samsung::html::HTMLMediaElement m_MediaElement;
   std::unique_ptr<samsung::wasm::ElementaryMediaStreamSource> m_Source;
-  SourceListener m_SourceListener;
-  AudioTrackListener m_AudioTrackListener;
-  VideoTrackListener m_VideoTrackListener;
   samsung::wasm::ElementaryMediaTrack m_AudioTrack;
   samsung::wasm::ElementaryMediaTrack m_VideoTrack;
-  std::atomic<bool> m_SourceClosed;
-  std::condition_variable m_SourceClosedCV;
+  OperationLatch m_InitialSourceCloseLatch;
+  OperationLatch m_SourceOpenLatch;
+  OperationLatch m_AudioTrackOpenLatch;
+  OperationLatch m_VideoTrackOpenLatch;
+  OperationLatch m_PlayLatch;
+  OperationLatch m_SourceCloseLatch;
 };
 
 extern MoonlightInstance* g_Instance;
