@@ -8,6 +8,7 @@ const {
 
 const indexSource = fs.readFileSync('wasm/platform/index.js', 'utf8');
 const mainSource = fs.readFileSync('wasm/main.cpp', 'utf8');
+const httpSource = fs.readFileSync('wasm/http.cpp', 'utf8');
 const indexLogCalls =
   indexSource.match(/console\.(?:log|warn|error)\([\s\S]*?\);/g) || [];
 const nativeLogCalls =
@@ -22,6 +23,13 @@ if (nativeLogCalls.some((call) => /\brikey(?:id)?\b/.test(call))) {
 }
 
 assert.deepStrictEqual(secretLogViolations, []);
+assert.ok(
+  (mainSource.match(/if\s*\(!m_Dispatcher\.post_job\(/g) || []).length >= 2,
+  'STUN and pairing requests must reject when dispatcher submissions close',
+);
+assert.match(mainSource, /Request dispatcher is unavailable\./);
+assert.match(httpSource, /if\s*\(!m_Dispatcher\.post_job\(/);
+assert.match(httpSource, /m_HttpRequests\.Remove\(callbackId\);/);
 
 const cancelledIds = [];
 const bridge = createMessageBridge(

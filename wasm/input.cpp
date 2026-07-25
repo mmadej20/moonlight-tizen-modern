@@ -34,7 +34,7 @@ static char GetModifierFlags(const EmscriptenKeyboardEvent &event) {
 }
 
 EM_BOOL MoonlightInstance::HandleMouseDown(const EmscriptenMouseEvent &event) {
-  if (!m_MouseLocked) {
+  if (!m_MouseLocked.load()) {
     LockMouse();
     m_MouseLastPosX = event.screenX;
     m_MouseLastPosY = event.screenY;
@@ -46,12 +46,12 @@ EM_BOOL MoonlightInstance::HandleMouseDown(const EmscriptenMouseEvent &event) {
 }
 
 EM_BOOL MoonlightInstance::HandleMouseMove(const EmscriptenMouseEvent &event) {
-  if (!m_MouseLocked) {
+  if (!m_MouseLocked.load()) {
     return EM_FALSE;
   }
 
-  m_MouseDeltaX += event.movementX;
-  m_MouseDeltaY += event.movementY;
+  m_MouseDeltaX.fetch_add(event.movementX);
+  m_MouseDeltaY.fetch_add(event.movementY);
 
   m_MouseLastPosX = event.screenX;
   m_MouseLastPosY = event.screenY;
@@ -60,7 +60,7 @@ EM_BOOL MoonlightInstance::HandleMouseMove(const EmscriptenMouseEvent &event) {
 }
 
 EM_BOOL MoonlightInstance::HandleMouseUp(const EmscriptenMouseEvent &event) {
-  if (!m_MouseLocked) {
+  if (!m_MouseLocked.load()) {
     return EM_FALSE;
   }
 
@@ -69,17 +69,21 @@ EM_BOOL MoonlightInstance::HandleMouseUp(const EmscriptenMouseEvent &event) {
 }
 
 EM_BOOL MoonlightInstance::HandleWheel(const EmscriptenWheelEvent &event) {
-  if (!m_MouseLocked) {
+  if (!m_MouseLocked.load()) {
     return EM_FALSE;
   }
 
   // Inverted delta y-axis to restore correct wheel direction
-  m_AccumulatedTicks -= event.deltaY;
+  float accumulatedTicks = m_AccumulatedTicks.load();
+  while (!m_AccumulatedTicks.compare_exchange_weak(
+      accumulatedTicks,
+      accumulatedTicks - static_cast<float>(event.deltaY))) {
+  }
   return EM_TRUE;
 }
 
 EM_BOOL MoonlightInstance::HandleKeyDown(const EmscriptenKeyboardEvent &event) {
-  if (!m_MouseLocked) {
+  if (!m_MouseLocked.load()) {
     return EM_FALSE;
   }
 
@@ -107,7 +111,7 @@ EM_BOOL MoonlightInstance::HandleKeyDown(const EmscriptenKeyboardEvent &event) {
 }
 
 EM_BOOL MoonlightInstance::HandleKeyUp(const EmscriptenKeyboardEvent &event) {
-  if (!m_MouseLocked) {
+  if (!m_MouseLocked.load()) {
     return EM_FALSE;
   }
 
@@ -168,16 +172,17 @@ EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userDa
 }
 
 void MoonlightInstance::ReportMouseMovement() {
-  if (m_MouseDeltaX != 0 || m_MouseDeltaY != 0) {
-    LiSendMouseMoveEvent(m_MouseDeltaX, m_MouseDeltaY);
-    m_MouseDeltaX = m_MouseDeltaY = 0;
+  const int32_t mouseDeltaX = m_MouseDeltaX.exchange(0);
+  const int32_t mouseDeltaY = m_MouseDeltaY.exchange(0);
+  if (mouseDeltaX != 0 || mouseDeltaY != 0) {
+    LiSendMouseMoveEvent(mouseDeltaX, mouseDeltaY);
   }
 
-  if (m_AccumulatedTicks != 0) {
+  const float accumulatedTicks = m_AccumulatedTicks.exchange(0);
+  if (accumulatedTicks != 0) {
     // We can have fractional ticks here, so multiply by WHEEL_DELTA
     // to get actual scroll distance and use the high-res variant.
-    LiSendHighResScrollEvent(m_AccumulatedTicks * 5);
-    m_AccumulatedTicks = 0;
+    LiSendHighResScrollEvent(accumulatedTicks * 5);
   }
 }
 
@@ -194,8 +199,9 @@ void MoonlightInstance::DidLockMouse(int32_t result) {
     ClLogMessage("Error locking mouse, event type: %d\n", result);
   }
 
-  m_MouseLocked = (result == 0);
-  if (m_MouseLocked) {
+  const bool mouseLocked = result == 0;
+  m_MouseLocked.store(mouseLocked);
+  if (mouseLocked) {
     // Request an IDR frame to dump the frame queue that may have
     // built up from the GL pipeline being stalled.
     LiRequestIdrFrame();
@@ -203,7 +209,7 @@ void MoonlightInstance::DidLockMouse(int32_t result) {
 }
 
 void MoonlightInstance::MouseLockLost() {
-  m_MouseLocked = false;
+  m_MouseLocked.store(false);
 }
 
 void sendKeyboardEvent(uint32_t keyCode, uint16_t action, char modifiers) {

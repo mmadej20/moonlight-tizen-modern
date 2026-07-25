@@ -57,6 +57,7 @@ static std::string s_StatString = "";
 static VIDEO_STATS m_ActiveWndVideoStats;
 static VIDEO_STATS m_LastWndVideoStats;
 static VIDEO_STATS m_GlobalVideoStats;
+static std::mutex s_VideoStatsMutex;
 
 MoonlightInstance::SourceListener::SourceListener(
   MoonlightInstance* instance
@@ -306,17 +307,21 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   // Set the frame pacing flag based on instance configuration
   s_FramePacingEnabled = g_Instance->m_FramePacingEnabled;
 
-  // Preallocate space for the performance stats string
-  s_StatString.resize(1000);
+  {
+    std::lock_guard<std::mutex> statsLock(s_VideoStatsMutex);
 
-  // Clear active window video statistics to start fresh
-  memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
+    // Preallocate and clear the performance stats string.
+    s_StatString.assign(1000, '\0');
 
-  // Clear last window video statistics from previous session
-  memset(&m_LastWndVideoStats, 0, sizeof(m_LastWndVideoStats));
+    // Clear active window video statistics to start fresh
+    memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
 
-  // Reset global video statistics for new decoding session
-  memset(&m_GlobalVideoStats, 0, sizeof(m_GlobalVideoStats));
+    // Clear last window video statistics from previous session
+    memset(&m_LastWndVideoStats, 0, sizeof(m_LastWndVideoStats));
+
+    // Reset global video statistics for new decoding session
+    memset(&m_GlobalVideoStats, 0, sizeof(m_GlobalVideoStats));
+  }
 
   // Ensure that StartupVidDecSetup is called every time when VidDecSetup is invoked to reinitialize the media pipeline
   int initVidDec = StartupVidDecSetup(videoFormat, width, height, redrawRate, context, drFlags);
@@ -339,7 +344,7 @@ void MoonlightInstance::VidDecCleanup(void) {
 }
 
 int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
-  if (!g_Instance->m_VideoStarted) {
+  if (!g_Instance->m_VideoStarted.load()) {
     return DR_OK;
   }
 
@@ -393,6 +398,10 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     }
   }
   const auto pacingEnd = std::chrono::steady_clock::now();
+
+  std::unique_lock<std::mutex> statsLock(s_VideoStatsMutex);
+  bool postStats = false;
+  std::string statMessage;
 
   if (m_ActiveWndVideoStats.measurementStartTimestamp == 0) {
     m_ActiveWndVideoStats.measurementStartTimestamp = callbackTimeMs;
@@ -475,13 +484,14 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   const uint64_t windowDurationMs = nowMs - m_ActiveWndVideoStats.measurementStartTimestamp;
   if (windowDurationMs > 1000) {
     const float bitrateMbps = static_cast<float>(total_bytes * 8.0 / (windowDurationMs * 1000.0));
-    if (g_Instance->m_PerformanceStatsEnabled) {
+    if (g_Instance->m_PerformanceStatsEnabled.load()) {
       VIDEO_STATS lastTwoWndStats = {};
       lastTwoWndStats.receivedBitrate = bitrateMbps;
       AddVideoStats(m_LastWndVideoStats, lastTwoWndStats);
       AddVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
       FormatVideoStats(lastTwoWndStats, s_StatString.data(), s_StatString.length());
-      PostToJs(std::string("StatMsg: ") + s_StatString.data());
+      statMessage = std::string("StatMsg: ") + s_StatString.data();
+      postStats = true;
       std::fill(s_StatString.begin(), s_StatString.end(), 0);
     }
     AddVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);
@@ -489,6 +499,11 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
     m_ActiveWndVideoStats.measurementStartTimestamp = nowMs;
     total_bytes = 0;
+  }
+
+  statsLock.unlock();
+  if (postStats) {
+    PostToJs(statMessage);
   }
 
   return DR_OK;
@@ -682,11 +697,17 @@ void MoonlightInstance::FormatVideoStats(VIDEO_STATS& stats, char* output, int l
 
 void MoonlightInstance::TogglePerformanceStats() {
   // Toggle the performance stats overlay flag
-  m_PerformanceStatsEnabled = !m_PerformanceStatsEnabled;
+  const bool performanceStatsEnabled = !m_PerformanceStatsEnabled.load();
+  m_PerformanceStatsEnabled.store(performanceStatsEnabled);
 
   // Notify the JS code that performance stats overlay is enabled or disabled
-  if (m_PerformanceStatsEnabled) {
-    PostToJs(std::string("StatMsg: ") + s_StatString.data());
+  if (performanceStatsEnabled) {
+    std::string statMessage;
+    {
+      std::lock_guard<std::mutex> statsLock(s_VideoStatsMutex);
+      statMessage = std::string("StatMsg: ") + s_StatString.data();
+    }
+    PostToJs(statMessage);
   } else {
     PostToJs(std::string("NoStatMsg: "));
   }

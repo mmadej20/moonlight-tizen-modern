@@ -189,11 +189,15 @@ void MoonlightInstance::OpenUrl(int callbackId, std::string url,
     return;
   }
 
-  m_Dispatcher.post_job(
-    [this, callbackId, url, ppk, binaryResponse, requestContext]() {
-      OpenUrl_private(callbackId, url, ppk, binaryResponse, requestContext);
-    },
-    false);
+  if (!m_Dispatcher.post_job(
+        [this, callbackId, url, ppk, binaryResponse, requestContext]() {
+          OpenUrl_private(callbackId, url, ppk, binaryResponse, requestContext);
+        },
+        false)) {
+    m_HttpRequests.Remove(callbackId);
+    PostPromiseMessage(
+      callbackId, "reject", "Request dispatcher is unavailable.");
+  }
 }
 
 MessageResult makeCert() {

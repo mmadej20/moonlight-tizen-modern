@@ -1,11 +1,11 @@
 #include "moonlight_wasm.hpp"
 #include "diagnostic_log.hpp"
 
-#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
+#include <errors.h>
 #include <pairing.h>
 #include <iostream>
 
@@ -13,6 +13,7 @@ extern char* g_UniqueId;
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
+#include <emscripten/threading.h>
 
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -62,8 +63,6 @@ MoonlightInstance::MoonlightInstance()
     m_VideoTrackListener(this),
     m_AudioTrack(),
     m_VideoTrack(),
-    m_ConnectionCancelled(false),
-    m_StopThread(0),
     m_SourceClosed(false) {
       m_Dispatcher.start();
     }
@@ -77,37 +76,65 @@ void MoonlightInstance::OnConnectionStarted(uint32_t unused) {
   PostToJs(std::string("Connection Established"));
 }
 
-void MoonlightInstance::OnConnectionStopped(uint32_t error) {
-  // Not running anymore
-  m_Running = false;
+void MoonlightInstance::OnConnectionStopped(int errorCode) {
+  if (m_TerminationReported.exchange(true)) {
+    return;
+  }
+
+  m_Running.store(false);
 
   // Unlock the mouse
   UnlockMouse();
 
   // Notify the JS code that the stream has ended
-  PostToJs(std::string(MSG_STREAM_TERMINATED + std::to_string((int)error)));
+  PostToJs(std::string(MSG_STREAM_TERMINATED + std::to_string(errorCode)));
 }
 
-void MoonlightInstance::StopConnection() {
-  m_ConnectionCancelled = true;
-  g_Instance->m_EmssStateChanged.notify_all();
-  g_Instance->m_EmssAudioStateChanged.notify_all();
-  g_Instance->m_EmssVideoStateChanged.notify_all();
+void MoonlightInstance::StopConnection(int errorCode) {
+  if (!m_ConnectionLifecycle.BeginStop()) {
+    return;
+  }
+
+  m_StopErrorCode.store(errorCode);
+  m_ConnectionCancelled.store(true);
+  m_EmssStateChanged.notify_all();
+  m_EmssAudioStateChanged.notify_all();
+  m_EmssVideoStateChanged.notify_all();
+
+  // Interrupt pending startup before the stop owner waits for the connection
+  // thread. LiStopConnection() remains owned solely by StopThreadFunc().
+  LiInterruptConnection();
 
   // Stopping needs to happen in a separate thread to avoid a potential deadlock
   // caused by us getting a callback to the main thread while inside
   // LiStopConnection.
-  pthread_create(&m_StopThread, NULL, MoonlightInstance::StopThreadFunc, NULL);
+  const int result =
+    m_StopThread.Create(MoonlightInstance::StopThreadFunc, this);
+  if (result != 0) {
+    int expected = 0;
+    m_StopErrorCode.compare_exchange_strong(expected, result);
+    ClLogMessage("Failed to create the connection stop thread: %d\n", result);
+    PostToJs(
+      "DialogMsg: Unable to start connection teardown (error " +
+      std::to_string(result) + ")");
+    return;
+  }
 
-  // We'll need to call the listener ourselves since our connection terminated
-  // callback won't be invoked for a manually requested termination.
-  OnConnectionStopped(0);
 }
 
 void* MoonlightInstance::StopThreadFunc(void* context) {
+  MoonlightInstance* me = static_cast<MoonlightInstance*>(context);
+
   // We must join the connection thread first, because LiStopConnection must
   // not be invoked during LiStartConnection.
-  pthread_join(g_Instance->m_ConnectionThread, NULL);
+  int result = me->m_ConnectionThread.Join();
+  if (result != 0) {
+    ClLogMessage("Failed to join the connection thread: %d\n", result);
+    PostToJs(
+      "DialogMsg: Connection teardown could not join the connection thread "
+      "(error " + std::to_string(result) + ")");
+    return nullptr;
+  }
 
   // Force raise all modifier keys to avoid leaving them down after disconnecting
   LiSendKeyboardEvent(0xA0, KEY_ACTION_UP, 0);
@@ -118,48 +145,64 @@ void* MoonlightInstance::StopThreadFunc(void* context) {
   LiSendKeyboardEvent(0xA5, KEY_ACTION_UP, 0);
 
   // Not running anymore
-  g_Instance->m_Running = false;
+  me->m_Running.store(false);
 
   // We also need to stop this thread after the connection thread, because it
   // depends on being initialized there.
-  pthread_join(g_Instance->m_InputThread, NULL);
+  result = me->m_InputThread.Join();
+  if (result != 0) {
+    ClLogMessage("Failed to join the input thread: %d\n", result);
+    PostToJs(
+      "DialogMsg: Connection teardown could not join the input thread "
+      "(error " + std::to_string(result) + ")");
+    return nullptr;
+  }
 
   // Stop the connection
   LiStopConnection();
 
+  // Task 4 integration seam: replace this existing unbounded close/wait block
+  // with the bounded CloseMediaSource() routine.
   // Close the media source and release tracks to ensure WebKit garbage collection
-  if (g_Instance && g_Instance->m_Source) {
-    g_Instance->m_Source->Close([](samsung::wasm::OperationResult err) {
-      g_Instance->m_AudioTrack = samsung::wasm::ElementaryMediaTrack();
-      g_Instance->m_VideoTrack = samsung::wasm::ElementaryMediaTrack();
+  if (me->m_Source) {
+    me->m_Source->Close([me](samsung::wasm::OperationResult) {
+      me->m_AudioTrack = samsung::wasm::ElementaryMediaTrack();
+      me->m_VideoTrack = samsung::wasm::ElementaryMediaTrack();
       
-      std::unique_lock<std::mutex> lock(g_Instance->m_Mutex);
-      g_Instance->m_SourceClosed = true;
-      g_Instance->m_SourceClosedCV.notify_all();
+      std::unique_lock<std::mutex> lock(me->m_Mutex);
+      me->m_SourceClosed.store(true);
+      me->m_SourceClosedCV.notify_all();
     });
     
     // Synchronously wait for the source to close before exiting,
     // which prevents the next StartStream from stomping on our teardown.
-    std::unique_lock<std::mutex> lock(g_Instance->m_Mutex);
-    g_Instance->m_SourceClosedCV.wait(lock, [] {
-      return g_Instance->m_SourceClosed.load();
+    std::unique_lock<std::mutex> lock(me->m_Mutex);
+    me->m_SourceClosedCV.wait(lock, [me] {
+      return me->m_SourceClosed.load();
     });
     
     // Reset EMSS state variables for the next stream
-    g_Instance->m_EmssReadyState = EmssReadyState::kDetached;
-    g_Instance->m_AudioStarted = false;
-    g_Instance->m_VideoStarted = false;
-    g_Instance->m_AudioSessionId = 0;
-    g_Instance->m_VideoSessionId = 0;
+    me->m_EmssReadyState = EmssReadyState::kDetached;
+    me->m_AudioStarted.store(false);
+    me->m_VideoStarted.store(false);
+    me->m_AudioSessionId.store(0);
+    me->m_VideoSessionId.store(0);
   }
 
-  return NULL;
+  const int stopErrorCode = me->m_StopErrorCode.load();
+  emscripten_sync_run_in_main_runtime_thread(
+    EM_FUNC_SIG_VI, onConnectionStopped, stopErrorCode);
+  if (!me->m_ConnectionLifecycle.MarkIdle()) {
+    ClLogMessage("Connection lifecycle failed to transition to idle\n");
+  }
+
+  return nullptr;
 }
 
 void* MoonlightInstance::InputThreadFunc(void* context) {
-  MoonlightInstance* me = (MoonlightInstance*)context;
+  MoonlightInstance* me = static_cast<MoonlightInstance*>(context);
 
-  while (me->m_Running) {
+  while (me->m_Running.load()) {
     me->PollGamepads();
     me->ReportMouseMovement();
 
@@ -167,11 +210,12 @@ void* MoonlightInstance::InputThreadFunc(void* context) {
     usleep(5 * 1000);
   }
 
-  return NULL;
+  return nullptr;
 }
 
 void* MoonlightInstance::ConnectionThreadFunc(void* context) {
-  MoonlightInstance* me = (MoonlightInstance*)context;
+  MoonlightInstance* me = static_cast<MoonlightInstance*>(context);
+
   int err;
   SERVER_INFORMATION serverInfo;
 
@@ -223,22 +267,30 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
   err = LiStartConnection(&serverInfo, &me->m_StreamConfig, &MoonlightInstance::s_ClCallbacks,
     &MoonlightInstance::s_DrCallbacks, &MoonlightInstance::s_ArCallbacks, NULL, 0, NULL, 0);
   if (err != 0) {
-    // Notify the JS code that the stream has ended!
-    // NB: We pass error code 0 here to avoid triggering a "Connection terminated" warning message.
-    if (me->m_ConnectionCancelled) {
-      PostToJs(MSG_STREAM_TERMINATED + std::to_string(0));
-    } else {
-      PostToJs(MSG_STREAM_TERMINATED + std::to_string(err));
-    }
-    return NULL;
+    me->StopConnection(me->m_ConnectionCancelled.load() ? 0 : err);
+    return nullptr;
+  }
+
+  if (!me->m_ConnectionLifecycle.MarkRunning()) {
+    return nullptr;
   }
 
   // Set running state before starting connection-specific threads
-  me->m_Running = true;
+  me->m_Running.store(true);
+  if (me->m_ConnectionCancelled.load()) {
+    me->m_Running.store(false);
+    return nullptr;
+  }
 
-  pthread_create(&me->m_InputThread, NULL, MoonlightInstance::InputThreadFunc, me);
-
-  return NULL;
+  const int inputThreadResult =
+    me->m_InputThread.Create(MoonlightInstance::InputThreadFunc, me);
+  if (inputThreadResult != 0) {
+    me->m_Running.store(false);
+    ClLogMessage("Failed to create the input thread: %d\n", inputThreadResult);
+    me->StopConnection(inputThreadResult);
+    return nullptr;
+  }
+  return nullptr;
 }
 
 static void HexStringToBytes(const char* str, char* output) {
@@ -252,13 +304,28 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats) {
-  
-  if (m_StopThread != 0) {
-    pthread_join(m_StopThread, NULL);
-    m_StopThread = 0;
+
+  if (!m_ConnectionLifecycle.TryStart()) {
+    return MessageResult::Reject(emscripten::val(GS_WRONG_STATE));
   }
-  m_ConnectionCancelled = false;
-  m_SourceClosed = false;
+
+  auto startGuard = m_ConnectionLifecycle.AcquireStartGuard();
+  if (!startGuard) {
+    return MessageResult::Reject(emscripten::val(GS_WRONG_STATE));
+  }
+
+  const int stopThreadJoinResult = m_StopThread.Join();
+  if (stopThreadJoinResult != 0) {
+    ClLogMessage("Failed to join the stop thread: %d\n", stopThreadJoinResult);
+    startGuard.Release();
+    m_ConnectionLifecycle.BeginStop();
+    return MessageResult::Reject(emscripten::val(stopThreadJoinResult));
+  }
+
+  m_ConnectionCancelled.store(false);
+  m_TerminationReported.store(false);
+  m_StopErrorCode.store(0);
+  m_SourceClosed.store(false);
 
   PostToJs("Setting the Host address to: " + host + ":" + std::to_string(httpPort));
   PostToJs("Setting the Video resolution to: " + width + "x" + height);
@@ -395,15 +462,30 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_FullRangeEnabled = fullRange;
   m_GameModeEnabled = gameMode;
   m_DisableWarningsEnabled = disableWarnings;
-  m_PerformanceStatsEnabled = performanceStats;
+  m_PerformanceStatsEnabled.store(performanceStats);
 
   // Initialize the rendering surface before starting the connection
+  bool teardownRequested = false;
+  int teardownErrorCode = 0;
   if (InitializeRenderingSurface(m_StreamConfig.width, m_StreamConfig.height)) {
     // Start the worker thread to establish the connection
-    pthread_create(&m_ConnectionThread, NULL, MoonlightInstance::ConnectionThreadFunc, this);
+    const int connectionThreadResult =
+      m_ConnectionThread.Create(MoonlightInstance::ConnectionThreadFunc, this);
+    if (connectionThreadResult != 0) {
+      ClLogMessage(
+        "Failed to create the connection thread: %d\n",
+        connectionThreadResult);
+      teardownRequested = true;
+      teardownErrorCode = connectionThreadResult;
+    }
   } else {
     // Failed to initialize renderer
-    OnConnectionStopped(0);
+    teardownRequested = true;
+  }
+
+  startGuard.Release();
+  if (teardownRequested) {
+    StopConnection(teardownErrorCode);
   }
 
   return MessageResult::Resolve();
@@ -411,7 +493,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
 
 MessageResult MoonlightInstance::StopStream() {
   // Begin connection teardown
-  StopConnection();
+  StopConnection(0);
 
   return MessageResult::Resolve();
 }
@@ -436,7 +518,11 @@ void MoonlightInstance::STUN_private(int callbackId) {
 }
 
 void MoonlightInstance::STUN(int callbackId) {
-  m_Dispatcher.post_job(std::bind(&MoonlightInstance::STUN_private, this, callbackId), false);
+  if (!m_Dispatcher.post_job(
+        std::bind(&MoonlightInstance::STUN_private, this, callbackId), false)) {
+    PostPromiseMessage(
+      callbackId, "reject", "Request dispatcher is unavailable.");
+  }
 }
 
 void MoonlightInstance::Pair_private(
@@ -467,13 +553,17 @@ void MoonlightInstance::Pair(int callbackId, std::string serverMajorVersion, std
     return;
   }
 
-  m_Dispatcher.post_job(
-    [this, callbackId, serverMajorVersion, address, httpPort, randomNumber,
-     requestContext]() {
-      Pair_private(callbackId, serverMajorVersion, address, httpPort,
-                   randomNumber, requestContext);
-    },
-    false);
+  if (!m_Dispatcher.post_job(
+        [this, callbackId, serverMajorVersion, address, httpPort, randomNumber,
+         requestContext]() {
+          Pair_private(callbackId, serverMajorVersion, address, httpPort,
+                       randomNumber, requestContext);
+        },
+        false)) {
+    m_HttpRequests.Remove(callbackId);
+    PostPromiseMessage(
+      callbackId, "reject", "Request dispatcher is unavailable.");
+  }
 }
 
 void MoonlightInstance::WakeOnLan(int callbackId, std::string macAddress) {

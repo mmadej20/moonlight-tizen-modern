@@ -12,7 +12,9 @@
 #include <Limelight.h>
 #include <opus_multistream.h>
 
+#include "connection_lifecycle.hpp"
 #include "lib.hpp"
+#include "owned_pthread.hpp"
 #include "request_registry.hpp"
 
 #include "samsung/wasm/elementary_media_stream_source.h"
@@ -118,9 +120,9 @@ class MoonlightInstance {
   void MouseLockLost();
   void DidLockMouse(int32_t result);
 
-  void OnConnectionStopped(uint32_t unused);
+  void OnConnectionStopped(int errorCode);
   void OnConnectionStarted(uint32_t error);
-  void StopConnection();
+  void StopConnection(int errorCode);
 
   static uint32_t ProfilerGetPackedMillis();
   static uint64_t ProfilerGetMillis();
@@ -240,25 +242,31 @@ class MoonlightInstance {
   bool m_FullRangeEnabled;
   bool m_GameModeEnabled;
   bool m_DisableWarningsEnabled;
-  bool m_PerformanceStatsEnabled;
+  std::atomic<bool> m_PerformanceStatsEnabled{false};
 
   STREAM_CONFIGURATION m_StreamConfig;
-  bool m_Running;
+  ConnectionLifecycle m_ConnectionLifecycle;
+  std::atomic<bool> m_ConnectionCancelled{false};
+  std::atomic<bool> m_TerminationReported{false};
+  std::atomic<int> m_StopErrorCode{0};
+  std::atomic<bool> m_Running{false};
 
-  pthread_t m_ConnectionThread;
-  pthread_t m_InputThread;
+  OwnedPthread m_ConnectionThread;
+  OwnedPthread m_InputThread;
+  OwnedPthread m_StopThread;
 
   OpusMSDecoder* m_OpusDecoder;
 
 #ifndef SAMSUNG_TIZEN_TV
   double m_LastPadTimestamps[4];
 #endif
-  bool m_MouseLocked;
+  std::atomic<bool> m_MouseLocked;
   long m_MouseLastPosX;
   long m_MouseLastPosY;
   bool m_WaitingForAllModifiersUp;
-  float m_AccumulatedTicks;
-  int32_t m_MouseDeltaX, m_MouseDeltaY;
+  std::atomic<float> m_AccumulatedTicks;
+  std::atomic<int32_t> m_MouseDeltaX;
+  std::atomic<int32_t> m_MouseDeltaY;
   uint32_t m_HttpThreadPoolSequence;
 
   Dispatcher m_Dispatcher;
@@ -271,8 +279,6 @@ class MoonlightInstance {
   EmssReadyState m_EmssReadyState;
   std::atomic<bool> m_AudioStarted;
   std::atomic<bool> m_VideoStarted;
-  std::atomic<bool> m_ConnectionCancelled;
-  pthread_t m_StopThread;
   std::atomic<samsung::wasm::SessionId> m_AudioSessionId;
   std::atomic<samsung::wasm::SessionId> m_VideoSessionId;
   samsung::html::HTMLMediaElement m_MediaElement;

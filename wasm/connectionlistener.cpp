@@ -24,10 +24,9 @@ void MoonlightInstance::ClConnectionStarted(void) {
 }
 
 void MoonlightInstance::ClConnectionTerminated(int errorCode) {
-  // Teardown the connection
-  LiStopConnection();
-
-  emscripten_sync_run_in_main_runtime_thread(EM_FUNC_SIG_VI, onConnectionStopped, errorCode);
+  if (g_Instance) {
+    g_Instance->StopConnection(errorCode);
+  }
 }
 
 void MoonlightInstance::ClDisplayMessage(const char* message) {
