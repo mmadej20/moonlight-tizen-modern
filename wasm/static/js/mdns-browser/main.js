@@ -77,6 +77,8 @@ function findNvService(ipString) {
  * registers the host in the UI. See the findNvService() comment above for why
  * mDNS is not used on Tizen.
  */
+var subnetScanner = null;
+
 function startSubnetScanner() {
   try {
     var localIp = (typeof webapis !== 'undefined' && webapis.network) ? webapis.network.getIp() : null;
@@ -86,37 +88,22 @@ function startSubnetScanner() {
     } else {
       var parts = localIp.split('.');
       // Check if the IP address is in the expected IPv4 format
-      if (parts.length !== 4) {
+      if (parts.length !== 4 || parts.some(function(part) {
+        return !/^\d+$/.test(part) || Number(part) > 255;
+      })) {
         console.warn('%c[main.js, startSubnetScanner]', 'color: orange;', 'Unexpected IP format:', localIp);
       } else {
         var subnet = parts[0] + '.' + parts[1] + '.' + parts[2];
         console.log('%c[main.js, startSubnetScanner]', 'color: green;', 'Starting subnet /24 scan on', subnet + '.0/24');
-        // Scan the /24 subnet (1-254) for hosts responding on port 47989
-        for (var i = 1; i <= 254; i++) {
-          (function(ip) {
-            var abortCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-            var timeoutId = setTimeout(function() {
-              // Abort the fetch request if it takes longer to avoid hanging on unresponsive hosts 
-              if (abortCtrl) {
-                abortCtrl.abort();
-              }
-            }, 3000);
-            // Use fetch() to probe the host for the /serverinfo endpoint on port 47989
-            fetch('http://' + ip + ':47989/serverinfo',
-              abortCtrl ? { signal: abortCtrl.signal } : {}
-            ).then(function(res) {
-              clearTimeout(timeoutId);
-              // If the host responds with HTTP 200, it is likely a Sunshine/GFE host, so we proceed to findNvService()
-              if (res.ok) {
-                console.log('%c[main.js, startSubnetScanner]', 'color: green;', 'Found host with IP address:', ip);
-                // Call findNvService() to handle the discovered host
-                findNvService('ipv4:' + ip);
-              }
-            }).catch(function() {
-              clearTimeout(timeoutId);
-            });
-          })(subnet + '.' + i);
+        if (!subnetScanner) {
+          subnetScanner = createSubnetScanner({
+            onFound: function(ip) {
+              console.log('%c[main.js, startSubnetScanner]', 'color: green;', 'Found host with IP address:', ip);
+              findNvService('ipv4:' + ip);
+            },
+          });
         }
+        subnetScanner.start(subnet);
       }
     }
   } catch (e) {
