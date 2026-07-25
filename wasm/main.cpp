@@ -580,7 +580,7 @@ void MoonlightInstance::Pair_private(
 
 void MoonlightInstance::Pair(int callbackId, std::string serverMajorVersion, std::string address, int httpPort, std::string randomNumber) {
   ClLogMessage("%s with host address: %s:%d\n", __func__, address.c_str(), httpPort);
-  auto requestContext = m_HttpRequests.Create(callbackId, 3000, 5000);
+  auto requestContext = m_HttpRequests.Create(callbackId, 180000, 180000);
   if (!requestContext) {
     PostPromiseMessage(callbackId, "reject", "Duplicate HTTP callback ID.");
     return;

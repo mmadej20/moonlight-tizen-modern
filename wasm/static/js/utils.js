@@ -648,7 +648,7 @@ NvHTTP.prototype = {
       var pairingFlow = nativePairingRequest.then(function(ppkstr) {
         this.ppkstr = ppkstr;
         var challengeRequest = sendMessage('openUrl', [
-          this._baseUrlHttps + '/pair?uniqueid=' + this.getUid() + '&devicename=roth&updateState=1&phrase=pairchallenge', this.ppkstr, false, 5000
+          this._baseUrlHttps + '/pair?uniqueid=' + this.getUid() + '&devicename=roth&updateState=1&phrase=pairchallenge', this.ppkstr, false, 180000
         ]);
         this._pairingRequest = challengeRequest;
         return challengeRequest.then(function(ret) {

@@ -360,20 +360,18 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   const auto playResult = instance->m_MediaElement.Play(
     [instance, mediaContext](EmssOperationResult result) {
       instance->m_MediaOperationEpoch.RunIfActive(mediaContext, [instance, result] {
-        if (result == EmssOperationResult::kSuccess) {
-          instance->m_PlayLatch.Succeed();
-        } else {
-          instance->m_PlayLatch.Fail();
+        if (result != EmssOperationResult::kSuccess) {
+          ClLogMessage("Media element play callback reported failure\n");
         }
       });
     });
   if (!playResult) {
     ClLogMessage("Failed to start media element playback\n");
-    instance->m_PlayLatch.Fail();
     return -1;
   }
-  if (!instance->WaitForMediaStage("media element play", instance->m_PlayLatch) ||
-      !instance->WaitForMediaStage("audio track open", instance->m_AudioTrackOpenLatch) ||
+  // Some Tizen 9 TVs open both EMSS tracks but never complete Play's callback.
+  // Track-open events are the reliable readiness signal on those devices.
+  if (!instance->WaitForMediaStage("audio track open", instance->m_AudioTrackOpenLatch) ||
       !instance->WaitForMediaStage("video track open", instance->m_VideoTrackOpenLatch)) {
     return -1;
   }

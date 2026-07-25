@@ -46,6 +46,19 @@ assert.match(
   player,
   /m_MediaElement\.Play\(\s*\[instance,\s*mediaContext\][\s\S]*?RunIfActive\(mediaContext/,
 );
+
+const startupStart = player.indexOf('int MoonlightInstance::StartupVidDecSetup(');
+const startupEnd = player.indexOf('\nint MoonlightInstance::VidDecSetup(', startupStart);
+assert.notStrictEqual(startupStart, -1);
+assert.notStrictEqual(startupEnd, -1);
+const startupBody = player.slice(startupStart, startupEnd);
+assert.doesNotMatch(
+  startupBody,
+  /WaitForMediaStage\("media element play"/,
+  'Tizen may open both media tracks without completing the Play callback',
+);
+assert.match(startupBody, /if\s*\(!playResult\)/);
+
 assert.match(
   main,
   /m_Source->Close\(\s*\[this,\s*closeContext\][\s\S]*?RunIfActive\(closeContext/,
