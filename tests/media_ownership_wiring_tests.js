@@ -12,6 +12,14 @@ const header = fs.readFileSync(path.join(root, 'wasm', 'moonlight_wasm.hpp'), 'u
 
 assert.match(audio, /opus_multistream_decoder_destroy\(g_Instance->m_OpusDecoder\)/);
 assert.match(audio, /m_OpusDecoder\s*=\s*nullptr/);
+assert.match(audio, /enum class DecodeAppendOutcome/);
+assert.match(audio, /static DecodeAppendOutcome DecodeAndAppendPacket/);
+assert.match(
+  audio,
+  /if\s*\(\s*decodeOutcome\s*==\s*DecodeAppendOutcome::Appended\s*\)\s*\{[\s\S]*?s_AudioSyncController\.CommitAppend/,
+);
+assert.doesNotMatch(audio, /Dropping audio packet to avoid overflow/);
+assert.match(audio, /Audio sync correction dropped/);
 assert.match(player, /10s/);
 assert.match(main, /3s/);
 assert.match(player, /add_track_result/);
