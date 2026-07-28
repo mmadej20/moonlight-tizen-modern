@@ -103,3 +103,82 @@ ramki IDR, złożony IDR bez submitu albo zatrzymanie Samsung `AppendPacket()`.
 W stanie normalnym zmniejszy to audio telemetry z około 120 do 12 linii na
 minutę. Heartbeat transportu wideo doda około 6 linii na minutę; markery IDR
 są zdarzeniowe. Normalny poziom wyniesie więc około 18 linii na minutę.
+
+## Drugi crash po ograniczeniu telemetrii
+
+Analizowany plik:
+`tools/moonlight-tv-logs/moonlight-previous-session-2026-07-28T20-02-16.500Z.log`
+
+SHA-256:
+`FE35B92505C7C97241000F2CCD40BEAC6D78FBFA09143E144BDFBE38D9949CD5`
+
+Nowa sesja używała tych samych parametrów HEVC: 3840x2160, 60 FPS, 43 Mbps,
+bez lokalnego frame pacingu. Log ma 338 linii, więc ograniczenie częstotliwości
+telemetrii zadziałało.
+
+Ten crash ma inną sygnaturę niż poprzednie zawieszenie:
+
+- nie ma uszkodzonej ramki, requestu IDR ani przepełnienia kolejki przy końcu;
+- nie ma błędu appendu wideo, błędu Opus, błędu appendu audio ani hard dropu;
+- ostatnie okno wideo zawiera 33519 pakietów i maksymalną przerwę 23 ms;
+- ostatnie okno audio zawiera 1999 pakietów audio i 1000 FEC, bez nowej straty;
+- oba heartbeat-y urywają się praktycznie razem przy 826,6 s działania procesu;
+- eksport nastąpił około 145 s po ostatnim wpisie, bez telemetrii w tym czasie;
+- plik kończy się pojedynczym bajtem ASCII `K`, bez prefiksu czasu i końca
+  linii. Nie jest to poprawny rekord natywnego loggera.
+
+Tuż przed urwaniem transport audio i wideo działał normalnie. Dane nie wskazują
+na zakleszczenie po IDR ani na zatrzymanie samego dekodera HEVC. Bardziej pasują
+do zatrzymania lub zabicia całego Web Application Runtime, zawieszenia głównego
+wątku wraz z workerami albo awarii procesu podczas zapisu logu. Sam końcowy bajt
+`K` jest śladem niepełnego/uszkodzonego zapisu, ale nie dowodzi korupcji pamięci.
+
+W trakcie sesji wystąpiły trzy okresy strat sieciowych audio. Łącznie transport
+zanotował 24 odzyskane pakiety, 2 nieudane bloki FEC, 92 pominięte pełne bloki i
+4 pakiety PLC. Pipeline wykonał 73 soft dropy, bez hard dropów. Pod koniec
+`mediaOffsetMs` wynosił około 830 ms. Suma 92 pominiętych bloków po 5 ms i 73
+soft dropów po 5 ms wynosi 825 ms, co bardzo dobrze wyjaśnia narosłe przesunięcie
+osi czasu audio. To jest osobny problem ciągłości audio, ale nie ma oznak, że
+wywołał nagłe zatrzymanie procesu.
+
+## Weryfikacja hipotezy o toolchainie Tizen 9
+
+Commit `7eff49d` (`build: target Tizen 9 with modern frontend`) nie zmienił
+`CMakeLists.txt`, wersji Tizen Studio, wersji Samsung Emscripten ani pliku
+toolchainu CMake. Przed i po commicie build używa:
+
+- Tizen Studio CLI 6.1;
+- Samsung Emscripten 1.39.4.7;
+- `latest-fastcomp`;
+- tego samego `CMAKE_TOOLCHAIN_FILE`.
+
+`res/config.xml` i pliki frontendowe są kopiowane do obrazu dopiero po
+`cmake --build build`. Zmiana `required_version` z 5.5 na 9.0 nie mogła więc
+zmienić wygenerowanego modułu WASM ani natywnej ścieżki dekodowania HEVC.
+`required_version` deklaruje minimalną wersję platformy potrzebną aplikacji; nie
+przełącza kompilatora ani trybu zgodności silnika przeglądarki na tym samym TV.
+
+W tym samym commicie zmieniono jednak jQuery z 2.2.0 na 4.0.0. To jest rzeczywista
+zmiana wykonywana w runtime, lecz obecny log nie zawiera wyjątku JavaScript ani
+innego dowodu łączącego ją z crashem. Problemy zgodności API jQuery zwykle
+ujawniłyby się deterministycznie przy wykonaniu konkretnej akcji, a nie jako
+równoczesne, ciche urwanie obu transportów po różnym czasie.
+
+Hipoteza regresji samego toolchainu jest więc odrzucona przez historię Git:
+toolchain się nie zmienił. Wpływ deklaracji `required_version` lub jQuery można
+rozstrzygnąć testem A/B, ale obecnie są to hipotezy drugorzędne.
+
+## Następny eksperyment rozstrzygający
+
+Najmniejsza macierz A/B na tym samym telewizorze i hoście:
+
+1. bieżący build: `required_version=9.0`, jQuery 4.0;
+2. ten sam commit źródeł z jedyną zmianą `required_version=5.5`;
+3. dopiero jeśli wynik nadal będzie niejednoznaczny: `required_version=9.0`
+   z jQuery 2.2.
+
+Ponieważ aplikacyjny logger znika razem z runtime, właściwy następny artefakt to
+log platformowy TV obejmujący proces WRT/Chromium i ewentualny crash dump,
+zebrany przez SDB. Należy korelować go z ostatnim `VideoTransportStats` i
+`AudioTransportStats`. Kolejne częste logi wewnątrz aplikacji nie wyjaśnią
+awarii procesu, który je zapisuje.
