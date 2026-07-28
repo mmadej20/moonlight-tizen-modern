@@ -9,6 +9,6 @@
     "jquery": "4.0.0"
   },
   "scripts": {
-    "test:js": "node tests/common_log_capture_wiring_tests.js && node tests/connection_wiring_tests.js && node tests/dependency_manifest_tests.js && node tests/diagnostic_log_manager_tests.js && node tests/diagnostic_logs_js_tests.js && node tests/gamepad_polling_tests.js && node tests/http_bridge_tests.js && node tests/media_ownership_wiring_tests.js && node tests/operation_guard_tests.js && node tests/pairing_ownership_wiring_tests.js && node tests/subnet_scanner_tests.js && node tests/ui_reliability_behavior_tests.js && node tests/ui_reliability_wiring_tests.js"
+    "test:js": "node tests/common_log_capture_wiring_tests.js && node tests/connection_wiring_tests.js && node tests/dependency_manifest_tests.js && node tests/diagnostic_log_manager_tests.js && node tests/diagnostic_logs_js_tests.js && node tests/gamepad_polling_tests.js && node tests/http_bridge_tests.js && node tests/media_ownership_wiring_tests.js && node tests/operation_guard_tests.js && node tests/pairing_ownership_wiring_tests.js && node tests/pairing_timeout_behavior_tests.js && node tests/subnet_scanner_tests.js && node tests/ui_reliability_behavior_tests.js && node tests/ui_reliability_wiring_tests.js"
   }
 }

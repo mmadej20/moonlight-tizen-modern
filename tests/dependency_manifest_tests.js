@@ -20,6 +20,7 @@ const expectedJavaScriptSuites = [
   'tests/media_ownership_wiring_tests.js',
   'tests/operation_guard_tests.js',
   'tests/pairing_ownership_wiring_tests.js',
+  'tests/pairing_timeout_behavior_tests.js',
   'tests/subnet_scanner_tests.js',
   'tests/ui_reliability_behavior_tests.js',
   'tests/ui_reliability_wiring_tests.js',
