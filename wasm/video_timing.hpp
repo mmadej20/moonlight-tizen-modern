@@ -14,7 +14,7 @@ struct VideoTimestampState {
 
 struct VideoTimestampUpdate {
   double seconds;
-  bool discontinuity;
+  bool resetPacing;
 };
 
 inline VideoTimestampUpdate UpdatePresentationTimestamp(
@@ -29,18 +29,29 @@ inline VideoTimestampUpdate UpdatePresentationTimestamp(
   }
 
   const int32_t deltaMs = static_cast<int32_t>(timestampMs - state.lastRawTimestampMs);
-  state.lastRawTimestampMs = timestampMs;
-  if (deltaMs < 0 || static_cast<uint32_t>(deltaMs) > discontinuityThresholdMs) {
+  if (deltaMs < 0) {
+    const auto backwardsDeltaMs =
+      static_cast<uint32_t>(-static_cast<int64_t>(deltaMs));
+    if (backwardsDeltaMs > discontinuityThresholdMs) {
+      state.lastRawTimestampMs = timestampMs;
+      return {
+        static_cast<double>(state.elapsedTimestampMs) / 1000.0,
+        true,
+      };
+    }
+
     return {
       static_cast<double>(state.elapsedTimestampMs) / 1000.0,
-      true,
+      false,
     };
   }
 
-  state.elapsedTimestampMs += static_cast<uint32_t>(deltaMs);
+  const auto forwardDeltaMs = static_cast<uint32_t>(deltaMs);
+  state.lastRawTimestampMs = timestampMs;
+  state.elapsedTimestampMs += forwardDeltaMs;
   return {
     static_cast<double>(state.elapsedTimestampMs) / 1000.0,
-    false,
+    forwardDeltaMs > discontinuityThresholdMs,
   };
 }
 

@@ -18,7 +18,7 @@ int main() {
   AssertNear(UpdatePresentationTimestamp(1016, state, 250).seconds, 0.016);
   AssertNear(UpdatePresentationTimestamp(1050, state, 250).seconds, 0.050);
   AssertNear(UpdatePresentationTimestamp(1049, state, 250).seconds, 0.050);
-  AssertNear(UpdatePresentationTimestamp(1066, state, 250).seconds, 0.067);
+  AssertNear(UpdatePresentationTimestamp(1066, state, 250).seconds, 0.066);
 
   VideoTimestampState wrapping{};
   AssertNear(UpdatePresentationTimestamp(UINT32_MAX - 15, wrapping, 250).seconds, 0.0);
@@ -30,26 +30,39 @@ int main() {
   AssertNear(UpdatePresentationTimestamp(2033, candidate, 250).seconds, 0.033);
   AssertNear(UpdatePresentationTimestamp(2016, committed, 250).seconds, 0.016);
 
-  VideoTimestampState discontinuous{};
-  auto first = UpdatePresentationTimestamp(1000, discontinuous, 250);
-  assert(first.discontinuity && first.seconds == 0.0);
-  auto normal = UpdatePresentationTimestamp(1016, discontinuous, 250);
-  assert(!normal.discontinuity);
-  auto jump = UpdatePresentationTimestamp(1400, discontinuous, 250);
-  assert(jump.discontinuity);
-  AssertNear(jump.seconds, 0.016);
-  auto backwards = UpdatePresentationTimestamp(1300, discontinuous, 250);
-  assert(backwards.discontinuity);
-  assert(backwards.seconds >= jump.seconds);
+  VideoTimestampState pacingReset{};
+  auto first = UpdatePresentationTimestamp(1000, pacingReset, 250);
+  assert(first.resetPacing && first.seconds == 0.0);
+  auto normal = UpdatePresentationTimestamp(1016, pacingReset, 250);
+  assert(!normal.resetPacing);
+  auto jump = UpdatePresentationTimestamp(1400, pacingReset, 250);
+  assert(jump.resetPacing);
+  AssertNear(jump.seconds, 0.400);
+  auto backwards = UpdatePresentationTimestamp(1300, pacingReset, 250);
+  assert(!backwards.resetPacing);
+  AssertNear(backwards.seconds, 0.400);
+  auto afterBackwards = UpdatePresentationTimestamp(1416, pacingReset, 250);
+  assert(!afterBackwards.resetPacing);
+  AssertNear(afterBackwards.seconds, 0.416);
 
   VideoTimestampState threshold{};
-  assert(UpdatePresentationTimestamp(1000, threshold, 250).discontinuity);
+  assert(UpdatePresentationTimestamp(1000, threshold, 250).resetPacing);
   auto exactThreshold = UpdatePresentationTimestamp(1250, threshold, 250);
-  assert(!exactThreshold.discontinuity);
+  assert(!exactThreshold.resetPacing);
   AssertNear(exactThreshold.seconds, 0.250);
   auto overThreshold = UpdatePresentationTimestamp(1501, threshold, 250);
-  assert(overThreshold.discontinuity);
-  AssertNear(overThreshold.seconds, 0.250);
+  assert(overThreshold.resetPacing);
+  AssertNear(overThreshold.seconds, 0.501);
+
+  VideoTimestampState restarted{};
+  AssertNear(UpdatePresentationTimestamp(5000, restarted, 250).seconds, 0.0);
+  AssertNear(UpdatePresentationTimestamp(5016, restarted, 250).seconds, 0.016);
+  auto restart = UpdatePresentationTimestamp(1000, restarted, 250);
+  assert(restart.resetPacing);
+  AssertNear(restart.seconds, 0.016);
+  auto afterRestart = UpdatePresentationTimestamp(1016, restarted, 250);
+  assert(!afterRestart.resetPacing);
+  AssertNear(afterRestart.seconds, 0.032);
 
   AdaptiveSpinWindow adaptive(200us, 50us, 300us, 0.25);
   adaptive.ObserveOvershoot(400us);

@@ -487,7 +487,7 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   AdaptiveSpinWindow candidateAdaptiveSpinWindow = s_AdaptiveSpinWindow;
   auto candidateFirstAppend = s_firstAppend;
   const auto pacingStart = std::chrono::steady_clock::now();
-  if (!s_hasFirstFrame || timestampUpdate.discontinuity) {
+  if (!s_hasFirstFrame || timestampUpdate.resetPacing) {
     candidateFirstAppend = pacingStart
       - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
           std::chrono::duration<double>(packetPtsSeconds));
@@ -611,7 +611,7 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     [&] {
       s_TimestampState = candidateTimestampState;
       s_AdaptiveSpinWindow = candidateAdaptiveSpinWindow;
-      if (!s_hasFirstFrame || timestampUpdate.discontinuity) {
+      if (!s_hasFirstFrame || timestampUpdate.resetPacing) {
         s_firstAppend = candidateFirstAppend;
       }
       if (!s_hasFirstFrame) {
