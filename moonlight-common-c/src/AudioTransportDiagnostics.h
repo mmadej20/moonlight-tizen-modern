@@ -18,6 +18,8 @@ typedef struct _RTP_AUDIO_STATS {
 
 typedef struct _AUDIO_TRANSPORT_DIAGNOSTICS {
     uint64_t windowStartMs;
+    uint64_t lastAnomalyReportMs;
+    bool hasAnomalyReport;
     RTP_AUDIO_STATS previous;
 } AUDIO_TRANSPORT_DIAGNOSTICS, *PAUDIO_TRANSPORT_DIAGNOSTICS;
 
@@ -37,6 +39,8 @@ static inline void AudioTransportDiagnosticsReset(
     uint64_t nowMs
 ) {
     diagnostics->windowStartMs = nowMs;
+    diagnostics->lastAnomalyReportMs = 0;
+    diagnostics->hasAnomalyReport = false;
     diagnostics->previous = *current;
 }
 
@@ -54,20 +58,28 @@ static inline bool AudioTransportStatsHaveActivity(
             stats->packetCountPlc != 0;
 }
 
-static inline bool AudioTransportTakeSnapshot(
+static inline bool AudioTransportStatsHaveAnomaly(
+    const RTP_AUDIO_STATS* stats
+) {
+    return stats->packetCountAudioInvalid != 0 ||
+            stats->packetCountFecInvalid != 0 ||
+            stats->packetCountOOS != 0 ||
+            stats->packetCountFecRecovered != 0 ||
+            stats->packetCountFecFailed != 0 ||
+            stats->packetCountFullBlockSkipped != 0 ||
+            stats->packetCountPlc != 0;
+}
+
+static inline bool AudioTransportTakeRateLimitedSnapshot(
     PAUDIO_TRANSPORT_DIAGNOSTICS diagnostics,
     const RTP_AUDIO_STATS* current,
     uint64_t nowMs,
     uint64_t reportIntervalMs,
+    uint64_t anomalyIntervalMs,
     bool force,
     PAUDIO_TRANSPORT_SNAPSHOT snapshot
 ) {
     RTP_AUDIO_STATS delta;
-
-    if (!force &&
-            nowMs - diagnostics->windowStartMs < reportIntervalMs) {
-        return false;
-    }
 
 #define AUDIO_STATS_DELTA(field) \
     delta.field = current->field - diagnostics->previous.field
@@ -86,6 +98,56 @@ static inline bool AudioTransportTakeSnapshot(
         return false;
     }
 
+    bool hasAnomaly = AudioTransportStatsHaveAnomaly(&delta);
+    bool normalReportDue =
+        nowMs - diagnostics->windowStartMs >= reportIntervalMs;
+    bool anomalyReportDue = hasAnomaly &&
+        (!diagnostics->hasAnomalyReport ||
+         nowMs - diagnostics->lastAnomalyReportMs >= anomalyIntervalMs);
+    if (!force && !normalReportDue && !anomalyReportDue) {
+        return false;
+    }
+
+    snapshot->windowMs = nowMs - diagnostics->windowStartMs;
+    snapshot->delta = delta;
+    snapshot->total = *current;
+    diagnostics->windowStartMs = nowMs;
+    diagnostics->previous = *current;
+    if (hasAnomaly) {
+        diagnostics->hasAnomalyReport = true;
+        diagnostics->lastAnomalyReportMs = nowMs;
+    }
+    return true;
+}
+
+static inline bool AudioTransportTakeSnapshot(
+    PAUDIO_TRANSPORT_DIAGNOSTICS diagnostics,
+    const RTP_AUDIO_STATS* current,
+    uint64_t nowMs,
+    uint64_t reportIntervalMs,
+    bool force,
+    PAUDIO_TRANSPORT_SNAPSHOT snapshot
+) {
+    RTP_AUDIO_STATS delta;
+    if (!force &&
+            nowMs - diagnostics->windowStartMs < reportIntervalMs) {
+        return false;
+    }
+#define AUDIO_STATS_DELTA(field) \
+    delta.field = current->field - diagnostics->previous.field
+    AUDIO_STATS_DELTA(packetCountAudio);
+    AUDIO_STATS_DELTA(packetCountFec);
+    AUDIO_STATS_DELTA(packetCountAudioInvalid);
+    AUDIO_STATS_DELTA(packetCountFecInvalid);
+    AUDIO_STATS_DELTA(packetCountOOS);
+    AUDIO_STATS_DELTA(packetCountFecRecovered);
+    AUDIO_STATS_DELTA(packetCountFecFailed);
+    AUDIO_STATS_DELTA(packetCountFullBlockSkipped);
+    AUDIO_STATS_DELTA(packetCountPlc);
+#undef AUDIO_STATS_DELTA
+    if (!AudioTransportStatsHaveActivity(&delta)) {
+        return false;
+    }
     snapshot->windowMs = nowMs - diagnostics->windowStartMs;
     snapshot->delta = delta;
     snapshot->total = *current;

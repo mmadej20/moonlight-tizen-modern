@@ -55,13 +55,28 @@ struct AudioPipelineSnapshot {
 
 class AudioPipelineDiagnostics {
  public:
-  explicit AudioPipelineDiagnostics(
-    std::uint64_t reportIntervalUs = 1'000'000
-  ) : reportIntervalUs_(reportIntervalUs) {}
+  AudioPipelineDiagnostics()
+    : reportIntervalUs_(10'000'000),
+      anomalyIntervalUs_(1'000'000),
+      anomalyReportsEnabled_(true) {}
+
+  explicit AudioPipelineDiagnostics(std::uint64_t reportIntervalUs)
+    : reportIntervalUs_(reportIntervalUs),
+      anomalyIntervalUs_(reportIntervalUs),
+      anomalyReportsEnabled_(false) {}
+
+  AudioPipelineDiagnostics(
+    std::uint64_t reportIntervalUs,
+    std::uint64_t anomalyIntervalUs
+  ) : reportIntervalUs_(reportIntervalUs),
+      anomalyIntervalUs_(anomalyIntervalUs),
+      anomalyReportsEnabled_(true) {}
 
   void Reset(std::uint64_t nowUs) {
     started_ = true;
     windowStartUs_ = nowUs;
+    hasAnomalyReport_ = false;
+    lastAnomalyReportUs_ = 0;
     ResetWindow();
   }
 
@@ -74,7 +89,13 @@ class AudioPipelineDiagnostics {
     }
 
     Accumulate(sample);
-    if (nowUs - windowStartUs_ < reportIntervalUs_) {
+    const bool normalReportDue =
+      nowUs - windowStartUs_ >= reportIntervalUs_;
+    const bool anomalyReportDue = anomalyReportsEnabled_ &&
+      windowHasAnomaly_ &&
+      (!hasAnomalyReport_ ||
+       nowUs - lastAnomalyReportUs_ >= anomalyIntervalUs_);
+    if (!normalReportDue && !anomalyReportDue) {
       return std::nullopt;
     }
 
@@ -173,6 +194,9 @@ class AudioPipelineDiagnostics {
     if (AppendFailed(sample.outcome)) {
       lastAppendResultCode_ = sample.appendResultCode;
     }
+    if (sample.outcome != AudioPacketOutcome::Appended) {
+      windowHasAnomaly_ = true;
+    }
   }
 
   std::optional<AudioPipelineSnapshot> TakeSnapshot(std::uint64_t nowUs) {
@@ -205,6 +229,10 @@ class AudioPipelineDiagnostics {
     snapshot.sessionId = sessionId_;
     snapshot.lastAppendResultCode = lastAppendResultCode_;
 
+    if (windowHasAnomaly_) {
+      hasAnomalyReport_ = true;
+      lastAnomalyReportUs_ = nowUs;
+    }
     windowStartUs_ = nowUs;
     ResetWindow();
     return snapshot;
@@ -235,10 +263,16 @@ class AudioPipelineDiagnostics {
     syncLeadMaxSeconds_ = 0.0;
     sessionId_ = 0;
     lastAppendResultCode_ = 0;
+    windowHasAnomaly_ = false;
   }
 
   const std::uint64_t reportIntervalUs_;
+  const std::uint64_t anomalyIntervalUs_;
+  const bool anomalyReportsEnabled_;
   bool started_ = false;
+  bool hasAnomalyReport_ = false;
+  bool windowHasAnomaly_ = false;
+  std::uint64_t lastAnomalyReportUs_ = 0;
   std::uint64_t windowStartUs_ = 0;
   std::uint64_t packets_ = 0;
   std::uint64_t appended_ = 0;

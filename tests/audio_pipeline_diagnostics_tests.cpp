@@ -280,6 +280,45 @@ void TestExplicitResetDiscardsPreviousSession() {
   assert(snapshot->sessionId == 9);
 }
 
+void TestNormalWindowsAreTenSecondsAndAnomaliesAreRateLimited() {
+  AudioPipelineDiagnostics diagnostics(10'000'000, 1'000'000);
+  diagnostics.Reset(0);
+
+  assert(!diagnostics.Record(
+    MakeSample(AudioPacketOutcome::Appended, 1, 2, 3, 0.010, 0.020, 1),
+    1'000'000
+  ));
+
+  const auto firstAnomaly = diagnostics.Record(
+    MakeSample(AudioPacketOutcome::SoftDropped, 0, 0, 4, 0.210, 0.220, 1),
+    1'100'000
+  );
+  assert(firstAnomaly);
+  assert(firstAnomaly->packets == 2);
+  assert(firstAnomaly->softDropped == 1);
+
+  assert(!diagnostics.Record(
+    MakeSample(AudioPacketOutcome::HardDropped, 0, 0, 5, 0.400, 0.410, 1),
+    1'500'000
+  ));
+  const auto coalescedAnomaly = diagnostics.Record(
+    MakeSample(AudioPacketOutcome::Appended, 1, 2, 3, 0.020, 0.030, 1),
+    2'100'000
+  );
+  assert(coalescedAnomaly);
+  assert(coalescedAnomaly->packets == 2);
+  assert(coalescedAnomaly->hardDropped == 1);
+
+  assert(!diagnostics.Record(
+    MakeSample(AudioPacketOutcome::Appended, 1, 2, 3, 0.020, 0.030, 1),
+    12'099'999
+  ));
+  assert(diagnostics.Record(
+    MakeSample(AudioPacketOutcome::Appended, 1, 2, 3, 0.020, 0.030, 1),
+    12'100'000
+  ));
+}
+
 }  // namespace
 
 int main() {
@@ -288,5 +327,6 @@ int main() {
   TestFlushAndWindowReset();
   TestPlcCountsOnlyWhenOpusRuns();
   TestExplicitResetDiscardsPreviousSession();
+  TestNormalWindowsAreTenSecondsAndAnomaliesAreRateLimited();
   return 0;
 }

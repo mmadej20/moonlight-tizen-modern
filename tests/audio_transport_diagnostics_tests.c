@@ -142,10 +142,49 @@ static void testExplicitResetUsesCurrentCountersAsBaseline(void) {
     assert(snapshot.total.packetCountAudio == 51);
 }
 
+static void testNormalWindowsAreTenSecondsAndAnomaliesAreRateLimited(void) {
+    RTP_AUDIO_STATS stats;
+    AUDIO_TRANSPORT_DIAGNOSTICS diagnostics;
+    AUDIO_TRANSPORT_SNAPSHOT snapshot;
+
+    memset(&stats, 0, sizeof(stats));
+    AudioTransportDiagnosticsReset(&diagnostics, &stats, 0);
+
+    stats.packetCountAudio = 200;
+    assert(!AudioTransportTakeRateLimitedSnapshot(
+        &diagnostics, &stats, 1000, 10000, 1000, false, &snapshot
+    ));
+
+    stats.packetCountOOS = 1;
+    assert(AudioTransportTakeRateLimitedSnapshot(
+        &diagnostics, &stats, 1100, 10000, 1000, false, &snapshot
+    ));
+    assert(snapshot.delta.packetCountOOS == 1);
+
+    stats.packetCountFecFailed = 1;
+    assert(!AudioTransportTakeRateLimitedSnapshot(
+        &diagnostics, &stats, 1500, 10000, 1000, false, &snapshot
+    ));
+    stats.packetCountAudio += 100;
+    assert(AudioTransportTakeRateLimitedSnapshot(
+        &diagnostics, &stats, 2100, 10000, 1000, false, &snapshot
+    ));
+    assert(snapshot.delta.packetCountFecFailed == 1);
+
+    stats.packetCountAudio += 1000;
+    assert(!AudioTransportTakeRateLimitedSnapshot(
+        &diagnostics, &stats, 12099, 10000, 1000, false, &snapshot
+    ));
+    assert(AudioTransportTakeRateLimitedSnapshot(
+        &diagnostics, &stats, 12100, 10000, 1000, false, &snapshot
+    ));
+}
+
 int main(void) {
     testSequenceDistance();
     testRateLimitAndWindowDeltas();
     testForcedPartialFlushAndEmptySuppression();
     testExplicitResetUsesCurrentCountersAsBaseline();
+    testNormalWindowsAreTenSecondsAndAnomaliesAreRateLimited();
     return 0;
 }

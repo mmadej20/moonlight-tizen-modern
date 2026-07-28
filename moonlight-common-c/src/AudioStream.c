@@ -39,10 +39,11 @@ typedef struct _QUEUED_AUDIO_PACKET {
 static void MaybeLogAudioTransportStats(bool force) {
     AUDIO_TRANSPORT_SNAPSHOT snapshot;
 
-    if (!AudioTransportTakeSnapshot(
+    if (!AudioTransportTakeRateLimitedSnapshot(
             &audioTransportDiagnostics,
             &rtpAudioQueue.stats,
             PltGetMillis(),
+            10000,
             1000,
             force,
             &snapshot)) {
