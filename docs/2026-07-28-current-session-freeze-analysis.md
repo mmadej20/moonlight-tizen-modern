@@ -94,11 +94,12 @@ ramki IDR, złożony IDR bez submitu albo zatrzymanie Samsung `AppendPacket()`.
   na sekundę podczas burzy;
 - transport wideo dostanie heartbeat co 10 s oraz rzadkie zdarzenia
   stall/recovery;
-- renderer wideo dostanie agregat co 10 s z liczbą ramek i czasem appendu;
+- renderer wideo zaloguje rzadkie markery bezpośrednio przed i po appendzie
+  ramki IDR, wraz z czasem i wynikiem;
 - ścieżka IDR zaloguje wykrycie ramki recovery;
 - nie będzie automatycznego retry/resetu dekodera bez danych rozróżniających
   powyższe etapy.
 
 W stanie normalnym zmniejszy to audio telemetry z około 120 do 12 linii na
-minutę. Dwa nowe agregaty wideo dodadzą najwyżej 12 linii na minutę, więc
-całość spadnie z około 120 do około 24 linii na minutę.
+minutę. Heartbeat transportu wideo doda około 6 linii na minutę; markery IDR
+są zdarzeniowe. Normalny poziom wyniesie więc około 18 linii na minutę.
