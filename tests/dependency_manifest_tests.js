@@ -47,23 +47,25 @@ for (const workflow of [developmentWorkflow, stableWorkflow]) {
 }
 
 assert.strictEqual(pkg.engines.node, '24.18.0');
-assert.strictEqual(pkg.dependencies.jquery, '4.0.0');
+assert.strictEqual(pkg.dependencies.jquery, '2.2.0');
 assert.strictEqual(lock.lockfileVersion, 3);
-assert.strictEqual(lock.packages[''].dependencies.jquery, '4.0.0');
-assert.strictEqual(lock.packages['node_modules/jquery'].version, '4.0.0');
+assert.strictEqual(lock.packages[''].dependencies.jquery, '2.2.0');
+assert.strictEqual(lock.packages['node_modules/jquery'].version, '2.2.0');
 assert.strictEqual(
   lock.packages['node_modules/jquery'].resolved,
-  'https://registry.npmjs.org/jquery/-/jquery-4.0.0.tgz'
+  'https://registry.npmjs.org/jquery/-/jquery-2.2.0.tgz'
 );
 assert.strictEqual(
   lock.packages['node_modules/jquery'].integrity,
-  'sha512-TXCHVR3Lb6TZdtw1l3RTLf8RBWVGexdxL6AC8/e0xZKEpBflBsjh9/8LXw+dkNFuOyW9B7iB3O1sP7hS0Kiacg=='
+  'sha512-bQLMb56JzEBBs2CMzy8llOL0J1xm/JkDma6+UnF2cSPYJmvQHS9yZ+YGny/1YydkdZm8j0Ny8peiaeoWEwy9Zg=='
 );
-assert(html.includes('static/js/jquery-4.0.0.min.js'));
-assert(!html.includes('jquery-2.2.0'));
-assert(config.includes('required_version="9.0"'));
+assert(html.includes('static/js/jquery-2.2.0.min.js'));
+assert(!html.includes('jquery-4.0.0'));
+assert(config.includes('required_version="5.5"'));
 assert(dockerfile.includes('FROM node:24.18.0-alpine AS frontend-dependencies'));
 assert(dockerfile.includes('npm ci --omit=dev --ignore-scripts'));
+assert(dockerfile.includes('/wasm/static/js/jquery-2.2.0.min.js'));
+assert(!dockerfile.includes('/wasm/static/js/jquery-4.0.0.min.js'));
 assert(dockerfile.includes('AS builder'));
 assert(dockerfile.includes('FROM scratch AS artifact'));
 assert(dockerfile.includes('COPY --from=builder /home/moonlight/Moonlight.wgt /home/moonlight/Moonlight.wgt'));
