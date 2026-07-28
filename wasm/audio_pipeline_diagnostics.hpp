@@ -194,7 +194,7 @@ class AudioPipelineDiagnostics {
     if (AppendFailed(sample.outcome)) {
       lastAppendResultCode_ = sample.appendResultCode;
     }
-    if (sample.outcome != AudioPacketOutcome::Appended) {
+    if (sample.plc || sample.outcome != AudioPacketOutcome::Appended) {
       windowHasAnomaly_ = true;
     }
   }

@@ -698,8 +698,29 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   const PacingCommitOutcome pacingCommitOutcome = AppendAndCommitPacingState(
     g_Instance->m_ConnectionCancelled,
     [&] {
+      if (decodeUnit->frameType == FRAME_TYPE_IDR) {
+        ClLogMessage(
+          "VideoRenderer IDR append start frame=%d ptsMs=%.3f session=%d\n",
+          decodeUnit->frameNumber,
+          packetPtsSeconds * 1000.0,
+          static_cast<int>(g_Instance->m_VideoSessionId.load())
+        );
+      }
       const auto appendResult = g_Instance->m_VideoTrack.AppendPacket(pkt);
       submitEnd = std::chrono::steady_clock::now();
+      if (decodeUnit->frameType == FRAME_TYPE_IDR) {
+        ClLogMessage(
+          "VideoRenderer IDR append returned frame=%d success=%d result=%d durationUs=%llu\n",
+          decodeUnit->frameNumber,
+          static_cast<bool>(appendResult) ? 1 : 0,
+          static_cast<int>(appendResult.operation_result),
+          static_cast<unsigned long long>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+              submitEnd - submitStart
+            ).count()
+          )
+        );
+      }
       return static_cast<bool>(appendResult);
     },
     [&] {

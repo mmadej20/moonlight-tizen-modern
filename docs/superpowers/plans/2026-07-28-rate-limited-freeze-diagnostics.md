@@ -34,15 +34,15 @@ and commit each patch separately.
 - Add focused native tests for heartbeat, stall cooldown, and recovery.
 - Commit as `feat: add rate-limited video freeze diagnostics`.
 
-## Patch 3: Renderer-side video heartbeat
+## Patch 3: Renderer-side IDR probe
 
-- Add a C++17 10 s accumulator for decode-unit count, append success/failure,
-  assembly/queue/pacing/append maxima, last frame number, PTS, and session.
-- Emit an anomaly snapshot immediately on append failure.
-- Integrate around `ElementaryMediaTrack::AppendPacket()` without changing
-  pacing state or return codes.
-- Add focused native tests and run video timing regressions.
-- Commit as `feat: add video renderer diagnostics`.
+- Emit rare markers immediately before and after the actual Samsung
+  `ElementaryMediaTrack::AppendPacket()` call for an IDR frame.
+- Include frame number, PTS, session, result, and append duration.
+- Keep normal P-frame rendering silent; the receive heartbeat already proves
+  whether transport remains active.
+- Run video timing and full build regressions.
+- Commit as `fix: place IDR probe around actual renderer`.
 
 ## Validation
 

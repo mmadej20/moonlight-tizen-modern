@@ -319,6 +319,28 @@ void TestNormalWindowsAreTenSecondsAndAnomaliesAreRateLimited() {
   ));
 }
 
+void TestSuccessfulPlcTriggersImmediateAnomalySnapshot() {
+  AudioPipelineDiagnostics diagnostics(10'000'000, 1'000'000);
+  diagnostics.Reset(0);
+  const auto snapshot = diagnostics.Record(
+    MakeSample(
+      AudioPacketOutcome::Appended,
+      10,
+      20,
+      30,
+      0.010,
+      0.020,
+      1,
+      0,
+      true
+    ),
+    100
+  );
+  assert(snapshot);
+  assert(snapshot->plc == 1);
+  assert(snapshot->appended == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -328,5 +350,6 @@ int main() {
   TestPlcCountsOnlyWhenOpusRuns();
   TestExplicitResetDiscardsPreviousSession();
   TestNormalWindowsAreTenSecondsAndAnomaliesAreRateLimited();
+  TestSuccessfulPlcTriggersImmediateAnomalySnapshot();
   return 0;
 }
