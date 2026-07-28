@@ -97,7 +97,7 @@ pattern in current upstream `moonlight-common-c`.
 
 Record:
 
-- valid audio and FEC datagrams;
+- all recognized audio and FEC datagrams, with invalid counters as subsets;
 - invalid audio and FEC datagrams;
 - out-of-sequence audio datagrams;
 - data shards recovered by Reed-Solomon;

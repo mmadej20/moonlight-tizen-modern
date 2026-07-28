@@ -187,6 +187,59 @@ void TestFlushAndWindowReset() {
   assert(second->sessionId == 4);
 }
 
+void TestPlcCountsOnlyWhenOpusRuns() {
+  AudioPipelineDiagnostics diagnostics(1'000'000);
+  diagnostics.Reset(0);
+
+  assert(!diagnostics.Record(
+    MakeSample(
+      AudioPacketOutcome::SoftDropped,
+      0,
+      0,
+      10,
+      0.010,
+      0.210,
+      4,
+      0,
+      true
+    ),
+    100
+  ));
+  assert(!diagnostics.Record(
+    MakeSample(
+      AudioPacketOutcome::HardDropped,
+      0,
+      0,
+      10,
+      0.020,
+      0.400,
+      4,
+      0,
+      true
+    ),
+    200
+  ));
+  assert(!diagnostics.Record(
+    MakeSample(
+      AudioPacketOutcome::DecodeFailed,
+      20,
+      0,
+      30,
+      0.030,
+      0.100,
+      4,
+      0,
+      true
+    ),
+    300
+  ));
+
+  const auto snapshot = diagnostics.Flush(400);
+  assert(snapshot);
+  assert(snapshot->packets == 3);
+  assert(snapshot->plc == 1);
+}
+
 void TestExplicitResetDiscardsPreviousSession() {
   AudioPipelineDiagnostics diagnostics(1'000'000);
   diagnostics.Reset(0);
@@ -233,6 +286,7 @@ int main() {
   TestRateLimitAndAggregates();
   TestEveryOutcomeHasItsOwnCounter();
   TestFlushAndWindowReset();
+  TestPlcCountsOnlyWhenOpusRuns();
   TestExplicitResetDiscardsPreviousSession();
   return 0;
 }

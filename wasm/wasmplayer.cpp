@@ -29,6 +29,47 @@ using EmssAsyncResult = samsung::wasm::OperationResult;
 using HTMLAsyncResult = samsung::wasm::OperationResult;
 using TimeStamp = samsung::wasm::Seconds;
 
+static_assert(
+  static_cast<int>(
+    samsung::wasm::ElementaryMediaTrack::CloseReason::kSourceClosed
+  ) == 0
+);
+static_assert(
+  static_cast<int>(
+    samsung::wasm::ElementaryMediaTrack::CloseReason::kSourceError
+  ) == 1
+);
+static_assert(
+  static_cast<int>(
+    samsung::wasm::ElementaryMediaTrack::CloseReason::kSourceDetached
+  ) == 2
+);
+static_assert(
+  static_cast<int>(
+    samsung::wasm::ElementaryMediaTrack::CloseReason::kSourceSuspended
+  ) == 3
+);
+static_assert(
+  static_cast<int>(
+    samsung::wasm::ElementaryMediaTrack::CloseReason::kTrackDisabled
+  ) == 4
+);
+static_assert(
+  static_cast<int>(
+    samsung::wasm::ElementaryMediaTrack::CloseReason::kTrackEnded
+  ) == 5
+);
+static_assert(
+  static_cast<int>(
+    samsung::wasm::ElementaryMediaTrack::CloseReason::kTrackSeeking
+  ) == 6
+);
+static_assert(
+  static_cast<int>(
+    samsung::wasm::ElementaryMediaTrack::CloseReason::kUnknown
+  ) == 7
+);
+
 static constexpr TimeStamp kFrameTimeMargin = 0.5ms;
 static constexpr uint32_t kPacingDiscontinuityThresholdMs = 250;
 static constexpr std::chrono::microseconds kInitialPacingSpinWindow(200);

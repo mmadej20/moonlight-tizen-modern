@@ -88,8 +88,9 @@ AudioTransportStats windowMs=1004 audio=201 fec=100 invalidAudio=0 invalidFec=0 
 The unprefixed counters are deltas for this window. The `total...` counters are
 cumulative for the current stream:
 
-- `audio` and `fec` count received RTP audio and FEC datagrams passed to the
-  audio queue.
+- `audio` and `fec` count all recognized RTP audio and FEC datagrams passed to
+  the audio queue. Malformed recognized datagrams remain in these totals, so
+  `invalidAudio` and `invalidFec` are subsets rather than additional traffic.
 - `invalidAudio` and `invalidFec` count rejected malformed or incompatible
   datagrams.
 - `oos` counts audio datagrams older than the queue's current FEC base.

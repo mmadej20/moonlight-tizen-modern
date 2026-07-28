@@ -110,7 +110,7 @@ class AudioPipelineDiagnostics {
 
   void Accumulate(const AudioPipelineSample& sample) {
     ++packets_;
-    if (sample.plc) {
+    if (sample.plc && DecodeRan(sample.outcome)) {
       ++plc_;
     }
 
