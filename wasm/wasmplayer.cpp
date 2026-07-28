@@ -1,4 +1,5 @@
 #include "moonlight_wasm.hpp"
+#include "media_track_diagnostics.hpp"
 #include "video_timing.hpp"
 
 #include <condition_variable>
@@ -113,7 +114,19 @@ MoonlightInstance::AudioTrackListener::AudioTrackListener(
 
 void MoonlightInstance::AudioTrackListener::OnTrackOpen() {
   m_Instance->m_MediaOperationEpoch.RunIfActive(m_MediaContext, [this] {
-    ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackOpen\n");
+    const auto currentSession = m_Instance->m_AudioTrack.GetSessionId();
+    const bool currentSessionAvailable =
+      static_cast<bool>(currentSession);
+    const auto message = FormatMediaTrackOpen(
+      "AUDIO",
+      static_cast<int>(m_Instance->m_AudioSessionId.load()),
+      currentSessionAvailable,
+      currentSessionAvailable
+        ? static_cast<int>(currentSession.value)
+        : 0,
+      static_cast<int>(currentSession.operation_result)
+    );
+    ClLogMessage("%s\n", message.c_str());
     {
       std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
       m_Instance->m_AudioStarted = true;
@@ -122,22 +135,36 @@ void MoonlightInstance::AudioTrackListener::OnTrackOpen() {
   });
 }
 
-void MoonlightInstance::AudioTrackListener::OnTrackClosed(samsung::wasm::ElementaryMediaTrack::CloseReason) {
-  m_Instance->m_MediaOperationEpoch.RunIfActive(m_MediaContext, [this] {
-    ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackClosed\n");
-    {
-      std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
-      m_Instance->m_AudioStarted = false;
-    }
-    m_Instance->m_AudioTrackOpenLatch.Fail();
-  });
+void MoonlightInstance::AudioTrackListener::OnTrackClosed(
+  samsung::wasm::ElementaryMediaTrack::CloseReason reason
+) {
+  m_Instance->m_MediaOperationEpoch.RunIfActive(
+    m_MediaContext,
+    [this, reason] {
+      const auto message = FormatMediaTrackClosed(
+        "AUDIO",
+        static_cast<int>(reason),
+        static_cast<int>(m_Instance->m_AudioSessionId.load())
+      );
+      ClLogMessage("%s\n", message.c_str());
+      {
+        std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
+        m_Instance->m_AudioStarted = false;
+      }
+      m_Instance->m_AudioTrackOpenLatch.Fail();
+    });
 }
 
 void MoonlightInstance::AudioTrackListener::OnSessionIdChanged(samsung::wasm::SessionId new_session_id) {
   m_Instance->m_MediaOperationEpoch.RunIfActive(
     m_MediaContext,
     [this, new_session_id] {
-      ClLogMessage("AUDIO ElementaryMediaTrack::OnSessionIdChanged\n");
+      const auto message = FormatMediaTrackSessionChanged(
+        "AUDIO",
+        static_cast<int>(m_Instance->m_AudioSessionId.load()),
+        static_cast<int>(new_session_id)
+      );
+      ClLogMessage("%s\n", message.c_str());
       std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
       m_Instance->m_AudioSessionId.store(new_session_id);
     });
@@ -151,7 +178,19 @@ MoonlightInstance::VideoTrackListener::VideoTrackListener(
 
 void MoonlightInstance::VideoTrackListener::OnTrackOpen() {
   m_Instance->m_MediaOperationEpoch.RunIfActive(m_MediaContext, [this] {
-    ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackOpen\n");
+    const auto currentSession = m_Instance->m_VideoTrack.GetSessionId();
+    const bool currentSessionAvailable =
+      static_cast<bool>(currentSession);
+    const auto message = FormatMediaTrackOpen(
+      "VIDEO",
+      static_cast<int>(m_Instance->m_VideoSessionId.load()),
+      currentSessionAvailable,
+      currentSessionAvailable
+        ? static_cast<int>(currentSession.value)
+        : 0,
+      static_cast<int>(currentSession.operation_result)
+    );
+    ClLogMessage("%s\n", message.c_str());
     {
       std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
       m_Instance->m_VideoStarted = true;
@@ -161,22 +200,36 @@ void MoonlightInstance::VideoTrackListener::OnTrackOpen() {
   });
 }
 
-void MoonlightInstance::VideoTrackListener::OnTrackClosed(samsung::wasm::ElementaryMediaTrack::CloseReason) {
-  m_Instance->m_MediaOperationEpoch.RunIfActive(m_MediaContext, [this] {
-    ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackClosed\n");
-    {
-      std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
-      m_Instance->m_VideoStarted = false;
-    }
-    m_Instance->m_VideoTrackOpenLatch.Fail();
-  });
+void MoonlightInstance::VideoTrackListener::OnTrackClosed(
+  samsung::wasm::ElementaryMediaTrack::CloseReason reason
+) {
+  m_Instance->m_MediaOperationEpoch.RunIfActive(
+    m_MediaContext,
+    [this, reason] {
+      const auto message = FormatMediaTrackClosed(
+        "VIDEO",
+        static_cast<int>(reason),
+        static_cast<int>(m_Instance->m_VideoSessionId.load())
+      );
+      ClLogMessage("%s\n", message.c_str());
+      {
+        std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
+        m_Instance->m_VideoStarted = false;
+      }
+      m_Instance->m_VideoTrackOpenLatch.Fail();
+    });
 }
 
 void MoonlightInstance::VideoTrackListener::OnSessionIdChanged(samsung::wasm::SessionId new_session_id) {
   m_Instance->m_MediaOperationEpoch.RunIfActive(
     m_MediaContext,
     [this, new_session_id] {
-      ClLogMessage("VIDEO ElementaryMediaTrack::OnSessionIdChanged\n");
+      const auto message = FormatMediaTrackSessionChanged(
+        "VIDEO",
+        static_cast<int>(m_Instance->m_VideoSessionId.load()),
+        static_cast<int>(new_session_id)
+      );
+      ClLogMessage("%s\n", message.c_str());
       std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
       m_Instance->m_VideoSessionId.store(new_session_id);
     });
