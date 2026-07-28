@@ -1094,7 +1094,8 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
 
         LC_ASSERT(!waitingForNextSuccessfulFrame);
 
-        if (frameType == FRAME_TYPE_IDR) {
+        bool assemblingIdrFrame = frameType == FRAME_TYPE_IDR;
+        if (assemblingIdrFrame) {
             Limelog("VideoRecovery IDR frame assembled=%u\n", frameIndex);
         }
 
@@ -1119,6 +1120,9 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
         }
 
         reassembleFrame(frameIndex);
+        if (assemblingIdrFrame) {
+            Limelog("VideoRecovery IDR renderer returned=%u\n", frameIndex);
+        }
     }
 }
 
