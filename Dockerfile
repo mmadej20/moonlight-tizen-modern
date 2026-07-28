@@ -96,7 +96,7 @@ COPY --chown=moonlight wasm/platform/ ./moonlight-tizen/wasm/platform/
 COPY --chown=moonlight wasm/static/ ./moonlight-tizen/wasm/static/
 COPY --from=frontend-dependencies \
 	/frontend/node_modules/jquery/dist/jquery.min.js \
-	/home/moonlight/moonlight-tizen/wasm/static/js/jquery-4.0.0.min.js
+	/home/moonlight/moonlight-tizen/wasm/static/js/jquery-2.2.0.min.js
 
 RUN cmake --install build --prefix build
 RUN cp moonlight-tizen/res/icon.png build/widget/
