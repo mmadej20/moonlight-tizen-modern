@@ -390,3 +390,52 @@ uruchomiony na TV i porównany z tym raportem.
 - `wasm/video_timing.hpp` — monotoniczna oś czasu wideo;
 - `tests/audio_sync_tests.cpp` — testy kontrolera audio;
 - `tests/video_timing_tests.cpp` — testy PTS i pacingu.
+
+## Aktualizacja: telemetryka diagnostyczna po przeglądzie
+
+Po przygotowaniu powyższego raportu dodano obserwowalność potrzebną do
+potwierdzenia lub odrzucenia hipotez, bez zmiany zachowania transportu:
+
+- `114cce7` dodaje `AudioPipelineStats` z czasami Opus, Samsung append i całego
+  callbacku oraz z rozdzieleniem soft/hard dropów i wyników appendu;
+- `c120b2a` dodaje `AudioTransportStats` z licznikami RTP, FEC, OOS, recovery,
+  nieodtwarzalnych bloków, całych pominiętych bloków i PLC;
+- `1be2de3` dodaje reason oraz stored/current session do lifecycle tracków audio
+  i video.
+
+To jest wyłącznie instrumentacja. W szczególności:
+
+- `fullBlockSkipped` mierzy pakiety pomijane przy całkowitym braku bloku, ale
+  nadal nie generuje dla nich PLC;
+- nie zmieniono `CAPABILITY_DIRECT_SUBMIT`;
+- nie zmieniono startowego dropu 500 ms;
+- nie zmieniono zachowania po błędzie Opus ani reopenie tracka.
+
+Stary punkt kontrolny `Audio sync correction dropped ...` został zastąpiony
+jednym pełniejszym rekordem `AudioPipelineStats`, więc porównanie nowej sesji
+powinno używać pól `softDrop`, `hardDrop`, `leadMaxMs` i `mediaOffsetMs`.
+
+### Jak nowe logi rozstrzygną hipotezy
+
+| Hipoteza | Sygnał potwierdzający | Sygnał osłabiający |
+|---|---|---|
+| Direct submit blokuje odbiór UDP | duże `callbackMaxUs`, równoczesne późniejsze straty RTP, spike w `decodeMaxUs` lub `appendMaxUs` | małe czasy callbacku podczas okien strat |
+| Samsung append blokuje lub odrzuca pakiety | duże `appendMaxUs` albo `appendIgnored`/`appendBufferFull`/`appendOther` | szybkie, udane appendy w czasie przerw |
+| Opus jest wąskim gardłem | duże `decodeMaxUs`, szczególnie dla 5.1/7.1 | stabilne krótkie decode przy dużym callbacku |
+| Główną przyczyną jest sieć/FEC | wzrost `fecFailed`, `fullBlockSkipped`, `plc` oraz współbieżne problemy wideo | przerwy bez zmian liczników transportu |
+| Session/reopen psuje timeline | close/change/open przed `appendIgnored` lub skokiem `mediaOffsetMs` | brak lifecycle eventów w oknie problemu |
+| Audio Sync nadal jest zbyt agresywny | dużo `softDrop`/`hardDrop` przy rosnącym `mediaOffsetMs` | sporadyczne dropy tylko przy wysokim `leadMaxMs` |
+
+### Minimalny zestaw do następnego porównania
+
+Po sesji na TV należy zachować:
+
+1. cały plik previous-session;
+2. wszystkie `AudioPipelineStats`;
+3. wszystkie `AudioTransportStats`;
+4. wszystkie `AUDIO track`, `AUDIO session`, `VIDEO track` i `VIDEO session`;
+5. wpisy o utracie audio, FEC, IDR oraz duże luki PTS w ich kontekście czasowym.
+
+Dopiero taki log pozwoli stwierdzić, czy poprawa wynika z łagodniejszego Audio
+Sync i zachowania PTS, czy problem nadal pochodzi głównie z transportu,
+blokującego callbacku albo lifecycle EMSS.
