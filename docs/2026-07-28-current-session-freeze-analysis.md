@@ -69,6 +69,24 @@ Ostatni request jest skutkiem wykrytej nieciągłości 24-bitowego
 prawdopodobny obszar to tor wideo: host/UDP, kolejka FEC, depakietyzacja albo
 Samsung video append. Transport audio w tym samym czasie był zdrowy.
 
+## Korelacja z logiem hosta
+
+Fragment logu Sunshine dostarczony po analizie rozstrzyga reakcję hosta:
+
+- `21:18:14.037` — Sunshine odebrał `IDX_REQUEST_IDR_FRAME`;
+- `21:18:14.052` — NVENC zakodował IDR, po 15 ms;
+- do `21:18:20.095` — encode loop nadal kodował, bez timeoutów i bez
+  `dropped_submissions`;
+- statystyki sieci do `21:18:19.895` pokazują dalsze wysyłanie pakietów z
+  maksymalną latencją ramki 0,31 ms;
+- `21:18:24.547` — host zanotował `CLIENT DISCONNECTED`.
+
+Host odpowiedział więc prawidłowo i nadal wysyłał wideo. Nie potwierdza to
+jeszcze dostarczenia konkretnych datagramów do telewizora, ale wyklucza
+hipotezę, że Sunshine zignorował request lub zatrzymał encoder. Następny log
+klienta musi rozróżnić: brak datagramów po drodze, datagramy bez kompletnej
+ramki IDR, złożony IDR bez submitu albo zatrzymanie Samsung `AppendPacket()`.
+
 ## Zmiana diagnostyki
 
 - normalne statystyki audio będą emitowane co 10 s zamiast co 1 s;

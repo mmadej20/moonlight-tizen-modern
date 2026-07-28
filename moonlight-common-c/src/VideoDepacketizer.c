@@ -775,7 +775,11 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
     // the streamPacketIndex not matching correctly should find nearly all of the rest.
     if (isBefore24(streamPacketIndex, U24(lastPacketInStream + 1)) ||
             (!(flags & FLAG_SOF) && streamPacketIndex != U24(lastPacketInStream + 1))) {
-        Limelog("Depacketizer detected corrupt frame: %d", frameIndex);
+        Limelog(
+            "Depacketizer detected corrupt frame=%u streamPacket=%u expected=%u\n",
+            frameIndex,
+            streamPacketIndex,
+            U24(lastPacketInStream + 1));
         decodingFrame = false;
         nextFrameNumber = frameIndex + 1;
         dropFrameState();
@@ -1089,6 +1093,10 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
         }
 
         LC_ASSERT(!waitingForNextSuccessfulFrame);
+
+        if (frameType == FRAME_TYPE_IDR) {
+            Limelog("VideoRecovery IDR frame assembled=%u\n", frameIndex);
+        }
 
         // Carry out any pending state drops. We can't just do this
         // arbitrarily in the middle of processing a frame because

@@ -1,4 +1,5 @@
 #include "Limelight-internal.h"
+#include "VideoReceiveDiagnostics.h"
 
 #define FIRST_FRAME_MAX 1500
 #define FIRST_FRAME_TIMEOUT_SEC 10
@@ -91,6 +92,10 @@ static void VideoReceiveThreadProc(void* context) {
     bool useSelect;
     int waitingForVideoMs;
     bool encrypted;
+    VIDEO_RECEIVE_DIAGNOSTICS diagnostics;
+    VIDEO_RECEIVE_SNAPSHOT diagnosticSnapshot;
+
+    VideoReceiveDiagnosticsReset(&diagnostics, PltGetMillis());
 
     encrypted = !!(EncryptionFeaturesEnabled & SS_ENC_VIDEO);
     decryptedSize = StreamConfig.packetSize + MAX_RTP_HEADER_SIZE;
@@ -154,9 +159,38 @@ static void VideoReceiveThreadProc(void* context) {
                     break;
                 }
             }
+            else if (VideoReceiveRecordTimeout(
+                    &diagnostics,
+                    PltGetMillis(),
+                    1000,
+                    5000,
+                    &diagnosticSnapshot) == VIDEO_RECEIVE_EVENT_STALL) {
+                Limelog(
+                    "VideoTransportStall noPacketMs=%llu packets=%llu\n",
+                    (unsigned long long)diagnosticSnapshot.gapMs,
+                    (unsigned long long)diagnosticSnapshot.packets);
+            }
             
             // Receive timed out; try again
             continue;
+        }
+
+        VIDEO_RECEIVE_EVENT receiveEvent = VideoReceiveRecordPacket(
+            &diagnostics,
+            PltGetMillis(),
+            10000,
+            &diagnosticSnapshot);
+        if (receiveEvent == VIDEO_RECEIVE_EVENT_HEARTBEAT) {
+            Limelog(
+                "VideoTransportStats windowMs=%llu packets=%llu maxGapMs=%llu\n",
+                (unsigned long long)diagnosticSnapshot.windowMs,
+                (unsigned long long)diagnosticSnapshot.packets,
+                (unsigned long long)diagnosticSnapshot.maxGapMs);
+        }
+        else if (receiveEvent == VIDEO_RECEIVE_EVENT_RECOVERY) {
+            Limelog(
+                "VideoTransportRecovery noPacketMs=%llu\n",
+                (unsigned long long)diagnosticSnapshot.gapMs);
         }
 
         if (!receivedDataFromPeer) {
