@@ -2,6 +2,7 @@
 
 #include "Video.h"
 
+#include "AudioTransportDiagnostics.h"
 #include "rs.h"
 
 // Maximum time to wait for an OOS data/FEC shard
@@ -63,6 +64,8 @@ typedef struct _RTP_AUDIO_QUEUE {
     bool receivedOosData;
     bool synchronizing;
     bool incompatibleServer;
+
+    RTP_AUDIO_STATS stats;
 } RTP_AUDIO_QUEUE, *PRTP_AUDIO_QUEUE;
 
 #define RTPQ_RET_PACKET_CONSUMED 0x1

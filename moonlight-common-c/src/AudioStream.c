@@ -4,6 +4,7 @@ static SOCKET rtpSocket = INVALID_SOCKET;
 
 static LINKED_BLOCKING_QUEUE packetQueue;
 static RTP_AUDIO_QUEUE rtpAudioQueue;
+static AUDIO_TRANSPORT_DIAGNOSTICS audioTransportDiagnostics;
 
 static PLT_THREAD udpPingThread;
 static PLT_THREAD receiveThread;
@@ -34,6 +35,47 @@ typedef struct _QUEUED_AUDIO_PACKET {
     QUEUED_AUDIO_PACKET_HEADER header;
     char data[MAX_PACKET_SIZE];
 } QUEUED_AUDIO_PACKET, *PQUEUED_AUDIO_PACKET;
+
+static void MaybeLogAudioTransportStats(bool force) {
+    AUDIO_TRANSPORT_SNAPSHOT snapshot;
+
+    if (!AudioTransportTakeSnapshot(
+            &audioTransportDiagnostics,
+            &rtpAudioQueue.stats,
+            PltGetMillis(),
+            1000,
+            force,
+            &snapshot)) {
+        return;
+    }
+
+    Limelog(
+        "AudioTransportStats windowMs=%llu audio=%llu fec=%llu "
+        "invalidAudio=%llu invalidFec=%llu oos=%llu recovered=%llu "
+        "fecFailed=%llu fullBlockSkipped=%llu plc=%llu "
+        "totalAudio=%llu totalFec=%llu totalInvalidAudio=%llu "
+        "totalInvalidFec=%llu totalOos=%llu totalRecovered=%llu "
+        "totalFecFailed=%llu totalFullBlockSkipped=%llu totalPlc=%llu\n",
+        (unsigned long long)snapshot.windowMs,
+        (unsigned long long)snapshot.delta.packetCountAudio,
+        (unsigned long long)snapshot.delta.packetCountFec,
+        (unsigned long long)snapshot.delta.packetCountAudioInvalid,
+        (unsigned long long)snapshot.delta.packetCountFecInvalid,
+        (unsigned long long)snapshot.delta.packetCountOOS,
+        (unsigned long long)snapshot.delta.packetCountFecRecovered,
+        (unsigned long long)snapshot.delta.packetCountFecFailed,
+        (unsigned long long)snapshot.delta.packetCountFullBlockSkipped,
+        (unsigned long long)snapshot.delta.packetCountPlc,
+        (unsigned long long)snapshot.total.packetCountAudio,
+        (unsigned long long)snapshot.total.packetCountFec,
+        (unsigned long long)snapshot.total.packetCountAudioInvalid,
+        (unsigned long long)snapshot.total.packetCountFecInvalid,
+        (unsigned long long)snapshot.total.packetCountOOS,
+        (unsigned long long)snapshot.total.packetCountFecRecovered,
+        (unsigned long long)snapshot.total.packetCountFecFailed,
+        (unsigned long long)snapshot.total.packetCountFullBlockSkipped,
+        (unsigned long long)snapshot.total.packetCountPlc);
+}
 
 static void AudioPingThreadProc(void* context) {
     char legacyPingData[] = { 0x50, 0x49, 0x4E, 0x47 };
@@ -68,6 +110,10 @@ static void AudioPingThreadProc(void* context) {
 int initializeAudioStream(void) {
     LbqInitializeLinkedBlockingQueue(&packetQueue, 30);
     RtpaInitializeQueue(&rtpAudioQueue);
+    AudioTransportDiagnosticsReset(
+        &audioTransportDiagnostics,
+        &rtpAudioQueue.stats,
+        PltGetMillis());
     lastSeq = 0;
     receivedDataFromPeer = false;
     pingThreadStarted = false;
@@ -373,6 +419,8 @@ static void AudioReceiveThreadProc(void* context) {
                 }
             }
         }
+
+        MaybeLogAudioTransportStats(false);
     }
     
     if (packet != NULL) {
@@ -416,6 +464,7 @@ void stopAudioStream(void) {
         PltJoinThread(&decoderThread);
     }
 
+    MaybeLogAudioTransportStats(true);
     AudioCallbacks.cleanup();
 }
 
