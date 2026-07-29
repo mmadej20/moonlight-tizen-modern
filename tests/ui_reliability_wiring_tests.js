@@ -19,6 +19,8 @@ const navigationSource = fs.readFileSync('wasm/platform/navigation.js', 'utf8');
 const messagesSource = fs.readFileSync('wasm/platform/messages.js', 'utf8');
 const utilsSource = fs.readFileSync('wasm/static/js/utils.js', 'utf8');
 const htmlSource = fs.readFileSync('wasm/index.html', 'utf8');
+const nativeHeaderSource = fs.readFileSync('wasm/moonlight_wasm.hpp', 'utf8');
+const nativeMainSource = fs.readFileSync('wasm/main.cpp', 'utf8');
 
 assert.match(indexSource, /addHostGenerationGate/);
 assert.match(indexSource, /pairingGenerationGate/);
@@ -39,5 +41,22 @@ assert.strictEqual(
 );
 assert.match(messagesSource, /if\s*\(!OperationGuard\.isStaleOperationError\(error\)\)/);
 assert(htmlSource.indexOf('platform/operation_guard.js') < htmlSource.indexOf('platform/index.js'));
+
+assert.match(htmlSource, /id="speculativeRfiBtn"[\s\S]*for="speculativeRfiSwitch"/);
+assert.match(htmlSource, /id="speculativeRfiSwitch"/);
+assert.match(navigationSource, /'speculativeRfiBtn'/);
+assert.match(indexSource, /#speculativeRfiSwitch'\)\.on\('click', saveSpeculativeRfi\)/);
+assert.match(indexSource, /function saveSpeculativeRfi\(\)[\s\S]*storeData\('speculativeRfi'/);
+assert.match(indexSource, /getData\('speculativeRfi'[\s\S]*#speculativeRfiBtn/);
+assert.match(indexSource, /const defaultSpeculativeRfi = false;[\s\S]*storeData\('speculativeRfi', defaultSpeculativeRfi/);
+assert.strictEqual(
+  (indexSource.match(/performanceStats,\s*speculativeRfi/g) || []).length,
+  2
+);
+assert.match(messagesSource, /performanceStats, speculativeRfi/);
+assert.match(nativeHeaderSource, /bool disableWarnings, bool performanceStats, bool speculativeRfi/);
+assert.match(nativeMainSource, /decoderCapabilitiesWithOptionalRfi\(/);
+assert.match(nativeMainSource, /Experimental RFI recovery requested/);
+assert.match(nativeMainSource, /Decoder renderer capabilities/);
 
 console.log('ui_reliability_wiring_tests: PASS');
