@@ -95,6 +95,7 @@ function attachListeners() {
   $('#optimizeBitrateSwitch').on('click', saveOptimizeBitrate);
   $('#disableWarningsSwitch').on('click', saveDisableWarnings);
   $('#performanceStatsSwitch').on('click', savePerformanceStats);
+  $('#speculativeRfiSwitch').on('click', saveSpeculativeRfi);
   $('#navigationGuideBtn').on('click', navigationGuideDialog);
   $('#checkUpdatesBtn').on('click', checkForAppUpdates);
   $('#restartAppBtn').on('click', restartAppDialog);
@@ -1584,7 +1585,7 @@ function handleSettingsView(category) {
   }
 }
 
-function beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing, videoCodec) {
+function beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing, videoCodec, speculativeRfi) {
   DiagnosticLogs.beginSession({
     host: host.address,
     codec: videoCodec,
@@ -1593,6 +1594,7 @@ function beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate
     fps: frameRate,
     bitrateKbps: bitrate,
     framePacing: framePacing === 1,
+    speculativeRfi: speculativeRfi === 1,
     appVersion: appInfo.version,
     platformVersion: platformVer,
     model: modelName,
@@ -2574,6 +2576,7 @@ function startGame(host, appID) {
       const gameMode = $('#gameModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const disableWarnings = $('#disableWarningsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const performanceStats = $('#performanceStatsSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      const speculativeRfi = $('#speculativeRfiSwitch').parent().hasClass('is-checked') ? 1 : 0;
 
       console.log('%c[index.js, startGame]', 'color: green;', 'startRequest:' + 
       '\n Host address: ' + host.address + ':' + host.httpPort + 
@@ -2594,7 +2597,8 @@ function startGame(host, appID) {
       '\n Full color range: ' + fullRange + 
       '\n Game Mode: ' + gameMode + 
       '\n Disable connection warnings: ' + disableWarnings + 
-      '\n Performance statistics: ' + performanceStats);
+      '\n Performance statistics: ' + performanceStats +
+      '\n Experimental RFI recovery: ' + speculativeRfi);
 
       // Hide on-screen overlays until the streaming session begins
       $('#connection-warnings, #performance-stats').css('background', 'transparent').text('');
@@ -2631,13 +2635,13 @@ function startGame(host, appID) {
             return;
           }
           // Start stream request
-          beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing, videoCodec);
+          beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing, videoCodec, speculativeRfi);
           sendMessage('startRequest', [
             host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
             host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
             framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
             audioConfig, audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
-            performanceStats
+            performanceStats, speculativeRfi
           ]);
         }, function(failedResumeApp) {
           console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to resume app with id: ' + appID + '\n Returned error was: ' + failedResumeApp + '!');
@@ -2684,13 +2688,13 @@ function startGame(host, appID) {
           return;
         }
         // Start stream request
-        beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing, videoCodec);
+        beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing, videoCodec, speculativeRfi);
         sendMessage('startRequest', [
           host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
           host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
           framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
           audioConfig, audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
-          performanceStats
+          performanceStats, speculativeRfi
         ]);
       }, function(failedLaunchApp) {
         console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to launch app with id: ' + appID + '\n Returned error was: ' + failedLaunchApp + '!');
@@ -3412,6 +3416,14 @@ function savePerformanceStats() {
   }, 100);
 }
 
+function saveSpeculativeRfi() {
+  setTimeout(() => {
+    const chosenSpeculativeRfi = $('#speculativeRfiSwitch').parent().hasClass('is-checked');
+    console.log('%c[index.js, saveSpeculativeRfi]', 'color: green;', 'Saving speculative RFI state: ' + chosenSpeculativeRfi);
+    storeData('speculativeRfi', chosenSpeculativeRfi, null);
+  }, 100);
+}
+
 // Reset all settings to their default state and save the value data
 function restoreDefaultsSettingsValues() {
   const defaultResolution = '1280:720';
@@ -3513,6 +3525,10 @@ function restoreDefaultsSettingsValues() {
   const defaultPerformanceStats = false;
   document.querySelector('#performanceStatsBtn').MaterialSwitch.off();
   storeData('performanceStats', defaultPerformanceStats, null);
+
+  const defaultSpeculativeRfi = false;
+  document.querySelector('#speculativeRfiBtn').MaterialSwitch.off();
+  storeData('speculativeRfi', defaultSpeculativeRfi, null);
 }
 
 function initSamsungKeys() {
@@ -3850,6 +3866,17 @@ function loadUserDataCb() {
       document.querySelector('#performanceStatsBtn').MaterialSwitch.off();
     } else {
       document.querySelector('#performanceStatsBtn').MaterialSwitch.on();
+    }
+  });
+
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored speculativeRfi preferences.');
+  getData('speculativeRfi', function(previousValue) {
+    if (previousValue.speculativeRfi == null) {
+      document.querySelector('#speculativeRfiBtn').MaterialSwitch.off(); // Set the default state
+    } else if (previousValue.speculativeRfi == false) {
+      document.querySelector('#speculativeRfiBtn').MaterialSwitch.off();
+    } else {
+      document.querySelector('#speculativeRfiBtn').MaterialSwitch.on();
     }
   });
 }

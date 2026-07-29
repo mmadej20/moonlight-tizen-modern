@@ -95,7 +95,7 @@ class MoonlightInstance {
     std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
     bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
     std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-    bool disableWarnings, bool performanceStats);
+    bool disableWarnings, bool performanceStats, bool speculativeRfi);
   MessageResult StopStream();
 
   MessageResult CancelRequest(int callbackId);
@@ -337,7 +337,7 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-  bool disableWarnings, bool performanceStats);
+  bool disableWarnings, bool performanceStats, bool speculativeRfi);
 MessageResult stopStream();
 
 MessageResult cancelRequest(int callbackId);

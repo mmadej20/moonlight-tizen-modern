@@ -242,6 +242,7 @@
         + ' @ ' + (self.metadata.fps || 'unknown') + ' FPS',
       'Bitrate: ' + (self.metadata.bitrateKbps || 'unknown') + ' Kbps',
       'Frame pacing: ' + (self.metadata.framePacing ? 'enabled' : 'disabled'),
+      'Experimental RFI recovery: ' + (self.metadata.speculativeRfi ? 'enabled' : 'disabled'),
       ''
     ].join('\n'));
 

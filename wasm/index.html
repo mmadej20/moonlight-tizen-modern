@@ -379,6 +379,18 @@
                 </label>
               </div>
             </div>
+            <div class="setting-option">
+              <label>Speculative RFI recovery (experimental)</label>
+              <span class="mdl-list__item-text-body">
+                - May shorten recovery after isolated packet loss, but unsupported TV decoders can freeze or display corrupted video. Takes effect on the next stream.
+              </span>
+              <div id="speculativeRfiMenu">
+                <label id="speculativeRfiBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="speculativeRfiSwitch">
+                  <input type="checkbox" id="speculativeRfiSwitch" class="mdl-switch__input">
+                  <span class="mdl-switch__label">Enable codec-specific reference frame invalidation recovery</span>
+                </label>
+              </div>
+            </div>
           </div>
           <div id="diagnosticSettings" class="settings-options">
             <div class="setting-option diagnostic-panel">

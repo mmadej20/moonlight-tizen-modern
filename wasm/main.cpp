@@ -1,5 +1,6 @@
 #include "moonlight_wasm.hpp"
 #include "diagnostic_log.hpp"
+#include "rfi_capabilities.hpp"
 
 #include <stdio.h>
 #include <string.h>
@@ -324,7 +325,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-  bool disableWarnings, bool performanceStats) {
+  bool disableWarnings, bool performanceStats, bool speculativeRfi) {
 
   if (!m_ConnectionLifecycle.TryStart()) {
     return MessageResult::Reject(emscripten::val(GS_WRONG_STATE));
@@ -380,6 +381,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   PostToJs("Setting the Game mode to: " + std::to_string(gameMode));
   PostToJs("Setting the Disable connection warnings to: " + std::to_string(disableWarnings));
   PostToJs("Setting the Performance statistics to: " + std::to_string(performanceStats));
+  ClLogMessage("Experimental RFI recovery requested: %s\n", speculativeRfi ? "enabled" : "disabled");
 
   // Populate the stream configuration
   LiInitializeStreamConfiguration(&m_StreamConfig);
@@ -443,6 +445,14 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
     m_StreamConfig.supportedVideoFormats = VIDEO_FORMAT_H264;
     PostToJs("Selecting the fallback video format to: VIDEO_FORMAT_H264");
   }
+
+  s_DrCallbacks.capabilities = decoderCapabilitiesWithOptionalRfi(
+    CAPABILITY_SLICES_PER_FRAME(4),
+    speculativeRfi,
+    m_StreamConfig.supportedVideoFormats);
+  ClLogMessage("Decoder renderer capabilities: 0x%X (RFI recovery %s)\n",
+    s_DrCallbacks.capabilities,
+    speculativeRfi ? "enabled" : "disabled");
 
   // Initialize the color range with default value
   m_StreamConfig.colorRange = 0;
@@ -704,11 +714,11 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-  bool disableWarnings, bool performanceStats) {
+  bool disableWarnings, bool performanceStats, bool speculativeRfi) {
   PostToJs("Starting the streaming session...");
   return g_Instance->StartStream(host, httpPort, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
   framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioConfig,
-  audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats);
+  audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats, speculativeRfi);
 }
 
 MessageResult stopStream() {

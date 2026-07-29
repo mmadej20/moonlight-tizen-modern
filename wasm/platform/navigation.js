@@ -1281,7 +1281,8 @@ const Views = {
       'unlockAllFpsBtn',
       'optimizeBitrateBtn',
       'disableWarningsBtn',
-      'performanceStatsBtn'
+      'performanceStatsBtn',
+      'speculativeRfiBtn'
     ]),
     up: function() {
       this.view.prevOption();
