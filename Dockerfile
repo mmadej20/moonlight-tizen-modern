@@ -3,7 +3,7 @@ WORKDIR /frontend
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
-FROM ubuntu:22.04 AS builder
+FROM ubuntu:22.04 AS sdk
 
 ARG DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
@@ -33,6 +33,8 @@ RUN aria2c -x 5 -s 5 -o web-cli_Tizen_Studio_6.1_ubuntu-64.bin 'https://download
 RUN chmod a+x web-cli_Tizen_Studio_6.1_ubuntu-64.bin
 RUN ./web-cli_Tizen_Studio_6.1_ubuntu-64.bin --accept-license /home/moonlight/tizen-studio
 ENV PATH=/home/moonlight/tizen-studio/tools/ide/bin:/home/moonlight/tizen-studio/tools:${PATH}
+
+FROM sdk AS builder
 
 # Prepare the Tizen certificate and security profiles for signing the application package
 RUN tizen certificate \
@@ -101,6 +103,16 @@ COPY --from=frontend-dependencies \
 RUN cmake --install build --prefix build
 RUN cp moonlight-tizen/res/icon.png build/widget/
 
+# Inject Game Mode metadata into the Tizen config.xml file, which is required for building the ForceGM variant later
+ARG FORCE_GAME_MODE=false
+RUN if [ "$FORCE_GAME_MODE" = "true" ]; then \
+		sed -i 's|<tizen:metadata key="http://samsung.com/tv/metadata/use.voiceguide"|<tizen:metadata key="http://samsung.com/tv/metadata/use.game.mode" value="true"/>\n    <tizen:metadata key="http://samsung.com/tv/metadata/use.voiceguide"|' build/widget/config.xml && \
+		grep -q 'use.game.mode' build/widget/config.xml && \
+		echo "Game Mode metadata injected into config.xml (ForceGM variant)"; \
+	else \
+		echo "No Game Mode metadata injected into config.xml (Standard variant)"; \
+	fi
+
 # Sign and package the application into a WGT file using Expect to automate the interactive password prompts
 RUN echo \
 	'set timeout -1\n' \
@@ -111,7 +123,10 @@ RUN echo \
 	'send -- "N\\r"\n' \
 	'expect eof\n' \
 | expect
-RUN mv build/widget/Moonlight.wgt .
+
+# Rename the output WGT file by appending a suffix for the ForceGM variant, or leave without a suffix for the Standard variant
+RUN if [ "$FORCE_GAME_MODE" = "true" ]; then SUFFIX="-ForceGM"; else SUFFIX=""; fi; \
+	mv build/widget/Moonlight.wgt "Moonlight${SUFFIX}.wgt" && ls -la *.wgt
 
 FROM scratch AS artifact
-COPY --from=builder /home/moonlight/Moonlight.wgt /home/moonlight/Moonlight.wgt
+COPY --from=builder /home/moonlight/Moonlight*.wgt /home/moonlight/

@@ -24,13 +24,6 @@ function findNvService(ipString) {
   // .local hostnames, and the HTTP subnet scanner only produces IPv4 addresses.
   var ip = ipString.replace('ipv4:', '');
 
-  // Skip hosts we have already registered by this exact IP address
-  for (var hostUID in hosts) {
-    if (hosts[hostUID].address === ip) {
-      return;
-    }
-  }
-
   // Create a new NvHTTP object for the discovered host
   var discoveredHost = new NvHTTP(ip, myUniqueid);
   discoveredHost.httpPort = 47989;
@@ -42,20 +35,30 @@ function findNvService(ipString) {
     if (!returnedDiscoveredHost.online) {
       return;
     }
+    // A discovery request may finish after the user deletes this host. Keep the
+    // deletion authoritative for the rest of the current app session.
+    if (removedHostUids[returnedDiscoveredHost.serverUid]) {
+      return;
+    }
     // Check if the host is already known by its server UID
     if (hosts[returnedDiscoveredHost.serverUid] != null) {
       // Host already known — update its stored IP if it has changed
       var existingAddress = hosts[returnedDiscoveredHost.serverUid].address;
-      // Check if the existing address is different from the newly discovered address
-      if (existingAddress !== returnedDiscoveredHost.address) {
+      // Also check if the base URL is out of sync or stale compared to the discovered host
+      var existingBaseUrl = hosts[returnedDiscoveredHost.serverUid]._baseUrlHttps;
+      if (existingAddress !== returnedDiscoveredHost.address || existingBaseUrl !== returnedDiscoveredHost._baseUrlHttps) {
         var isIpv4 = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(existingAddress);
         // Do not overwrite IPv6 or DNS addresses if they are currently online
-        if (!isIpv4 && hosts[returnedDiscoveredHost.serverUid].online) {
+        if (!isIpv4 && hosts[returnedDiscoveredHost.serverUid].online && existingBaseUrl === returnedDiscoveredHost._baseUrlHttps) {
           console.log('%c[main.js, findNvService]', 'color: gray;', 'Keeping existing non-IPv4 address since it is online:', existingAddress);
         } else {
           // Update the stored address to the newly discovered IPv4 address
           console.log('%c[main.js, findNvService]', 'color: gray;', 'Updating address for server UID:', returnedDiscoveredHost.serverUid, 'from', existingAddress, 'to', returnedDiscoveredHost.address);
           hosts[returnedDiscoveredHost.serverUid].address = returnedDiscoveredHost.address;
+          hosts[returnedDiscoveredHost.serverUid].localAddress = returnedDiscoveredHost.localAddress;
+          hosts[returnedDiscoveredHost.serverUid]._baseUrlHttp = returnedDiscoveredHost._baseUrlHttp;
+          hosts[returnedDiscoveredHost.serverUid]._baseUrlHttps = returnedDiscoveredHost._baseUrlHttps;
+          hosts[returnedDiscoveredHost.serverUid].macAddress = returnedDiscoveredHost.macAddress;
           if (typeof hosts[returnedDiscoveredHost.serverUid].updateExternalAddressIP4 === 'function') {
             hosts[returnedDiscoveredHost.serverUid].updateExternalAddressIP4();
           }

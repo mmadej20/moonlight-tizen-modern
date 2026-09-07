@@ -23,8 +23,13 @@ class HttpRequestRegistry {
                                                long connect_timeout_ms,
                                                long total_timeout_ms) {
     auto context = std::make_shared<HTTP_REQUEST_CONTEXT>();
+    // A zero transfer deadline is the pairing policy: the host may wait for
+    // user input without sending any bytes. Keep the connection deadline and
+    // cancellation active, but do not let the ordinary low-speed limit end it.
+    const bool waitingForUser = total_timeout_ms == 0;
     http_request_context_init(context.get(), connect_timeout_ms,
-                              total_timeout_ms, 2, 1);
+                              total_timeout_ms, waitingForUser ? 0 : 2,
+                              waitingForUser ? 0 : 1);
 
     std::lock_guard<std::mutex> lock(m_Mutex);
     if (m_Requests.find(callback_id) != m_Requests.end())

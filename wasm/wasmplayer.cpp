@@ -332,7 +332,9 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
     return -1;
   }
 
-  {
+  // The Web Audio backend renders the audio itself in platform/audio.js, so the EMSS audio
+  // track is only added when the EMSS backend is selected
+  if (g_Instance->m_AudioBackend == AudioBackend::Emss) {
     samsung::wasm::ChannelLayout channelLayout; // Selected audio channel layout from audio config
     switch (CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(instance->m_AudioConfig)) {
       case 2:
@@ -465,7 +467,8 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   }
   // Some Tizen 9 TVs open both EMSS tracks but never complete Play's callback.
   // Track-open events are the reliable readiness signal on those devices.
-  if (!instance->WaitForMediaStage("audio track open", instance->m_AudioTrackOpenLatch) ||
+  if ((instance->m_AudioBackend == AudioBackend::Emss &&
+       !instance->WaitForMediaStage("audio track open", instance->m_AudioTrackOpenLatch)) ||
       !instance->WaitForMediaStage("video track open", instance->m_VideoTrackOpenLatch)) {
     return -1;
   }

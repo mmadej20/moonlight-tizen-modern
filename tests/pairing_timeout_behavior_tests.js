@@ -19,6 +19,7 @@ const context = {
   Int32Array,
   ArrayBuffer,
   Math,
+  cancelAsyncRequest: function() { return false; },
   sendMessage: function(type, args) {
     requests.push({ type, args });
     if (type === 'pair') return Promise.resolve('test-certificate');
@@ -60,8 +61,8 @@ async function main() {
   assert(challenge, 'pairing challenge request was not sent');
   assert.strictEqual(
     challenge.args[3],
-    180000,
-    'pairing challenge must allow three minutes for completion',
+    0,
+    'pairing challenge must wait for user input without a transfer deadline',
   );
 
   console.log('pairing_timeout_behavior_tests: PASS');

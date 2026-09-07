@@ -1,6 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 function flushMicrotasks() {
   return Promise.resolve().then(() => Promise.resolve()).then(() => Promise.resolve());
@@ -162,7 +163,77 @@ function createScanner(fakeFetch, fakeTimers, FakeAbortController, found, overri
   }, overrides));
 }
 
+function loadDiscoveryHarness(existingHosts, removedHostUids) {
+  const callbacks = [];
+  const added = [];
+  const saved = [];
+  const source = fs.readFileSync(
+    path.join(__dirname, '../wasm/static/js/mdns-browser/main.js'),
+    'utf8',
+  );
+  const context = {
+    hosts: existingHosts,
+    removedHostUids,
+    myUniqueid: 'client-id',
+    console: { log() {}, warn() {}, error() {} },
+    NvHTTP: function(address) {
+      this.address = address;
+      this.pollServer = (callback) => callbacks.push(callback);
+    },
+    addHostToGrid(host) { added.push(host); context.hosts[host.serverUid] = host; },
+    beginBackgroundPollingOfHost() {},
+    saveHosts() { saved.push(true); },
+  };
+  vm.runInNewContext(source, context);
+  return { context, callbacks, added, saved };
+}
+
+function testDiscoveryUpdatesBothBaseUrls() {
+  const stored = {
+    address: '192.168.1.10',
+    localAddress: '192.168.1.10',
+    _baseUrlHttp: 'http://192.168.1.10:47989',
+    _baseUrlHttps: 'https://192.168.1.10:47984',
+    online: false,
+    updateExternalAddressIP4() {},
+  };
+  const harness = loadDiscoveryHarness({ server: stored }, {});
+  harness.context.findNvService('ipv4:192.168.1.20');
+  harness.callbacks[0]({
+    online: true,
+    serverUid: 'server',
+    address: '192.168.1.20',
+    localAddress: '192.168.1.20',
+    _baseUrlHttp: 'http://192.168.1.20:47989',
+    _baseUrlHttps: 'https://192.168.1.20:47984',
+    macAddress: '00:11:22:33:44:55',
+  });
+
+  assert.strictEqual(stored.address, '192.168.1.20');
+  assert.strictEqual(stored._baseUrlHttp, 'http://192.168.1.20:47989');
+  assert.strictEqual(stored._baseUrlHttps, 'https://192.168.1.20:47984');
+  assert.strictEqual(harness.saved.length, 1);
+}
+
+function testDeletedHostDoesNotReturnThroughDiscoveryCallback() {
+  const harness = loadDiscoveryHarness({}, { server: true });
+  harness.context.findNvService('ipv4:192.168.1.20');
+  harness.callbacks[0]({
+    online: true,
+    serverUid: 'server',
+    address: '192.168.1.20',
+    localAddress: '192.168.1.20',
+    _baseUrlHttp: 'http://192.168.1.20:47989',
+    _baseUrlHttps: 'https://192.168.1.20:47984',
+  });
+
+  assert.deepStrictEqual(harness.added, [], 'a deleted host is not re-added by a late discovery callback');
+  assert.deepStrictEqual(harness.saved, [], 'a stale discovery callback does not persist the deleted host');
+}
+
 async function run() {
+  testDiscoveryUpdatesBothBaseUrls();
+  testDeletedHostDoesNotReturnThroughDiscoveryCallback();
   const FakeAbortController = createFakeAbortController();
   const fakeTimers = createFakeTimers();
   const fakeFetch = createDeferredFetch();

@@ -20,6 +20,10 @@ const PREVIOUS = 'wgt-private/moonlight-diagnostics-previous.log';
     fps: 60,
     bitrateKbps: 36000,
     framePacing: true,
+    audioBackend: 'WebAudio',
+    audioConfig: 'Stereo',
+    audioSync: false,
+    audioJitterMs: 75,
     speculativeRfi: true,
     startedAt: '2026-07-21T20:00:00.000Z'
   });
@@ -29,6 +33,10 @@ const PREVIOUS = 'wgt-private/moonlight-diagnostics-previous.log';
   assert(current.includes('Codec: HEVC'));
   assert(current.includes('Video: 3840x2160 @ 60 FPS'));
   assert(current.includes('Bitrate: 36000 Kbps'));
+  assert(current.includes('Audio backend: WebAudio'));
+  assert(current.includes('Audio configuration: Stereo'));
+  assert(current.includes('Audio synchronization: disabled'));
+  assert(current.includes('Audio jitter buffer: 75 ms'));
   assert(current.includes('Experimental RFI recovery: enabled'));
 
   let appendCalls = 0;

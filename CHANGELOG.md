@@ -2,6 +2,66 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.16.0
+
+### Added
+- Introduced a new 'Audio backend' setting for switching between EMSS and Web Audio
+- Added Web Audio as an alternative audio backend alongside the existing EMSS implementation
+- Introduced a new 'Audio jitter buffer' setting for tuning Web Audio playback buffering
+- Retained the existing 'Audio synchronization' setting for the default EMSS backend
+- Handled backend-specific audio settings dynamically based on the selected audio backend
+
+### Fixed
+- Fixed selection menu settings not being preserved after restoring defaults
+- Fixed a race condition causing missing Smart Hub Preview box art for newly added apps
+- Fixed an issue causing toggle switches to revert to their previous state after being selected
+- Fixed background polling failures caused by stale host addresses and missing local IP fallback
+
+## v1.15.0
+
+### Added
+- Added Smart Hub Preview support with app tiles, box art, and native tile ordering (Tizen 5.5–6.0)
+- Added Deep Link support for launching apps directly from the Smart Hub Preview home screen
+- Added offline persistence to preserve Smart Hub Preview apps when hosts are unavailable
+- Handled unsupported Tizen versions to prevent Smart Hub Preview background service processes
+
+### Changed
+- Improved sorting of the app list for titles containing numbers for a more natural ordering
+
+### Fixed
+- Fixed selection menu settings not being preserved after application restart
+- Fixed an issue causing the memory-cached app list to persist across application restarts
+- Fixed an issue causing system info to be loaded multiple times during application startup
+- Fixed a race condition causing some box arts to fail when retrieving multiple apps at once
+- Fixed polling failures after the subnet scanner detects a known host with a changed IP address
+
+## v1.14.1
+
+### Added
+- Added a warning message when unlocking higher frame rate options
+- Added the ForceGM variant release packaging for release workflows
+- Reintroduced translation synchronization tooling for maintaining locale files
+
+### Changed
+- Moved the 'Host address field mode' setting to the 'UI Settings' category
+- Improved the warning message when selecting 5.1 or 7.1 surround sound options
+- Optimized Docker build caching to reduce build times by reusing the Tizen SDK layer
+
+## v1.14.0
+
+### Added
+- Added a new 'UI Settings' category for interface customization options
+- Introduced a new 'Language' setting to manually change the application language
+- Added support for automatic language detection based on the TV system language
+- Added translations for the application interface and backend-generated messages
+- Added the ability to change the application language without restarting the app
+- Added Portuguese Brazilian (pt-BR) language support to the language selector
+- Preserved English (en-US) as the base and fallback language for untranslated strings
+
+### Changed
+- Moved the 'Language' setting into the new 'UI Settings' category
+- Configured workflow for automated comments on issues and pull requests when opened or closed
+
 ## v1.13.1
 
 ### Fixed

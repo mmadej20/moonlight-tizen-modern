@@ -242,6 +242,14 @@
         + ' @ ' + (self.metadata.fps || 'unknown') + ' FPS',
       'Bitrate: ' + (self.metadata.bitrateKbps || 'unknown') + ' Kbps',
       'Frame pacing: ' + (self.metadata.framePacing ? 'enabled' : 'disabled'),
+      'Audio backend: ' + (self.metadata.audioBackend || 'unknown'),
+      'Audio configuration: ' + (self.metadata.audioConfig || 'unknown'),
+      'Audio synchronization: ' + (self.metadata.audioSync ? 'enabled' : 'disabled'),
+      'Audio jitter buffer: ' + (
+        self.metadata.audioJitterMs !== undefined && self.metadata.audioJitterMs !== null
+          ? self.metadata.audioJitterMs
+          : 'unknown'
+      ) + ' ms',
       'Experimental RFI recovery: ' + (self.metadata.speculativeRfi ? 'enabled' : 'disabled'),
       ''
     ].join('\n'));

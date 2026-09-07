@@ -13,8 +13,8 @@ assert.match(httpCpp, /mkcert_free\(certKeyPair\)/);
 assert.doesNotMatch(httpCpp, /char\* _certStr = strdup/);
 assert.match(
   mainCpp,
-  /m_HttpRequests\.Create\(callbackId,\s*180000,\s*180000\)/,
-  'native pairing requests must allow three minutes for PIN confirmation',
+  /m_HttpRequests\.Create\(callbackId,\s*3000,\s*0\)/,
+  'native pairing must keep a connection deadline without timing out PIN entry',
 );
 
 console.log('pairing_ownership_wiring_tests: PASS');

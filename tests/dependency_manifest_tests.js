@@ -10,6 +10,7 @@ const developmentWorkflow = fs.readFileSync('.github/workflows/release-developme
 const stableWorkflow = fs.readFileSync('.github/workflows/release-stable.yml', 'utf8');
 
 const expectedJavaScriptSuites = [
+  'tests/audio_backend_behavior_tests.js',
   'tests/common_log_capture_wiring_tests.js',
   'tests/connection_wiring_tests.js',
   'tests/dependency_manifest_tests.js',
@@ -19,11 +20,13 @@ const expectedJavaScriptSuites = [
   'tests/http_bridge_tests.js',
   'tests/media_ownership_wiring_tests.js',
   'tests/operation_guard_tests.js',
+  'tests/pairing_cancellation_behavior_tests.js',
   'tests/pairing_ownership_wiring_tests.js',
   'tests/pairing_timeout_behavior_tests.js',
   'tests/subnet_scanner_tests.js',
   'tests/ui_reliability_behavior_tests.js',
   'tests/ui_reliability_wiring_tests.js',
+  'tests/upstream_ui_integration_tests.js',
 ];
 
 const discoveredJavaScriptSuites = fs.readdirSync('tests')
@@ -44,6 +47,12 @@ for (const workflow of [developmentWorkflow, stableWorkflow]) {
   assert.doesNotMatch(workflow, /docker (?:start|stop) temp_container/);
   assert.match(workflow, /docker cp temp_container:\/home\/moonlight\/Moonlight\.wgt \./);
   assert.match(workflow, /docker rm temp_container/);
+  assert.match(workflow, /docker create --name temp_container_forcegm \$IMAGE_TAG_FORCEGM artifact-only/);
+  assert.match(workflow, /docker cp temp_container_forcegm:\/home\/moonlight\/Moonlight-ForceGM\.wgt \./);
+  assert(workflow.includes('steps.build_standard.outputs.digest'));
+  assert(workflow.includes('steps.build_forcegm.outputs.digest'));
+  assert(workflow.includes('needs.build-and-push-image.outputs.standard_digest'));
+  assert(workflow.includes('needs.build-and-push-image.outputs.forcegm_digest'));
 }
 
 assert.strictEqual(pkg.engines.node, '24.18.0');
@@ -68,5 +77,8 @@ assert(dockerfile.includes('/wasm/static/js/jquery-2.2.0.min.js'));
 assert(!dockerfile.includes('/wasm/static/js/jquery-4.0.0.min.js'));
 assert(dockerfile.includes('AS builder'));
 assert(dockerfile.includes('FROM scratch AS artifact'));
-assert(dockerfile.includes('COPY --from=builder /home/moonlight/Moonlight.wgt /home/moonlight/Moonlight.wgt'));
+assert(dockerfile.includes('COPY --from=builder /home/moonlight/Moonlight*.wgt /home/moonlight/'));
+assert(config.includes('version="1.16.0"'));
+assert.strictEqual(pkg.version, '1.16.0');
+assert.strictEqual(lock.version, pkg.version);
 console.log('dependency_manifest_tests: PASS');

@@ -63,6 +63,21 @@ function extractFunction(source, name) {
 }
 
 function loadFunctions(names, context) {
+  if (!context.t) {
+    context.t = function(template) {
+      const values = Array.prototype.slice.call(arguments, 1);
+      return String(template).replace(/%(\d+)\$[sd]/g, function(match, index) {
+        return String(values[Number(index) - 1]);
+      });
+    };
+  }
+  if (context._isSmartHubSupported === undefined) context._isSmartHubSupported = false;
+  if (!context._previewApps) context._previewApps = {};
+  if (!context.activePolls) context.activePolls = {};
+  if (!context.window) context.window = { previewPromises: [] };
+  if (!context.savePreviewApps) context.savePreviewApps = function() {};
+  if (!context.updatePreviewData) context.updatePreviewData = function() {};
+  if (!context.beginBackgroundPollingOfHost) context.beginBackgroundPollingOfHost = function() {};
   const source = names.map((name) => extractFunction(indexSource, name)).join('\n');
   const exports = names.map((name) => name + ': ' + name).join(', ');
   vm.runInNewContext(source + '\nthis.testExports = {' + exports + '};', context);
@@ -636,6 +651,72 @@ function testIndexedDbTotality() {
   assert.deepStrictEqual(storeResults, [false]);
 }
 
+async function testSavedCertificateAndHostStateSurviveReload() {
+  const savedCertificate = { cert: 'saved-cert', privateKey: 'saved-key' };
+  const storedHost = {
+    address: '192.168.1.20',
+    userEnteredAddress: 'gaming-pc.local',
+    localAddress: '192.168.1.20',
+    macAddress: '00:11:22:33:44:55',
+    httpPort: 47989,
+    httpsPort: 47984,
+    externalPort: 48010,
+    externalIP: '203.0.113.10',
+    serverUid: 'server-uid',
+    hostname: 'Gaming PC',
+    ppkstr: 'saved-pinned-key',
+    retainedFutureField: 'keep-me'
+  };
+  const stored = {
+    cert: savedCertificate,
+    uniqueid: 'saved-client-id',
+    hosts: { 'server-uid': storedHost },
+    previewApps: {}
+  };
+  const initialized = [];
+  const context = {
+    console: quietConsole([]),
+    Promise,
+    Object,
+    pairingCert: null,
+    myUniqueid: null,
+    hosts: {},
+    getData: function(key, callback) { callback({ [key]: stored[key] }); },
+    storeData: function() { throw new Error('existing identity must not be rewritten'); },
+    sendMessage: function(method, args) {
+      initialized.push({ method, args });
+      return Promise.resolve(true);
+    },
+    NvHTTP: function(address, clientUid, userEnteredAddress, macAddress) {
+      this.address = address;
+      this.clientUid = clientUid;
+      this.userEnteredAddress = userEnteredAddress;
+      this.macAddress = macAddress;
+    },
+    addHostToGrid: function() {},
+    startPollingHosts: function() {},
+    restoreUiAfterWasmLoad: function() {},
+    updatePreviewData: function() {},
+    startSubnetScanner: function() {},
+    snackbarLog: function() {},
+    setTimeout: function() {},
+    window: { i18n: null, previewPromises: [] }
+  };
+  const loadHTTPCertsCb = loadFunctions(['loadHTTPCertsCb'], context).loadHTTPCertsCb;
+  loadHTTPCertsCb();
+  await flush();
+
+  assert.strictEqual(context.pairingCert, savedCertificate);
+  assert.strictEqual(context.myUniqueid, 'saved-client-id');
+  assert.strictEqual(context.hosts['server-uid'].ppkstr, 'saved-pinned-key');
+  assert.strictEqual(context.hosts['server-uid'].retainedFutureField, 'keep-me');
+  assert.strictEqual(context.hosts['server-uid'].userEnteredAddress, 'gaming-pc.local');
+  assert.strictEqual(initialized[0].method, 'httpInit');
+  assert.strictEqual(initialized[0].args[0], 'saved-cert');
+  assert.strictEqual(initialized[0].args[1], 'saved-key');
+  assert.strictEqual(initialized[0].args[2], 'saved-client-id');
+}
+
 function createAddHostContext(hostPromises, throwDuringSuccess) {
   const errors = [];
   const jquery = createJQueryHarness();
@@ -747,6 +828,7 @@ const cases = {
   'apps-render-throw': testRenderHelperExceptionRejectsAndRecovers,
   'apps-async-generation': testAsyncAppRenderingHonorsGeneration,
   indexeddb: testIndexedDbTotality,
+  'saved-identity-reload': testSavedCertificateAndHostStateSurviveReload,
   'add-host-cleanup': testAddHostTerminalCleanup,
   'add-host-stale': testStaleAddHostDoesNotReleaseCurrentControl
 };

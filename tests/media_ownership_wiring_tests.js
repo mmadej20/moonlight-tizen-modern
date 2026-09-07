@@ -68,6 +68,48 @@ assert.doesNotMatch(
 );
 assert.match(startupBody, /if\s*\(!playResult\)/);
 
+// Exercise the actual backend-dependent readiness predicate. Only C++ member
+// access/scope notation is translated; short-circuit semantics stay identical.
+const audioWait = startupBody.indexOf('WaitForMediaStage("audio track open"');
+assert(audioWait > 0);
+const conditionStart = startupBody.lastIndexOf('if (', audioWait) + 3;
+let depth = 0;
+let conditionEnd = conditionStart;
+do {
+  const char = startupBody[conditionEnd++];
+  if (char === '(') depth++;
+  if (char === ')') depth--;
+} while (depth > 0 && conditionEnd < startupBody.length);
+const readinessCondition = startupBody.slice(conditionStart, conditionEnd)
+  .replace(/instance->/g, 'instance.').replace(/AudioBackend::/g, 'AudioBackend.');
+function evaluateReadiness(backend, audioReady, videoReady) {
+  const calls = [];
+  const failed = require('vm').runInNewContext(readinessCondition, {
+    AudioBackend: { Emss: 'EMSS' },
+    instance: {
+      m_AudioBackend: backend,
+      WaitForMediaStage(stage) {
+        calls.push(stage);
+        return stage === 'audio track open' ? audioReady : videoReady;
+      },
+    },
+  });
+  return { failed, calls };
+}
+assert.deepStrictEqual(evaluateReadiness('WebAudio', false, true), {
+  failed: false, calls: ['video track open'],
+});
+assert.deepStrictEqual(evaluateReadiness('WebAudio', false, false), {
+  failed: true, calls: ['video track open'],
+});
+assert.deepStrictEqual(evaluateReadiness('EMSS', true, true), {
+  failed: false, calls: ['audio track open', 'video track open'],
+});
+assert.deepStrictEqual(evaluateReadiness('EMSS', false, true), {
+  failed: true, calls: ['audio track open'],
+});
+assert.match(startupBody, /if\s*\(g_Instance->m_AudioBackend == AudioBackend::Emss\)\s*\{[\s\S]*?ElementaryAudioTrackConfig/);
+
 assert.match(
   main,
   /m_Source->Close\(\s*\[this,\s*closeContext\][\s\S]*?RunIfActive\(closeContext/,

@@ -28,6 +28,7 @@ try {
 }
 var isHdrCapable = webapis.avinfo.isHdrTvSupport(); // Check if the device supports HDR
 var hosts = {}; // Hosts is an associative array of NvHTTP objects, keyed by server UID
+var removedHostUids = {}; // Hosts explicitly removed during this app session must not be revived by late discovery callbacks
 var activePolls = {}; // Hosts currently being polled. An associated array of polling IDs, keyed by server UID
 var pairingCert; // Loads the generated certificate
 var myUniqueid;
@@ -51,6 +52,11 @@ var repeatTimeout = null; // Flag indicating whether the repeat timeout is set, 
 var navigationTimeout = null; // Flag indicating whether the navigation timeout is set, initial value is null
 const BUILD_TYPE = '__BUILD_TYPE__'; // Placeholder for build type, which should be replaced during the build process
 const BUILD_COMMIT = '__BUILD_COMMIT__'; // Placeholder for build commit, which should be replaced during the build process
+var _smartHubLocalMessagePort = null; // Local message port for receiving messages from the Smart Hub service
+var _smartHubMessagePortListener = null; // Listener ID for the Smart Hub local message port
+var _previewApps = {}; // Per-host app cache for Smart Hub Preview: {serverUid: {hostname, address, apps: [{id, title, imageUri}]}}
+var _isSmartHubSupported = false; // Flag indicating if Smart Hub Preview is supported on this device
+
 const REPEAT_DELAY = 350; // Repeat delay set to 350ms (milliseconds)
 const REPEAT_INTERVAL = 100; // Repeat interval set to 100ms (milliseconds)
 const ACTION_THRESHOLD = 0.5; // Threshold for initial navigation set to 0.5
@@ -60,7 +66,18 @@ const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // Automatic check for updates inte
 
 // Called by the common.js module
 function attachListeners() {
-  changeUiModeForWasmLoad();
+  const i18nInitPromise = (window.i18n && typeof window.i18n.init === 'function')
+    ? window.i18n.init().catch((error) => {
+      console.warn('%c[index.js, attachListeners]', 'color: green;', 'Warning: i18n initialization failed: ' + error);
+    })
+    : Promise.resolve();
+
+  i18nInitPromise.finally(() => {
+    changeUiModeForWasmLoad();
+    if (window.i18n && typeof window.i18n.populateLanguageMenu === 'function') {
+      window.i18n.populateLanguageMenu(saveLanguagePreference);
+    }
+  });
   initIpAddressFields();
   filterUnsupportedResolutions();
   DiagnosticLogs.init();
@@ -84,8 +101,10 @@ function attachListeners() {
   $('#mouseEmulationSwitch').on('click', saveMouseEmulation);
   $('#flipABfaceButtonsSwitch').on('click', saveFlipABfaceButtons);
   $('#flipXYfaceButtonsSwitch').on('click', saveFlipXYfaceButtons);
+  $('.audioBackendMenu li').on('click', saveAudioBackend);
   $('.audioConfigMenu li').on('click', saveAudioConfiguration);
   $('#audioSyncSwitch').on('click', saveAudioSync);
+  $('#jitterSlider').on('input', saveAudioJitter);
   $('#playHostAudioSwitch').on('click', savePlayHostAudio);
   $('.videoCodecMenu li').on('click', saveVideoCodec);
   $('#hdrModeSwitch').on('click', saveHdrMode);
@@ -113,7 +132,10 @@ function attachListeners() {
   registerMenu('selectResolution', Views.SelectResolutionMenu);
   registerMenu('selectFramerate', Views.SelectFramerateMenu);
   registerMenu('selectBitrate', Views.SelectBitrateMenu);
+  registerMenu('selectLanguage', Views.SelectLanguageMenu);
+  registerMenu('selectAudioBackend', Views.SelectAudioBackendMenu);
   registerMenu('selectAudio', Views.SelectAudioMenu);
+  registerMenu('selectAudioJitter', Views.SelectAudioJitterMenu);
   registerMenu('selectCodec', Views.SelectCodecMenu);
 
   $(window).resize(fullscreenWasmModule);
@@ -191,7 +213,7 @@ function changeUiModeForWasmLoad() {
   $('#main-content').children().not('#listener, #wasmSpinner').hide();
   $('#wasmSpinner').css('display', 'inline-block');
   $('#wasmSpinnerLogo').show();
-  $('#wasmSpinnerMessage').text('Loading Moonlight...');
+  $('#wasmSpinnerMessage').text(t('Loading Moonlight...'));
 }
 
 function moduleDidLoad() {
@@ -376,18 +398,20 @@ function stopPollingHosts() {
 }
 
 function snackbarLog(givenMessage) {
+  const translatedMessage = t(givenMessage);
   console.log('%c[index.js, snackbarLog]', 'color: green;', givenMessage);
   var data = {
-    message: givenMessage,
+    message: translatedMessage,
     timeout: 2500
   };
   document.querySelector('#snackbar').MaterialSnackbar.showSnackbar(data);
 }
 
 function snackbarLogLong(givenMessage) {
+  const translatedMessage = t(givenMessage);
   console.log('%c[index.js, snackbarLogLong]', 'color: green;', givenMessage);
   var data = {
-    message: givenMessage,
+    message: translatedMessage,
     timeout: 5000
   };
   document.querySelector('#snackbar').MaterialSnackbar.showSnackbar(data);
@@ -396,7 +420,7 @@ function snackbarLogLong(givenMessage) {
 // Handle layout elements when displaying the Hosts view
 function showHostsMode() {
   console.log('%c[index.js, showHostsMode]', 'color: green;', 'Entering "Show Hosts" mode.');
-  $('#header-title').html('Hosts');
+  $('#header-title').html(t('Hosts'));
   $('#header-logo').show();
   $('#main-header').show();
   $('.nav-menu-parent').show();
@@ -437,7 +461,7 @@ function showHosts() {
   // Show a spinner while the host list loads
   $('#wasmSpinner').css('display', 'inline-block');
   $('#wasmSpinnerLogo').hide();
-  $('#wasmSpinnerMessage').text('Loading Hosts...');
+  $('#wasmSpinnerMessage').text(t('Loading Hosts...'));
 
   setTimeout(() => {
     // Hide the spinner after successfully retrieving the host list
@@ -506,7 +530,7 @@ function restoreUiAfterWasmLoad() {
 
 function hostChosen(host) {
   if (isPairingInProgress) {
-    snackbarLogLong('A pairing request is currently in progress. Please wait for it to timeout or finish before trying again.');
+    snackbarLogLong(t('A pairing request is currently in progress. Please wait for it to timeout or finish before trying again.'));
     return;
   }
 
@@ -514,7 +538,7 @@ function hostChosen(host) {
   if (!host.online) {
     // Let the user know what to do to bring the host back online and until then, we'll be back to the previous view.
     console.error('%c[index.js, hostChosen]', 'color: green;', 'Error: Connection to host failed or host is offline!');
-    snackbarLogLong('Failed to connect to the host. Ensure the host is online, Sunshine is running on your PC or GameStream is enabled in GeForce Experience SHIELD settings.');
+    snackbarLogLong(t('Failed to connect to %1$s. Ensure Sunshine is running on your host PC or GameStream is enabled in GeForce Experience SHIELD settings.', 'the host'));
     return;
   }
 
@@ -689,7 +713,7 @@ function parseHostAndPortInput(rawInput) {
   const input = (rawInput || '').trim();
 
   if (!input) {
-    return { valid: false, error: 'Please enter a valid host address!' };
+    return { valid: false, error: t('Please enter a valid host address!') };
   }
 
   let hostPart = input;
@@ -719,21 +743,21 @@ function parseHostAndPortInput(rawInput) {
   }
 
   if (!hostPart) {
-    return { valid: false, error: 'Please enter a valid host address!' };
+    return { valid: false, error: t('Please enter a valid host address!') };
   }
 
   if (!isValidHostAddress(hostPart)) {
-    return { valid: false, error: 'Please enter a valid host address!' };
+    return { valid: false, error: t('Please enter a valid host address!') };
   }
 
   if (portPart) {
     if (!/^\d{1,5}$/.test(portPart)) {
-      return { valid: false, error: 'Port must be a numeric value between 1 and 65535!' };
+      return { valid: false, error: t('Port must be a numeric value between 1 and 65535!') };
     }
 
     const parsedPort = parseInt(portPart, 10);
     if (!isValidPort(parsedPort)) {
-      return { valid: false, error: 'Please enter a valid port number between 1 and 65535!' };
+      return { valid: false, error: t('Please enter a valid port number between 1 and 65535!') };
     }
 
     return { valid: true, addr: hostPart, port: parsedPort };
@@ -822,7 +846,9 @@ function addHostDialog() {
       return _nvhttpHost.refreshServerInfoAtAddress(parsedHostInput.addr);
     }).then(function(success) {
       if (!addHostGenerationGate.isCurrent(addHostGeneration)) return;
-      snackbarLog('Connecting to ' + _nvhttpHost.hostname + '...');
+      // Explicit manual addition clears the session-only auto-discovery tombstone.
+      delete removedHostUids[_nvhttpHost.serverUid];
+      snackbarLog(t('Connecting to %1$s...', _nvhttpHost.hostname));
       // Close the dialog if the user has provided the IP address
       console.log('%c[index.js, addHostDialog]', 'color: green;', 'Closing app dialog and returning.');
       addHostOverlay.style.display = 'none';
@@ -851,7 +877,7 @@ function addHostDialog() {
     }.bind(this), function(failure) {
       if (!addHostGenerationGate.isCurrent(addHostGeneration)) return;
       console.error('%c[index.js, addHostDialog]', 'color: green;', 'Error: Failed API object:\n', _nvhttpHost, '\n' + _nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-      snackbarLogLong('Failed to connect to ' + (_nvhttpHost.hostname || 'the host') + '. Ensure Sunshine is running on your PC or GameStream is enabled in GeForce Experience SHIELD settings.');
+      snackbarLogLong(t('Failed to connect to %1$s. Ensure Sunshine is running on your host PC or GameStream is enabled in GeForce Experience SHIELD settings.', _nvhttpHost.hostname || t('the host')));
     }.bind(this)).then(function() {
       finishAddHostOperation(addHostGeneration);
     }, function(error) {
@@ -872,7 +898,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
 
   if (!pairingCert) {
     console.warn('%c[index.js, pairingDialog]', 'color: green;', 'Warning: Pairing certificate is not generated yet. Please ensure Wasm is initialized properly!');
-    snackbarLogLong('Something went wrong with the pairing certificate. Please try pairing with the host PC again.');
+    snackbarLogLong(t('Something went wrong with the pairing certificate. Please try pairing with the host PC again.'));
     onFailure();
     return;
   }
@@ -882,7 +908,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     if (!returnedNvHTTPHost.online) {
       if (!pairingGenerationGate.isCurrent(pairingGeneration)) return;
       console.error('%c[index.js, pairingDialog]', 'color: green;', 'Error: Failed to connect to ' + nvhttpHost.hostname + '. Ensure your host PC is online!', nvhttpHost, '\n' + nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-      snackbarLogLong('Failed to connect to ' + nvhttpHost.hostname + '. Ensure Sunshine is running on your host PC or GameStream is enabled in the GeForce Experience SHIELD settings.');
+      snackbarLogLong(t('Failed to connect to %1$s. Ensure Sunshine is running on your host PC or GameStream is enabled in GeForce Experience SHIELD settings.', nvhttpHost.hostname || t('the host')));
       onFailure();
       return;
     }
@@ -895,7 +921,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
 
     if (nvhttpHost.currentGame != 0) {
       if (!pairingGenerationGate.isCurrent(pairingGeneration)) return;
-      snackbarLogLong(nvhttpHost.hostname + ' is currently in a game session. Please quit the running app or restart the computer, then try again.');
+      snackbarLogLong(t('%1$s is currently in a game session. Please quit the running app or restart the computer, then try again.', nvhttpHost.hostname));
       onFailure();
       return;
     }
@@ -911,10 +937,10 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
 
     // Change the dialog text element to include the random PIN number
     $('#pairingDialogText').html(
-      'Please enter the following PIN on the target PC: ' + randomNumber + '<br><br>' +
-      'If your host PC is running Sunshine (all GPUs), navigate to the Sunshine Web UI to enter the PIN.<br><br>' +
-      'Alternatively, if your host PC has NVIDIA GameStream (NVIDIA-only), navigate to the GeForce Experience to enter the PIN.<br><br>' +
-      'This dialog will close once the pairing is complete.'
+      t('Please enter the following PIN on the target PC: %1$s<br><br>', randomNumber) +
+      t('If your host PC is running Sunshine (all GPUs), navigate to the Sunshine Web UI to enter the PIN.<br><br>') +
+      t('Alternatively, if your host PC has NVIDIA GameStream (NVIDIA-only), navigate to the GeForce Experience to enter the PIN.<br><br>') +
+      t('This dialog will close once the pairing is complete.')
     );
 
     // Show the dialog and push the view
@@ -945,7 +971,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     nvhttpHost.pair(randomNumber).then(function() {
       if (!pairingGenerationGate.isCurrent(pairingGeneration)) return;
       isPairingInProgress = false;
-      snackbarLog('Successfully paired with ' + nvhttpHost.hostname);
+      snackbarLog(t('Successfully paired with %1$s', nvhttpHost.hostname));
       // Close the dialog if the pairing was successful
       console.log('%c[index.js, pairingDialog]', 'color: green;', 'Closing app dialog and returning.');
       pairingOverlay.style.display = 'none';
@@ -961,17 +987,16 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
         return;
       }
       console.error('%c[index.js, pairingDialog]', 'color: green;', 'Error: Failed API object:\n', nvhttpHost, '\n' + nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-      
+      snackbarLog(t('Failed to pair with %1$s', nvhttpHost.hostname));
       // Keep the modal opened, but change the button for "Close"
       $('#cancelPairing').text('Close');
-      
-      snackbarLog('Failed to pair with ' + nvhttpHost.hostname);
+
       // If the host is already in a streaming session or failed during pairing,
       // change the dialog text element to include the hostname and display the returned error message
       if (nvhttpHost.currentGame != 0) {
-        $('#pairingDialogText').html('Error: ' + nvhttpHost.hostname + ' is currently busy!<br><br>You must stop the running app in order to pair with the host.');
+        $('#pairingDialogText').html(t('Error: %1$s is currently busy!<br><br>You must stop the running app in order to pair with the host.', nvhttpHost.hostname));
       } else {
-        $('#pairingDialogText').html('Error: Failed to pair with ' + nvhttpHost.hostname + '.<br><br>Please, try pairing with the host again.');
+        $('#pairingDialogText').html(t('Error: Failed to pair with %1$s.<br><br>Please, try pairing with the host again.', nvhttpHost.hostname));
       }
       onFailure();
     });
@@ -1131,10 +1156,11 @@ function hostMenuDialog(host) {
     {
       id: 'refreshApps-' + host.hostname,
       class: 'host-menu-button',
-      text: 'Refresh apps',
+      'data-i18n': 'Refresh apps',
+      text: t('Refresh apps'),
       action: function() {
         // Refresh the list of apps for the target host
-        snackbarLogLong('Refreshing the list of ' + host.hostname + ' applications...');
+        snackbarLogLong(t('Refreshing the list of %1$s applications...', host.hostname));
         host.clearBoxArt();
         host.getAppListWithCacheFlush();
       }
@@ -1142,17 +1168,19 @@ function hostMenuDialog(host) {
     {
       id: 'wakeHost-' + host.hostname,
       class: 'host-menu-button',
-      text: 'Wake PC',
+      'data-i18n': 'Wake PC',
+      text: t('Wake PC'),
       action: function() {
         // Send a Wake-on-LAN request to the target host
-        snackbarLogLong('Sending a Wake On LAN request to ' + host.hostname + '...');
+        snackbarLogLong(t('Sending a Wake On LAN request to %1$s...', host.hostname));
         host.sendWOL();
       }
     },
     {
       id: 'deleteHost-' + host.hostname,
       class: 'host-menu-button',
-      text: 'Delete PC',
+      'data-i18n': 'Delete PC',
+      text: t('Delete PC'),
       action: function() {
         // Remove the selected host from the list
         setTimeout(() => deleteHostDialog(host), 100);
@@ -1161,7 +1189,8 @@ function hostMenuDialog(host) {
     {
       id: 'viewDetails-' + host.hostname,
       class: 'host-menu-button',
-      text: 'View Details',
+      'data-i18n': 'View Details',
+      text: t('View Details'),
       action: function() {
         // View details of the selected host
         setTimeout(() => hostDetailsDialog(host), 100);
@@ -1201,7 +1230,8 @@ function hostMenuDialog(host) {
     type: 'button',
     id: 'closeHostMenu',
     class: 'mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect',
-    text: 'Close'
+    'data-i18n': 'Close',
+    text: t('Close')
   });
 
   // Close the dialog if the Close button is pressed
@@ -1235,8 +1265,8 @@ function deleteHostDialog(host) {
   var deleteHostDialog = document.querySelector('#deleteHostDialog');
 
   // Change the dialog title and text elements to include the hostname
-  document.getElementById('deleteHostDialogTitle').innerHTML = 'Delete Host';
-  document.getElementById('deleteHostDialogText').innerHTML = 'Are you sure you want to delete ' + host.hostname + '?';
+  document.getElementById('deleteHostDialogTitle').innerHTML = t('Delete Host');
+  document.getElementById('deleteHostDialogText').innerHTML = t('Are you sure you want to delete %1$s?', host.hostname);
 
   // Show the dialog and push the view
   deleteHostOverlay.style.display = 'flex';
@@ -1266,11 +1296,16 @@ function deleteHostDialog(host) {
     // Stop background polling for removed host
     endBackgroundPollingOfHost(host);
     // Remove the host from the hosts object
+    removedHostUids[host.serverUid] = true;
     delete hosts[host.serverUid];
     // Save the updated hosts
     saveHosts();
+    // Remove the host from the preview app cache and update Smart Hub Preview
+    delete _previewApps[host.serverUid];
+    savePreviewApps();
+    updatePreviewData();
     // If host removed, show snackbar message
-    snackbarLog(host.hostname + ' has been deleted successfully.');
+    snackbarLog(t('%1$s has been deleted successfully.', host.hostname));
     deleteHostOverlay.style.display = 'none';
     deleteHostDialog.close();
     isDialogOpen = false;
@@ -1285,7 +1320,7 @@ function deleteHostDialog(host) {
 function deleteAllHostsDialog() {
   if (Object.keys(hosts).length === 0) {
     // If there are no hosts, show snackbar message
-    snackbarLog('No host exists.');
+    snackbarLog(t('No host exists.'));
     return;
   } else {
     // Find the existing overlay and dialog elements
@@ -1293,8 +1328,8 @@ function deleteAllHostsDialog() {
     var deleteHostDialog = document.querySelector('#deleteHostDialog');
 
     // Change the dialog title and text elements
-    document.getElementById('deleteHostDialogTitle').innerHTML = 'Delete All Hosts';
-    document.getElementById('deleteHostDialogText').innerHTML = 'Are you sure you want to delete all existing hosts?';
+    document.getElementById('deleteHostDialogTitle').innerHTML = t('Delete All Hosts');
+    document.getElementById('deleteHostDialogText').innerHTML = t('Are you sure you want to delete all existing hosts?');
     
     // Show the dialog and push the view
     deleteHostOverlay.style.display = 'flex';
@@ -1326,13 +1361,18 @@ function deleteAllHostsDialog() {
           // Remove the host container from the grid
           $('#host-container-' + host.serverUid).remove();
           // Remove the host from the hosts object
+          removedHostUids[host.serverUid] = true;
           delete hosts[host.serverUid];
           // Save the updated hosts (empty hosts object)
           saveHosts();
         }
       }
       // If all hosts removed, show snackbar message
-      snackbarLog('All hosts have been deleted successfully.');
+      snackbarLog(t('All hosts have been deleted successfully.'));
+      // Clear the preview app cache and update Smart Hub Preview
+      _previewApps = {};
+      savePreviewApps();
+      updatePreviewData();
       deleteHostOverlay.style.display = 'none';
       deleteHostDialog.close();
       isDialogOpen = false;
@@ -1362,7 +1402,8 @@ function hostDetailsDialog(host) {
   $('<h3>', {
     id: 'hostDetailsDialogTitle-' + host.serverUid,
     class: 'mdl-dialog__title',
-    text: 'Host Details'
+    'data-i18n': 'Host Details',
+    text: t('Host Details')
   }).appendTo(hostDetailsDialog);
 
   // Create a content section inside the dialog
@@ -1374,16 +1415,18 @@ function hostDetailsDialog(host) {
   $('<p>', {
     id: 'hostDetailsDialogText-' + host.serverUid,
     class: 'host-details-text',
-    html: 'Name: ' + host.hostname + '<br>' +
-          'State: ' + (host.online ? 'ONLINE' : 'OFFLINE') + '<br>' +
-          'Active Address: ' + (host.address && host.externalPort ? host.address + ':' + host.externalPort : 'NULL') + '<br>' +
-          'UUID: ' + (host.serverUid ? host.serverUid : 'NULL') + '<br>' +
-          'Local Address: ' + (host.localAddress && host.externalPort ? host.localAddress + ':' + host.externalPort : 'NULL') + '<br>' +
-          'MAC Address: ' + (host.macAddress ? host.macAddress : 'NULL') + '<br>' +
-          'Pair State: ' + (host.paired ? 'PAIRED' : 'UNPAIRED') + '<br>' +
-          'Running Game ID: ' + host.currentGame + '<br>' +
-          'HTTP Port: ' + (host.httpPort ? host.httpPort : 'NULL') + '<br>' +
-          'HTTPS Port: ' + (host.httpsPort ? host.httpsPort : 'NULL')
+    html: [
+      t('Name: %1$s', host.hostname),
+      t('State: %1$s', host.online ? t('ONLINE') : t('OFFLINE')),
+      t('Active Address: %1$s', host.address && host.externalPort ? host.address + ':' + host.externalPort : t('NULL')),
+      t('UUID: %1$s', host.serverUid ? host.serverUid : t('NULL')),
+      t('Local Address: %1$s', host.localAddress && host.externalPort ? host.localAddress + ':' + host.externalPort : t('NULL')),
+      t('MAC Address: %1$s', host.macAddress ? host.macAddress : t('NULL')),
+      t('Pair State: %1$s', host.paired ? t('PAIRED') : t('UNPAIRED')),
+      t('Running Game ID: %1$s', host.currentGame),
+      t('HTTP Port: %1$s', host.httpPort ? host.httpPort : t('NULL')),
+      t('HTTPS Port: %1$s', host.httpsPort ? host.httpsPort : t('NULL'))
+    ].join('<br>')
   }).appendTo(hostDetailsDialogContent);
 
   // Create the actions section inside the dialog
@@ -1396,7 +1439,8 @@ function hostDetailsDialog(host) {
     type: 'button',
     id: 'closeHostDetails',
     class: 'mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect',
-    text: 'Close'
+    'data-i18n': 'Close',
+    text: t('Close')
   });
 
   // Close the dialog if the Close button is pressed
@@ -1450,7 +1494,7 @@ function appSupportDialog() {
 // Handle layout elements when displaying the Settings view
 function showSettingsMode() {
   console.log('%c[index.js, showSettingsMode]', 'color: green;', 'Entering "Show Settings" mode.');
-  $('#header-title').html('Settings');
+  $('#header-title').html(t('Settings'));
   $('#header-logo').show();
   $('#main-header').show();
   $('#goBackBtn').show();
@@ -1470,6 +1514,10 @@ function showSettingsMode() {
 
   stopPollingHosts();
   Navigation.start();
+  // Register showSettingsMode to re-run every time the language changes
+  if (window.i18n && typeof window.i18n.onRefresh === 'function') {
+    window.i18n.onRefresh(showSettingsMode);
+  }
 }
 
 // Show the Settings list
@@ -1485,7 +1533,7 @@ function showSettings() {
   // Show a spinner while the setting list loads
   $('#wasmSpinner').css('display', 'inline-block');
   $('#wasmSpinnerLogo').hide();
-  $('#wasmSpinnerMessage').text('Loading Settings...');
+  $('#wasmSpinnerMessage').text(t('Loading Settings...'));
 
   setTimeout(() => {
     // Hide the spinner after successfully retrieving the setting list
@@ -1558,6 +1606,9 @@ function handleSettingsView(category) {
     case 'basicSettings': // Navigate to the BasicSettings view
       navigateSettingsView(Views.BasicSettings);
       break;
+    case 'interfaceSettings': // Navigate to the InterfaceSettings view
+      navigateSettingsView(Views.InterfaceSettings);
+      break;
     case 'hostSettings': // Navigate to the HostSettings view
       navigateSettingsView(Views.HostSettings);
       break;
@@ -1585,7 +1636,9 @@ function handleSettingsView(category) {
   }
 }
 
-function beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing, videoCodec, speculativeRfi) {
+function beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing,
+                                      audioBackend, audioConfig, audioSync, audioJitterMs,
+                                      videoCodec, speculativeRfi) {
   DiagnosticLogs.beginSession({
     host: host.address,
     codec: videoCodec,
@@ -1594,6 +1647,10 @@ function beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate
     fps: frameRate,
     bitrateKbps: bitrate,
     framePacing: framePacing === 1,
+    audioBackend: audioBackend,
+    audioConfig: audioConfig,
+    audioSync: audioSync === 1,
+    audioJitterMs: audioJitterMs,
     speculativeRfi: speculativeRfi === 1,
     appVersion: appInfo.version,
     platformVersion: platformVer,
@@ -1643,7 +1700,7 @@ function fetchLatestRelease() {
   }).then(data => {
     // Get the latest version and release notes from the released update
     let latestVersion = data.tag_name.startsWith('v') ? data.tag_name.slice(1) : data.tag_name;
-    const releaseNotes = extractReleaseNotes(data.body) || '• No relevant changes found.';
+    const releaseNotes = extractReleaseNotes(data.body) || t('• No relevant changes found.');
     return { latestVersion, releaseNotes };
   });
 }
@@ -1719,14 +1776,17 @@ function updateAppButton(latestVersion) {
   // Create the button text dynamically
   var updateAppBtnText = $('<span>', {
     id: 'updateAppBtnText',
-    text: 'New update v' + latestVersion
+    'data-i18n': 'New update v%1$s',
+    'data-param': latestVersion,
+    text: t('New update v%1$s', latestVersion)
   });
   // Create the button tooltip dynamically
   var updateAppBtnTooltip = $('<div>', {
     id: 'updateAppBtnTooltip',
     class: 'mdl-tooltip',
     'for': 'updateAppBtn',
-    text: 'Check what\'s new'
+    'data-i18n': 'Check what\'s new',
+    text: t('Check what\'s new')
   });
   // Create the layout spacer dynamically
   var extraLayoutSpacer = $('<div>', {
@@ -1762,7 +1822,7 @@ function updateAppButton(latestVersion) {
       }, 500);
     }).catch(error => {
       console.error('%c[index.js, updateAppButton]', 'color: green;', 'Error: Failed to fetch the release data!', error);
-      snackbarLogLong('Unable to check update release notes at this time. Please try again later!');
+      snackbarLogLong(t('Unable to check update release notes at this time. Please try again later!'));
     });
   });
 }
@@ -1785,7 +1845,8 @@ function updateAppDialog(latestVersion, releaseNotes) {
   $('<h3>', {
     id: 'updateAppDialogTitle',
     class: 'mdl-dialog__title',
-    text: 'Update Moonlight'
+    'data-i18n': 'Update Moonlight',
+    text: t('Update Moonlight')
   }).appendTo(updateAppDialog);
 
   // Create a content section inside the dialog
@@ -1797,8 +1858,8 @@ function updateAppDialog(latestVersion, releaseNotes) {
   $('<p>', {
     id: 'updateAppDialogText',
     class: 'update-app-text',
-    html: `Version ${latestVersion} is now available! Update manually to enjoy new features and improvements.<br><br>` +
-          `<strong>What's Changed:</strong><br>` + releaseNotes
+    html: t('Version %1$s is now available! Update manually to enjoy new features and improvements.<br><br>', latestVersion) +
+          t('<strong>What\'s Changed:</strong><br>%1$s', releaseNotes)
   }).appendTo(updateAppDialogContent);
 
   // Create the actions section inside the dialog
@@ -1811,7 +1872,8 @@ function updateAppDialog(latestVersion, releaseNotes) {
     type: 'button',
     id: 'closeUpdateApp',
     class: 'mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect',
-    text: 'Close'
+    'data-i18n': 'Close',
+    text: t('Close')
   });
 
   // Close the dialog if the Close button is pressed
@@ -1842,7 +1904,7 @@ function updateAppDialog(latestVersion, releaseNotes) {
 // Check for updates when the Check for Updates button is pressed
 function checkForAppUpdates() {
   console.log('%c[index.js, checkForAppUpdates]', 'color: green;', 'Checking for new application updates...');
-  snackbarLog('Checking for available Moonlight updates...');
+  snackbarLog(t('Checking for available Moonlight updates...'));
   // Fetch the latest release data from the GitHub API
   fetchLatestRelease().then(({ latestVersion, releaseNotes }) => {
     setTimeout(() => {
@@ -1852,12 +1914,12 @@ function checkForAppUpdates() {
         updateAppDialog(latestVersion, releaseNotes);
       } else {
         // Otherwise, show a snackbar message to inform the user that the app is already up to date
-        snackbarLogLong(`✅ Your app is already up to date! You're on the latest version.`);
+        snackbarLogLong(t('Your app is already up to date! You\'re on the latest version.'));
       }
     }, 1500);
   }).catch(error => {
     console.error('%c[index.js, checkForAppUpdates]', 'color: green;', 'Error: Failed to fetch the release data!', error);
-    snackbarLogLong('Unable to check for updates right now. Please try again later!');
+    snackbarLogLong(t('Unable to check for updates right now. Please try again later!'));
   });
 }
 
@@ -1881,14 +1943,14 @@ function checkForAppUpdatesAtStartup() {
           // Check if a new version update is available
           if (checkVersionUpdate(appInfo.version, latestVersion)) {
             // Show snackbar message with new version to inform user to update the app
-            snackbarLogLong(`🚀 Version ${latestVersion} is now available! Check out the latest features & improvements.`);
+            snackbarLogLong(t('Version %1$s is now available! Check out the latest features & improvements.', latestVersion));
             // Create and display the Update App button with tooltip and additional layout spacer
             updateAppButton(latestVersion);
           }
         }, 100);
       }).catch(error => {
         console.error('%c[index.js, checkForAppUpdatesAtStartup]', 'color: green;', 'Error: Failed to fetch the release data!', error);
-        snackbarLogLong('Cannot automatically check for updates at this time!');
+        snackbarLogLong(t('Cannot automatically check for updates at this time!'));
       });
 
       // Save the current time
@@ -1937,7 +1999,7 @@ function restoreDefaultsDialog() {
     // Reset any settings to their default state and save the updated values
     restoreDefaultsSettingsValues();
     // If the settings have been reset to default, show snackbar message
-    snackbarLog('Settings have been restored to their default values.');
+    snackbarLog(t('Settings have been restored to their default values.'));
     restoreDefaultsDialogOverlay.style.display = 'none';
     restoreDefaultsDialog.close();
     isDialogOpen = false;
@@ -1955,8 +2017,8 @@ function warningDialog(title, message) {
   var warningDialog = document.querySelector('#warningDialog');
 
   // Change the dialog title and text element with a custom warning message
-  document.getElementById('warningDialogTitle').innerHTML = title;
-  document.getElementById('warningDialogText').innerHTML = message;
+  document.getElementById('warningDialogTitle').innerHTML = t(title);
+  document.getElementById('warningDialogText').innerHTML = t(message);
 
   // Show the dialog and push the view
   warningDialogOverlay.style.display = 'flex';
@@ -1989,7 +2051,7 @@ function restartAppDialog() {
   var restartAppDialog = document.querySelector('#restartAppDialog');
 
   // Change the dialog text element to confirm whether the user wants to restart the application
-  document.getElementById('restartAppDialogText').innerHTML = 'Are you sure you want to restart Moonlight?';
+  document.getElementById('restartAppDialogText').innerHTML = t('Are you sure you want to restart Moonlight?');
 
   // Show the dialog and push the view
   restartAppDialogOverlay.style.display = 'flex';
@@ -2027,8 +2089,7 @@ function requiredRestartAppDialog() {
   var restartAppDialog = document.querySelector('#restartAppDialog');
 
   // Change the dialog text element to inform the user that a restart is required
-  document.getElementById('restartAppDialogText').innerHTML = 'In order for your changes to take effect, a restart of the application is required.'
-  + '<br><br>' + 'Would you like to proceed with the restart?';
+  document.getElementById('restartAppDialogText').innerHTML = t('In order for your changes to take effect, a restart of the application is required.<br><br>Would you like to proceed with the restart?');
 
   // Show the dialog and push the view
   restartAppDialogOverlay.style.display = 'flex';
@@ -2124,10 +2185,9 @@ function stylizeBoxArt(freshApi, appIdToStylize, appsGeneration) {
     // If the game is currently running, then apply CSS stylization
     if (freshApi.currentGame === appIdToStylize) {
       appBox.classList.add('current-game-active');
-      appBox.title += ' (Running)';
+      appBox.title += t(' (Running)');
     } else {
       appBox.classList.remove('current-game-active');
-      appBox.title = appBox.title.replace(' (Running)', ''); // TODO: Replace with localized string so make it e.title = game_title
     }
   }).catch(function(failedRefreshInfo) {
     if (appsGenerationGate.isCurrent(appsGeneration)) {
@@ -2139,37 +2199,24 @@ function stylizeBoxArt(freshApi, appIdToStylize, appsGeneration) {
 // Sort the app titles
 function sortTitles(list, sortOrder) {
   return list.sort((a, b) => {
-    const titleA = a.title.toLowerCase();
-    const titleB = b.title.toLowerCase();
-
     // Ascending order (A - Z)
     if (sortOrder === 'ASC') {
-      if (titleA < titleB) {
-        return -1;
-      }
-      if (titleA > titleB) {
-        return 1;
-      }
-      return 0;
+      return a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' });
     }
 
     // Descending order (Z - A)
     if (sortOrder === 'DESC') {
-      if (titleA < titleB) {
-        return 1;
-      }
-      if (titleA > titleB) {
-        return -1;
-      }
-      return 0;
+      return b.title.localeCompare(a.title, undefined, { numeric: true, sensitivity: 'base' });
     }
+
+    return 0;
   });
 }
 
 // Handle layout elements when displaying the Apps view
 function showAppsMode() {
   console.log('%c[index.js, showAppsMode]', 'color: green;', 'Entering "Show Apps" mode.');
-  $('#header-title').html('Apps');
+  $('#header-title').html(t('Apps'));
   $('#header-logo').show();
   $('#main-header').show();
   $('#goBackBtn').show();
@@ -2227,7 +2274,7 @@ function showApps(host) {
     // Show a spinner while the app list loads
     $('#wasmSpinner').css('display', 'inline-block');
     $('#wasmSpinnerLogo').hide();
-    $('#wasmSpinnerMessage').text('Loading Apps...');
+    $('#wasmSpinnerMessage').text(t('Loading Apps...'));
 
     // Remove all game container elements from the game grid and from any other div elements
     $('#game-grid').empty();
@@ -2258,7 +2305,7 @@ function showApps(host) {
           var emptyAppListImg = new Image();
           emptyAppListImg.src = 'static/res/applist_empty.svg';
           $('#game-grid').html(emptyAppListImg);
-          snackbarLogLong('Your list is currently empty. Please add your favorite apps to the list.');
+          snackbarLogLong(t('Your list is currently empty. Please add your favorite apps to the list.'));
           Views.Apps.view.reset();
           showAppsMode();
           resolve([]);
@@ -2271,6 +2318,46 @@ function showApps(host) {
         const sortOrder = sortAppsListSwitch.checked ? 'DESC' : 'ASC';
         // If game grid is populated, sort the app list
         const sortedAppList = sortTitles(appList, sortOrder);
+
+        if (_isSmartHubSupported) {
+          var oldApps = (_previewApps[host.serverUid] && _previewApps[host.serverUid].apps) || [];
+
+          _previewApps[host.serverUid] = {
+            hostname: host.hostname,
+            address: host.address,
+            apps: sortedAppList.map(function(app) {
+              var oldApp = oldApps.find(function(a) {
+                return a.id === app.id;
+              });
+              var newApp = {
+                id: app.id, title: app.title
+              };
+              if (oldApp) {
+                if (oldApp.imageUri) {
+                  newApp.imageUri = oldApp.imageUri;
+                }
+                if (oldApp.txtPath) {
+                  newApp.txtPath = oldApp.txtPath;
+                }
+              }
+              return newApp;
+            })
+          };
+        }
+
+        // Pause background polling during box art downloads to prevent
+        // the polling /serverinfo request from being queued behind 40+
+        // concurrent image downloads, which would cause a 5-second timeout
+        // and trigger cancelRequest, killing all in-flight downloads.
+        if (activePolls[host.serverUid]) {
+          window.clearInterval(activePolls[host.serverUid]);
+          delete activePolls[host.serverUid];
+        }
+
+        var boxArtPromises = [];
+
+        // Reset preview promises for this showApps invocation
+        window.previewPromises = [];
 
         sortedAppList.forEach(function(app) {
           // Double clicking the button will cause multiple box arts to appear.
@@ -2338,7 +2425,6 @@ function showApps(host) {
 
             // Append the game container to the game grid
             $('#game-grid').append(gameContainer);
-
             // Apply style to the game container to indicate whether the game is active or not
             setTimeout(() => {
               if (appsGenerationGate.isCurrent(appsGeneration)) {
@@ -2348,29 +2434,104 @@ function showApps(host) {
           }
           // Load box art
           var boxArtPlaceholderImg = new Image();
-          Promise.resolve(host.getBoxArt(app.id)).then(function(resolvedPromise) {
-            if (!appsGenerationGate.isCurrent(appsGeneration)) return;
-            boxArtPlaceholderImg.src = resolvedPromise;
-          }).catch(function(failedPromise) {
-            if (!appsGenerationGate.isCurrent(appsGeneration)) return;
-            console.error('%c[index.js, showApps]', 'color: green;', 'Error: Failed to retrieve box art for app ID: ' + app.id + '. Returned value was: ' + failedPromise + '. Host object: ', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-            try {
-              boxArtPlaceholderImg.src = 'static/res/placeholder_error.svg';
-            } catch (imageError) {
-              console.error('%c[index.js, showApps]', 'color: green;', 'Error: Failed to apply the box art error placeholder:', imageError);
-            }
+          var appEntry = (_isSmartHubSupported && _previewApps[host.serverUid]) ? _previewApps[host.serverUid].apps.find(function(a) {
+            return a.id === app.id;
+          }) : null;
+          var boxArtPromise = new Promise(function(resolveBoxArt) {
+            Promise.resolve(host.getBoxArt(app.id, _isSmartHubSupported)).then(function(resolvedPromise) {
+              if (!appsGenerationGate.isCurrent(appsGeneration)) {
+                resolveBoxArt();
+                return;
+              }
+              boxArtPlaceholderImg.src = resolvedPromise;
+              // The resolvedPromise is now the absolute file URI (or data URL if it failed to save).
+              if (_isSmartHubSupported && _previewApps[host.serverUid] && appEntry) {
+                // Resolve real TV IP because Smart Hub might block 127.0.0.1
+                var tvIp = '127.0.0.1';
+                try {
+                  if (typeof webapis !== 'undefined' && webapis.network) {
+                    tvIp = webapis.network.getIp();
+                  }
+                } catch(e) {
+                  console.log('%c[index.js, showApps]', 'color: green;', 'Failed to get TV IP: ', e);
+                }
+
+                // Use deterministic filename so the local HTTP server route stays stable
+                var filename = 'preview-' + app.id + '.jpg';
+                var cacheBuster = '?v=' + Date.now();
+
+                // Determine local path from resolvedPromise if it's a file URI
+                if (resolvedPromise.startsWith('file://')) {
+                  var localPngPath = resolvedPromise.replace('file://', '');
+                  appEntry.txtPath = localPngPath;
+                  appEntry.imageUri = 'http://' + tvIp + ':8888/' + filename + cacheBuster;
+                  resolveBoxArt();
+                } else {
+                  try {
+                    var documentsPath = tizen.filesystem.toURI('documents').replace('file://', '');
+                    appEntry.txtPath = documentsPath + '/' + filename;
+                    appEntry.imageUri = 'http://' + tvIp + ':8888/' + filename + cacheBuster;
+                  } catch(err) {
+                    appEntry.txtPath = '/opt/usr/home/owner/content/Documents/' + filename;
+                    appEntry.imageUri = 'http://' + tvIp + ':8888/' + filename + cacheBuster;
+                  }
+                  resolveBoxArt();
+                }
+
+                // Early return to prevent the fallback synchronous resolveBoxArt from firing
+                return;
+              }
+              resolveBoxArt();
+            }, function(failedPromise) {
+              if (!appsGenerationGate.isCurrent(appsGeneration)) {
+                resolveBoxArt();
+                return;
+              }
+              console.error('%c[index.js, showApps]', 'color: green;', 'Error: Failed to retrieve box art for app ID: ' + app.id + '. Returned value was: ' + failedPromise + '. Host object: ', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
+              try {
+                boxArtPlaceholderImg.src = 'static/res/placeholder_error.svg';
+              } catch (imageError) {
+                console.error('%c[index.js, showApps]', 'color: green;', 'Error: Failed to apply the box art error placeholder:', imageError);
+              }
+              resolveBoxArt();
+            });
           });
+
           boxArtPlaceholderImg.onload = function() {
             if (appsGenerationGate.isCurrent(appsGeneration)) {
               boxArtPlaceholderImg.classList.add('fade-in');
             }
           };
           $(gameContainer).append(boxArtPlaceholderImg);
+          boxArtPromises.push(boxArtPromise);
         });
+
+        var settledPromises = boxArtPromises.map(function(p) {
+          return p.catch(function(e) {
+            console.error('%c[index.js, showApps]', 'color: green;', 'Error: Box art promise rejected with error: ', e);
+            return e;
+          });
+        });
+
         // Navigate to the Apps view
         Views.Apps.view.reset();
         showAppsMode();
         resolve(sortedAppList);
+
+        Promise.all(settledPromises).then(function() {
+          if (!appsGenerationGate.isCurrent(appsGeneration)) return;
+          // Resume background polling now that all box art downloads are complete
+          beginBackgroundPollingOfHost(host);
+
+          // Wait for all Smart Hub Preview JPEGs to finish encoding and saving to disk
+          // before sending the updated data to the background service.
+          var previewsDone = window.previewPromises || [];
+          Promise.all(previewsDone).then(function() {
+            if (!appsGenerationGate.isCurrent(appsGeneration)) return;
+            savePreviewApps();
+            updatePreviewData();
+          });
+        });
       }).catch(function(failedAppList) {
         if (!appsGenerationGate.isCurrent(appsGeneration)) {
           reject(OperationGuard.createStaleOperationError());
@@ -2387,7 +2548,7 @@ function showApps(host) {
         var errorAppListImg = new Image();
         errorAppListImg.src = 'static/res/applist_error.svg';
         $('#game-grid').html(errorAppListImg);
-        snackbarLogLong('Unable to retrieve your list of apps at this time. Please refresh the list of apps or try again later!');
+        snackbarLogLong(t('Unable to retrieve your list of apps at this time. Please refresh the list of apps or try again later!'));
 
         // Navigate to the Apps view
         Views.Apps.view.reset();
@@ -2410,7 +2571,7 @@ function quitAppDialog() {
       var quitAppDialog = document.querySelector('#quitAppDialog');
 
       // Change the dialog text element to include the game title
-      document.getElementById('quitAppDialogText').innerHTML = 'Are you sure you want to quit ' + currentGame.title + '? All unsaved data will be lost.';
+      document.getElementById('quitAppDialogText').innerHTML = t('Are you sure you want to quit %1$s? All unsaved data will be lost.', currentGame.title);
       
       // Show the dialog and push the view
       quitAppOverlay.style.display = 'flex';
@@ -2500,6 +2661,13 @@ function startGame(host, appID) {
     return;
   }
 
+  // Start the audio scheduler of the Web Audio backend while we are still running inside the
+  // handler of the key press that started the stream, because the audio context of a device
+  // with an autoplay policy can only be created from a user gesture
+  if (isWebAudioBackendSelected()) {
+    startAudioScheduler();
+  }
+
   // Refresh the server info, because the user might have quit the game
   host.refreshServerInfo().then(function(ret) {
     host.getAppById(appID).then(function(appToStart) {
@@ -2510,7 +2678,7 @@ function startGame(host, appID) {
           var quitAppDialog = document.querySelector('#quitAppDialog');
 
           // Change the dialog text element to include the game title
-          document.getElementById('quitAppDialogText').innerHTML = currentApp.title + ' is already running. Would you like to quit it and start ' + appToStart.title + '?';
+          document.getElementById('quitAppDialogText').innerHTML = t('%1$s is already running. Would you like to quit it and start %2$s?', currentApp.title, appToStart.title);
 
           // Show the dialog and push the view
           quitAppOverlay.style.display = 'flex';
@@ -2567,8 +2735,10 @@ function startGame(host, appID) {
       const mouseEmulation = $('#mouseEmulationSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const flipABfaceButtons = $('#flipABfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const flipXYfaceButtons = $('#flipXYfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      var audioBackend = $('#selectAudioBackend').data('value').toString();
       var audioConfig = $('#selectAudio').data('value').toString();
       const audioSync = $('#audioSyncSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      const audioJitterMs = parseInt($('#jitterSlider').val());
       const playHostAudio = $('#playHostAudioSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var videoCodec = $('#selectCodec').data('value').toString();
       const hdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
@@ -2589,8 +2759,10 @@ function startGame(host, appID) {
       '\n Mouse emulation: ' + mouseEmulation + 
       '\n Flip A/B face buttons: ' + flipABfaceButtons + 
       '\n Flip X/Y face buttons: ' + flipXYfaceButtons + 
+      '\n Audio backend: ' + audioBackend +
       '\n Audio configuration: ' + audioConfig + 
       '\n Audio synchronization: ' + audioSync + 
+      '\n Audio jitter buffer: ' + audioJitterMs + ' ms' +
       '\n Play host audio: ' + playHostAudio + 
       '\n Video codec: ' + videoCodec + 
       '\n Video HDR mode: ' + hdrMode + 
@@ -2604,7 +2776,7 @@ function startGame(host, appID) {
       $('#connection-warnings, #performance-stats').css('background', 'transparent').text('');
 
       // Shows a loading message to launch the application and start stream mode
-      $('#loadingSpinnerMessage').text('Starting ' + appToStart.title + '...');
+      $('#loadingSpinnerMessage').text(t('Starting %1$s...', appToStart.title));
       showStreamMode();
 
       // Check if user wants to resume the already-running app
@@ -2625,7 +2797,7 @@ function startGame(host, appID) {
           var status_message = $root.attr('status_message');
           if (status_code != 200) {
             $('#loadingSpinnerMessage').text('');
-            snackbarLogLong('Error ' + status_code + ': ' + status_message);
+            snackbarLogLong(t('Error %1$s: %2$s', status_code, status_message));
             showApps(host).then(() => {
               // Scroll to the current game row
               Navigation.switch();
@@ -2635,17 +2807,18 @@ function startGame(host, appID) {
             return;
           }
           // Start stream request
-          beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing, videoCodec, speculativeRfi);
+          beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing,
+            audioBackend, audioConfig, audioSync, audioJitterMs, videoCodec, speculativeRfi);
           sendMessage('startRequest', [
             host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
             host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
             framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
-            audioConfig, audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
-            performanceStats, speculativeRfi
+            audioBackend, audioConfig, audioSync, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode,
+            disableWarnings, performanceStats, speculativeRfi
           ]);
         }, function(failedResumeApp) {
           console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to resume app with id: ' + appID + '\n Returned error was: ' + failedResumeApp + '!');
-          snackbarLog('Failed to resume ' + appToStart.title);
+          snackbarLog(t('Failed to resume %1$s', appToStart.title));
           showApps(host).then(() => {
             // Scroll to the current game row
             Navigation.switch();
@@ -2675,10 +2848,10 @@ function startGame(host, appID) {
           if (status_code == 4294967295 && status_message == 'Invalid') {
             // Special case handling an audio capture error which GFE doesn't provide any useful status message
             status_code = 418;
-            status_message = 'Audio capture device is missing. Please reinstall the audio drivers.';
+            status_message = t('Audio capture device is missing. Please reinstall the audio drivers.');
           }
           $('#loadingSpinnerMessage').text('');
-          snackbarLogLong('Error ' + status_code + ': ' + status_message);
+          snackbarLogLong(t('Error %1$s: %2$s', status_code, status_message));
           showApps(host).then(() => {
             // Scroll to the current game row
             Navigation.switch();
@@ -2688,17 +2861,18 @@ function startGame(host, appID) {
           return;
         }
         // Start stream request
-        beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing, videoCodec, speculativeRfi);
+        beginDiagnosticStreamSession(host, streamWidth, streamHeight, frameRate, bitrate, framePacing,
+          audioBackend, audioConfig, audioSync, audioJitterMs, videoCodec, speculativeRfi);
         sendMessage('startRequest', [
           host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
           host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
           framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
-          audioConfig, audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
-          performanceStats, speculativeRfi
+          audioBackend, audioConfig, audioSync, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode,
+          disableWarnings, performanceStats, speculativeRfi
         ]);
       }, function(failedLaunchApp) {
         console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to launch app with id: ' + appID + '\n Returned error was: ' + failedLaunchApp + '!');
-        snackbarLog('Failed to launch ' + appToStart.title + '.');
+        snackbarLog(t('Failed to launch %1$s', appToStart.title));
         showApps(host).then(() => {
           // Scroll to the current game row
           Navigation.switch();
@@ -2725,13 +2899,13 @@ function stopGame(host) {
     return host.getAppById(host.currentGame);
   }).then(function(runningApp) {
       if (!runningApp) {
-        snackbarLog('No app is currently running.');
+        snackbarLog(t('No app is currently running.'));
         return showApps(host);
       }
       var appTitle = runningApp.title;
-      snackbarLog('Quitting ' + appTitle + '...');
+      snackbarLog(t('Quitting %1$s...', appTitle));
       return host.quitApp().then(function() {
-        snackbarLog('Successfully quit ' + appTitle);
+        snackbarLog(t('Successfully quit %1$s', appTitle));
         return host.refreshServerInfo();
       }).then(function() {
         return showApps(host);
@@ -2944,9 +3118,17 @@ function saveHosts() {
   storeData('hosts', hosts, null);
 }
 
+function savePreviewApps() {
+  if (!_isSmartHubSupported) {
+    return;
+  }
+  console.log('%c[index.js, savePreviewApps]', 'color: green;', 'Saving preview apps data: ' + JSON.stringify(_previewApps));
+  storeData('previewApps', _previewApps, null);
+}
+
 function saveResolution() {
   var chosenResolution = $(this).data('value');
-  $('#selectResolution').text($(this).text()).data('value', chosenResolution);
+  $('#selectResolution').text($(this).text()).attr('data-value', chosenResolution).data('value', chosenResolution);
   console.log('%c[index.js, saveResolution]', 'color: green;', 'Saving resolution value: ' + chosenResolution);
   storeData('resolution', chosenResolution, null);
 
@@ -2958,7 +3140,7 @@ function saveResolution() {
 
 function saveFramerate() {
   var chosenFramerate = $(this).data('value');
-  $('#selectFramerate').text($(this).text()).data('value', chosenFramerate);
+  $('#selectFramerate').text($(this).text()).attr('data-value', chosenFramerate).data('value', chosenFramerate);
   console.log('%c[index.js, saveFramerate]', 'color: green;', 'Saving framerate value: ' + chosenFramerate);
   storeData('frameRate', chosenFramerate, null);
 
@@ -2976,7 +3158,7 @@ function warnResolutionFramerate() {
   // Video resolution and frame rate warning
   if (!resFpsWarning && chosenResolutionWidth > '1920' && chosenResolutionHeight > '1080' && chosenFramerate > '60') {
     // Warn only if video resolution is greater than 1080p and frame rate is greater than 60 FPS
-    snackbarLogLong('Warning: This resolution and frame rate may not perform well on lower-end devices or slower connections!');
+    snackbarLogLong(t('Warning: This resolution and frame rate may not perform well on lower-end devices or slower connections!'));
     // Set flag for video resolution and frame rate warning
     resFpsWarning = true;
   } else if (resFpsWarning && (chosenResolutionWidth <= '1920' || chosenResolutionHeight <= '1080' || chosenFramerate <= '60')) {
@@ -3001,7 +3183,7 @@ function warnBitrate() {
   // Video bitrate warning
   if (!bitrateWarning && chosenBitrate > 100) {
     // Warn only if video bitrate is greater than 100 Mbps
-    snackbarLogLong('Warning: Higher bitrate may cause playback interruptions and performance issues, please try with caution!');
+    snackbarLogLong(t('Warning: Higher bitrate may cause playback interruptions and performance issues, please try with caution!'));
     // Set flag for video bitrate warning
     bitrateWarning = true;
   } else if (bitrateWarning && chosenBitrate <= 100) {
@@ -3128,6 +3310,17 @@ function saveFramePacing() {
   }, 100);
 }
 
+function saveLanguagePreference() {
+  var chosenLanguage = $(this).data('value') || 'auto';
+  $('#selectLanguage').text($(this).text()).attr('data-value', chosenLanguage).data('value', chosenLanguage);
+  console.log('%c[index.js, saveLanguagePreference]', 'color: green;', 'Saving language preference value: ' + chosenLanguage);
+  if (window.i18n && typeof window.i18n.applyLanguagePreference === 'function') {
+    window.i18n.applyLanguagePreference(chosenLanguage).catch((error) => {
+      console.warn('%c[index.js, saveLanguagePreference]', 'color: green;', 'Warning: failed to apply language: ' + error);
+    });
+  }
+}
+
 function saveIpAddressFieldMode() {
   setTimeout(() => {
     const chosenIpAddressFieldMode = $('#ipAddressFieldModeSwitch').parent().hasClass('is-checked');
@@ -3141,6 +3334,20 @@ function saveSortAppsList() {
     const chosenSortAppsList = $('#sortAppsListSwitch').parent().hasClass('is-checked');
     console.log('%c[index.js, saveSortAppsList]', 'color: green;', 'Saving sort apps list state: ' + chosenSortAppsList);
     storeData('sortAppsList', chosenSortAppsList, null);
+
+    // Instantly update the Smart Hub Preview to reflect the new sort order
+    const sortOrder = chosenSortAppsList ? 'DESC' : 'ASC';
+    let updated = false;
+    Object.keys(_previewApps).forEach(function(serverUid) {
+      if (_previewApps[serverUid] && _previewApps[serverUid].apps) {
+        _previewApps[serverUid].apps = sortTitles(_previewApps[serverUid].apps, sortOrder);
+        updated = true;
+      }
+    });
+    if (updated) {
+      savePreviewApps();
+      updatePreviewData();
+    }
   }, 100);
 }
 
@@ -3184,9 +3391,38 @@ function saveFlipXYfaceButtons() {
   }, 100);
 }
 
+function saveAudioBackend() {
+  var chosenAudioBackend = $(this).data('value');
+  $('#selectAudioBackend').text($(this).text()).attr('data-value', chosenAudioBackend).data('value', chosenAudioBackend);
+  console.log('%c[index.js, saveAudioBackend]', 'color: green;', 'Saving audioBackend value: ' + chosenAudioBackend);
+  storeData('audioBackend', chosenAudioBackend, null);
+
+  // Show only the settings that apply to the selected audio backend
+  updateAudioBackendSettings();
+}
+
+// The audio backends do not share their tuning settings, so only show the settings that the
+// selected backend actually uses while streaming
+function updateAudioBackendSettings() {
+  if (isWebAudioBackendSelected()) {
+    // The Web Audio backend schedules the audio itself using the jitter buffer
+    $('#audioSyncOption').hide();
+    $('#audioJitterOption').show();
+  } else {
+    // The EMSS backend drops audio packets to stay in sync instead of buffering them
+    $('#audioJitterOption').hide();
+    $('#audioSyncOption').show();
+  }
+}
+
+// Check whether the Web Audio backend is the currently selected audio backend
+function isWebAudioBackendSelected() {
+  return $('#selectAudioBackend').data('value') === 'WebAudio';
+}
+
 function saveAudioConfiguration() {
   var chosenAudioConfig = $(this).data('value');
-  $('#selectAudio').text($(this).text()).data('value', chosenAudioConfig);
+  $('#selectAudio').text($(this).text()).attr('data-value', chosenAudioConfig).data('value', chosenAudioConfig);
   console.log('%c[index.js, saveAudioConfiguration]', 'color: green;', 'Saving audioConfig value: ' + chosenAudioConfig);
   storeData('audioConfig', chosenAudioConfig, null);
 
@@ -3200,7 +3436,7 @@ function warnAudioConfiguration() {
   // Audio configuration warning
   if (!audioWarning && (chosenAudioConfig === '71Surround' || chosenAudioConfig === '51Surround')) {
     // Warn only if audio configuration is selected to 5.1 or 7.1 Surround
-    snackbarLogLong('Warning: 5.1 or 7.1 Surround sound may not be supported by your host PC and may increase audio latency!');
+    snackbarLogLong(t('Warning: Surround Sound (5.1/7.1) may not be supported by your TV and is not guaranteed to work due to platform limitations!'));
     // Set flag for audio configuration warning
     audioWarning = true;
   } else if (audioWarning && (chosenAudioConfig === 'Stereo')) {
@@ -3215,6 +3451,13 @@ function saveAudioSync() {
     console.log('%c[index.js, saveAudioSync]', 'color: green;', 'Saving audio sync state: ' + chosenAudioSync);
     storeData('audioSync', chosenAudioSync, null);
   }, 100);
+}
+
+function saveAudioJitter() {
+  var chosenAudioJitter = $('#jitterSlider').val();
+  $('#selectAudioJitter').html(chosenAudioJitter + ' ms');
+  console.log('%c[index.js, saveAudioJitter]', 'color: green;', 'Saving audio jitter buffer: ' + chosenAudioJitter);
+  storeData('audioJitter', chosenAudioJitter, null);
 }
 
 function savePlayHostAudio() {
@@ -3234,9 +3477,9 @@ function saveVideoCodec() {
   if (enabledHdrMode && chosenVideoCodec === selectedH264Codec) { // Selecting H.264 while HDR mode is enabled
     // H.264 does not support HDR profile, so stay on H.264 codec
     updateVideoCodec('#h264', selectedH264Codec);
-    snackbarLog('HDR has been disabled due to unsupported H.264 codec.');
+    snackbarLog(t('HDR has been disabled due to unsupported H.264 codec.'));
     // Turn off the HDR mode switch and save the state
-    $('#hdrModeSwitch').parent().removeClass('is-checked');
+    document.querySelector('#hdrModeBtn').MaterialSwitch.off();
     updateHdrMode();
   } else { // Selecting other video codecs while HDR mode is disabled
     // Continue to select the SDR profile of other video codecs
@@ -3245,7 +3488,7 @@ function saveVideoCodec() {
 }
 
 function updateVideoCodec(chosenCodecId, chosenCodecValue) {
-  $('#selectCodec').text($(chosenCodecId).text()).data('value', chosenCodecValue);
+  $('#selectCodec').text($(chosenCodecId).text()).attr('data-value', chosenCodecValue).data('value', chosenCodecValue);
   console.log('%c[index.js, updateVideoCodec]', 'color: green;', 'Saving video codec value: ' + chosenCodecValue);
   storeData('videoCodec', chosenCodecValue, null);
 
@@ -3263,7 +3506,7 @@ function warnVideoCodec() {
   // Video codec warning
   if (!codecWarning && (chosenVideoCodec === 'AV1')) {
     // Warn only if video codec is selected to AV1
-    snackbarLogLong('Warning: Selected codec may not be supported by your host PC and may significantly slow down performance!');
+    snackbarLogLong(t('Warning: Selected codec may not be supported by your host PC and may significantly slow down performance!'));
     // Set flag for video codec warning
     codecWarning = true;
   } else if (codecWarning && (chosenVideoCodec === 'HEVC' || chosenVideoCodec === 'H264')) {
@@ -3282,9 +3525,9 @@ function saveHdrMode() {
     // Handle HDR mode switch based on the selected codec
     if (selectedVideoCodec === chosenH264Codec) { // H.264
       // H.264 does not support HDR profile, so stay on H.264 codec
-      snackbarLog('H.264 codec does not support the HDR profile.');
+      snackbarLog(t('H.264 codec does not support the HDR profile.'));
       // Turn off the HDR mode switch and save the state
-      $('#hdrModeSwitch').parent().removeClass('is-checked');
+      document.querySelector('#hdrModeBtn').MaterialSwitch.off();
       updateHdrMode();
     } else if (selectedVideoCodec === chosenHevcCodec) { // HEVC
       // Select the HDR profile of the HEVC codec (HEVC Main10)
@@ -3296,9 +3539,9 @@ function saveHdrMode() {
       updateHdrMode();
     } else { // Undefined
       // Unknown codec format does not support HDR profile
-      snackbarLog('Selected codec does not support the HDR profile.');
+      snackbarLog(t('Selected codec does not support the HDR profile.'));
       // Turn off the HDR mode switch and save the state
-      $('#hdrModeSwitch').parent().removeClass('is-checked');
+      document.querySelector('#hdrModeBtn').MaterialSwitch.off();
       updateHdrMode();
     }
   }, 100);
@@ -3336,14 +3579,15 @@ function saveGameMode() {
       // Show the Warning dialog and push the view
       setTimeout(() => {
         // Show a warning message when enabling game mode on Tizen 9.0 platform
-        warningDialog('Compatibility Warning',
-          'Game Mode (Ultra Low Latency) is not compatible with Tizen ' + platformVer + ' due to platform changes introduced by Samsung. Enabling this option may result in video freezing on the first rendered frame, black screen, unstable performance, and other streaming issues.<br><br>' +
-          'For more information about this incompatibility, including available workarounds and potential limitations, please refer to the <b>Known Issues &amp; Limitations</b> page on the Wiki.'
+        warningDialog(t('Compatibility Warning'),
+          t('Game Mode (Ultra Low Latency) is not compatible with Tizen %1$s due to platform changes introduced by Samsung.', platformVer) +
+          t('Enabling this option may result in video freezing on the first rendered frame, black screen, unstable performance, and other streaming issues.<br><br>') +
+          t('For more information about this incompatibility, including available workarounds and potential limitations, please refer to the <b>Known Issues &amp; Limitations</b> page on the Wiki.')
         );
       }, 250);
     } else if (parseFloat(platformVer) < 9.0 && !chosenGameMode) { // Warning other Tizen versions when disabling game mode
       // Show a warning message when disabling game mode
-      snackbarLogLong('Warning: Disabling game mode may increase latency and affect your game streaming performance!');
+      snackbarLogLong(t('Warning: Disabling game mode may increase latency and affect your game streaming performance!'));
     }
   }, 100);
 }
@@ -3353,6 +3597,12 @@ function saveUnlockAllFps() {
     const chosenUnlockAllFps = $('#unlockAllFpsSwitch').parent().hasClass('is-checked');
     console.log('%c[index.js, saveUnlockAllFps]', 'color: green;', 'Saving unlock all FPS state: ' + chosenUnlockAllFps);
     storeData('unlockAllFps', chosenUnlockAllFps, null);
+
+    // Warning when enabling higher FPS options
+    if (chosenUnlockAllFps) {
+      // Show a warning message when enabling higher FPS options
+      snackbarLogLong(t('Warning: Higher frame rates may not be fully supported by your TV and do not guarantee a smoother experience. Performance issues may occur due to platform limitations!'));
+    }
   }, 100);
 }
 
@@ -3367,9 +3617,9 @@ function handleUnlockAllFps() {
     if (!$('.videoFramerateMenu').find('li[data-value="90"], li[data-value="120"], li[data-value="144"]').length) {
       // Insert all higher FPS options in correct order (90, 120, 144)
       addFramerate.after(`
-        <li class="mdl-menu__item" data-value="90">90 FPS</li>
-        <li class="mdl-menu__item" data-value="120">120 FPS</li>
-        <li class="mdl-menu__item" data-value="144">144 FPS</li>
+        <li class="mdl-menu__item" data-value="90" data-i18n="90 FPS">90 FPS</li>
+        <li class="mdl-menu__item" data-value="120" data-i18n="120 FPS">120 FPS</li>
+        <li class="mdl-menu__item" data-value="144" data-i18n="144 FPS">144 FPS</li>
       `);
       // Attach click listeners only to the newly added FPS options
       $('.videoFramerateMenu li[data-value="90"], li[data-value="120"], li[data-value="144"]').on('click', saveFramerate);
@@ -3380,7 +3630,7 @@ function handleUnlockAllFps() {
     $('.videoFramerateMenu li[data-value="90"], li[data-value="120"], li[data-value="144"]').remove();
     // After removal, if a higher FPS option remains selected, then reset it to the default option
     if (['90', '120', '144'].includes(String(currentFps))) {
-      $('#selectFramerate').text('60 FPS').data('value', '60');
+      $('#selectFramerate').text('60 FPS').attr('data-value', '60').data('value', '60');
       console.log('%c[index.js, handleUnlockAllFps]', 'color: green;', 'Resetting framerate value to 60 FPS');
       storeData('frameRate', '60', null);
       // Update the bitrate value based on the selected frame rate
@@ -3427,11 +3677,11 @@ function saveSpeculativeRfi() {
 // Reset all settings to their default state and save the value data
 function restoreDefaultsSettingsValues() {
   const defaultResolution = '1280:720';
-  $('#selectResolution').text('1280 x 720 (720p)').data('value', defaultResolution);
+  $('#selectResolution').text('1280 x 720 (720p)').attr('data-value', defaultResolution).data('value', defaultResolution);
   storeData('resolution', defaultResolution, null);
 
   const defaultFramerate = '60';
-  $('#selectFramerate').text('60 FPS').data('value', defaultFramerate);
+  $('#selectFramerate').text('60 FPS').attr('data-value', defaultFramerate).data('value', defaultFramerate);
   storeData('frameRate', defaultFramerate, null);
 
   const defaultBitrate = '10';
@@ -3471,20 +3721,31 @@ function restoreDefaultsSettingsValues() {
   document.querySelector('#flipXYfaceButtonsBtn').MaterialSwitch.off();
   storeData('flipXYfaceButtons', defaultFlipXYfaceButtons, null);
 
+  const defaultAudioBackend = 'EMSS';
+  $('#selectAudioBackend').text('EMSS').attr('data-value', defaultAudioBackend).data('value', defaultAudioBackend);
+  storeData('audioBackend', defaultAudioBackend, null);
+  // Show the settings of the restored audio backend
+  updateAudioBackendSettings();
+
   const defaultAudioConfig = 'Stereo';
-  $('#selectAudio').text('Stereo').data('value', defaultAudioConfig);
+  $('#selectAudio').text('Stereo').attr('data-value', defaultAudioConfig).data('value', defaultAudioConfig);
   storeData('audioConfig', defaultAudioConfig, null);
 
   const defaultAudioSync = false;
   document.querySelector('#audioSyncBtn').MaterialSwitch.off();
   storeData('audioSync', defaultAudioSync, null);
 
+  const defaultAudioJitter = '100';
+  $('#selectAudioJitter').html(defaultAudioJitter + ' ms');
+  $('#jitterSlider')[0].MaterialSlider.change(defaultAudioJitter);
+  storeData('audioJitter', defaultAudioJitter, null);
+
   const defaultPlayHostAudio = false;
   document.querySelector('#playHostAudioBtn').MaterialSwitch.off();
   storeData('playHostAudio', defaultPlayHostAudio, null);
 
   const defaultVideoCodec = 'H264';
-  $('#selectCodec').text('H.264').data('value', defaultVideoCodec);
+  $('#selectCodec').text('H.264').attr('data-value', defaultVideoCodec).data('value', defaultVideoCodec);
   storeData('videoCodec', defaultVideoCodec, null);
 
   const defaultHdrMode = false;
@@ -3594,14 +3855,14 @@ function loadSystemInfo() {
     console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'HDR Capable: ' + (isHdrCapable ? 'Yes' : 'No'));
     // Insert the system information into the placeholder
     systemInfoPlaceholder.innerText =
-      'App Version: ' + appInfo.name + ' v' + buildVer + '\n' +
-      'Platform Version: Tizen ' + (platformVer ? platformVer : 'Unknown') + '\n' +
-      'TV Model Series: ' + (modelSeries ? modelSeries : 'Unknown') + '\n' +
-      'TV Model Name: ' + (modelName ? modelName : 'Unknown') + '\n' +
-      'TV Model Group: ' + (modelGroup ? modelGroup : 'Unknown');
+      t('App Version: %1$s v%2$s', appInfo.name, buildVer) + '\n' +
+      t('Platform Version: Tizen %1$s', platformVer ? platformVer : t('Unknown')) + '\n' +
+      t('TV Model Series: %1$s', modelSeries ? modelSeries : t('Unknown')) + '\n' +
+      t('TV Model Name: %1$s', modelName ? modelName : t('Unknown')) + '\n' +
+      t('TV Model Group: %1$s', modelGroup ? modelGroup : t('Unknown'));
   } else {
     console.error('%c[index.js, loadSystemInfo]', 'color: green;', 'Error: Failed to load system information!');
-    systemInfoPlaceholder.innerText = 'Failed to load system information!';
+    systemInfoPlaceholder.innerText = t('Failed to load system information!');
   }
 }
 
@@ -3611,6 +3872,19 @@ function loadUserData() {
 }
 
 function loadUserDataCb() {
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored language preferences.');
+  getData('languagePreference', function(previousValue) {
+    const savedLanguagePreference = (previousValue && previousValue['languagePreference']) || 'auto';
+    // Update the language field based on the stored value
+    $('#selectLanguage').attr('data-value', savedLanguagePreference).data('value', savedLanguagePreference);
+    // Apply the stored language preference if the i18n object is available
+    if (window.i18n && typeof window.i18n.applyLanguagePreference === 'function') {
+      window.i18n.applyLanguagePreference(savedLanguagePreference).catch((error) => {
+        console.error('%c[index.js, loadUserDataCb]', 'color: green;', 'Error: Failed to apply stored language: ' + error);
+      });
+    }
+  });
+
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored resolution preferences.');
   getData('resolution', function(previousValue) {
     if (previousValue.resolution != null) {
@@ -3622,7 +3896,7 @@ function loadUserDataCb() {
       $('.videoResolutionMenu li').each(function() {
         if ($(this).data('value') === previousValue.resolution) {
           // Update the video resolution field based on the given value
-          $('#selectResolution').text($(this).text()).data('value', previousValue.resolution);
+          $('#selectResolution').text($(this).text()).attr('data-value', previousValue.resolution).data('value', previousValue.resolution);
         }
       });
     }
@@ -3647,7 +3921,7 @@ function loadUserDataCb() {
       $('.videoFramerateMenu li').each(function() {
         if ($(this).data('value') === previousValue.frameRate) {
           // Update the video frame rate field based on the given value
-          $('#selectFramerate').text($(this).text()).data('value', previousValue.frameRate);
+          $('#selectFramerate').text($(this).text()).attr('data-value', previousValue.frameRate).data('value', previousValue.frameRate);
         }
       });
     }
@@ -3750,13 +4024,27 @@ function loadUserDataCb() {
     }
   });
 
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioBackend preferences.');
+  getData('audioBackend', function(previousValue) {
+    if (previousValue.audioBackend != null) {
+      $('.audioBackendMenu li').each(function() {
+        if ($(this).data('value') === previousValue.audioBackend) {
+          // Update the audio backend field based on the given value
+          $('#selectAudioBackend').text($(this).text()).attr('data-value', previousValue.audioBackend).data('value', previousValue.audioBackend);
+        }
+      });
+    }
+    // Show the settings of the stored audio backend
+    updateAudioBackendSettings();
+  });
+
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioConfig preferences.');
   getData('audioConfig', function(previousValue) {
     if (previousValue.audioConfig != null) {
       $('.audioConfigMenu li').each(function() {
         if ($(this).data('value') === previousValue.audioConfig) {
           // Update the audio configuration field based on the given value
-          $('#selectAudio').text($(this).text()).data('value', previousValue.audioConfig);
+          $('#selectAudio').text($(this).text()).attr('data-value', previousValue.audioConfig).data('value', previousValue.audioConfig);
         }
       });
     }
@@ -3771,6 +4059,13 @@ function loadUserDataCb() {
     } else {
       document.querySelector('#audioSyncBtn').MaterialSwitch.on();
     }
+  });
+
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioJitter preferences.');
+  getData('audioJitter', function(previousValue) {
+    $('#jitterSlider')[0].MaterialSlider.change(previousValue.audioJitter != null ? previousValue.audioJitter : '100');
+    // Update the audio jitter buffer field based on the given value
+    $('#selectAudioJitter').html($('#jitterSlider').val() + ' ms');
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored playHostAudio preferences.');
@@ -3790,7 +4085,7 @@ function loadUserDataCb() {
       $('.videoCodecMenu li').each(function() {
         if ($(this).data('value') === previousValue.videoCodec) {
           // Update the video codec field based on the given value
-          $('#selectCodec').text($(this).text()).data('value', previousValue.videoCodec);
+          $('#selectCodec').text($(this).text()).attr('data-value', previousValue.videoCodec).data('value', previousValue.videoCodec);
         }
       });
     }
@@ -3821,13 +4116,9 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored gameMode preferences.');
   getData('gameMode', function(previousValue) {
     if (previousValue.gameMode == null) {
-      if (parseFloat(platformVer) === 9.0) {
-        document.querySelector('#gameModeBtn').MaterialSwitch.off(); // Disable for Tizen 9.0 to avoid compatibility issues
-      } else if (parseFloat(platformVer) === 5.5) {
-        document.querySelector('#gameModeBtn').MaterialSwitch.off(); // Disable for Tizen 5.5 due to lack of support
+      document.querySelector('#gameModeBtn').MaterialSwitch.off(); // Never force Game Mode without an explicit user choice
+      if (parseFloat(platformVer) === 5.5) {
         document.querySelector('#gameModeBtn').MaterialSwitch.disable(); // Disable the switch to prevent user interaction
-      } else {
-        document.querySelector('#gameModeBtn').MaterialSwitch.on(); // Set the default state
       }
     } else if (previousValue.gameMode == false) {
       document.querySelector('#gameModeBtn').MaterialSwitch.off();
@@ -3930,6 +4221,7 @@ function loadHTTPCertsCb() {
         for (var hostUID in hosts) { // Programmatically add each new host
           var revivedHost = new NvHTTP(hosts[hostUID].address, myUniqueid, hosts[hostUID].userEnteredAddress, hosts[hostUID].macAddress);
           Object.assign(revivedHost, hosts[hostUID]);
+          revivedHost._memCachedApplist = null; // Prevent using the app list cache from a previous session
           revivedHost.httpPort = hosts[hostUID].httpPort || ((hosts[hostUID].httpsPort || 47984) + 5);
           revivedHost.httpsPort = hosts[hostUID].httpsPort || (revivedHost.httpPort - 5);
           revivedHost.externalPort = hosts[hostUID].externalPort || revivedHost.httpPort;
@@ -3941,14 +4233,355 @@ function loadHTTPCertsCb() {
           addHostToGrid(revivedHost);
         }
         startPollingHosts();
+        // Register loadSystemInfo to re-run every time the language changes
+        if (window.i18n && typeof window.i18n.onRefresh === 'function') {
+          window.i18n.onRefresh(loadSystemInfo);
+        }
+        // Load stored preview app lists and update Smart Hub Preview tiles.
+        // Using the persisted list avoids requiring live host connections at startup.
+        getData('previewApps', function(storedPreview) {
+          _previewApps = (storedPreview.previewApps != null) ? storedPreview.previewApps : {};
+          updatePreviewData();
+        });
         console.log('%c[index.js, loadHTTPCertsCb]', 'color: green;', 'Loading previously connected hosts...');
         // Start subnet scanning silently in the background after hosts are fully loaded
         setTimeout(() => {
-          snackbarLog('Scanning the local network to discover new hosts...');
+          snackbarLog(t('Scanning the local network to discover new hosts...'));
           startSubnetScanner();
         }, 1000);
       });
     });
+  });
+}
+
+// Navigates to a specific host once it has been loaded and becomes available.
+// Polls the hosts object at 1-second intervals for up to 30 seconds.
+function waitForHostAndNavigate(serverUid) {
+  var attempts = 0;
+  var interval = setInterval(function() {
+    attempts++;
+    if (hosts[serverUid]) {
+      clearInterval(interval);
+      console.log('%c[index.js, waitForHostAndNavigate]', 'color: green;', 'Host found for deep link, navigating: ' + serverUid);
+      hostChosen(hosts[serverUid]);
+    } else if (attempts > 30) {
+      clearInterval(interval);
+      console.warn('%c[index.js, waitForHostAndNavigate]', 'color: orange;', 'Warning: Timed out waiting for host ' + serverUid + ' to load.');
+    }
+  }, 1000);
+}
+
+// Navigates to a specific app on a host from a Smart Hub Preview deep link.
+// Waits for the host to load, then checks availability and whether the app still exists.
+// - If the host is offline: removes it from preview and returns to the Moonlight home screen.
+// - If the app no longer exists on the server: connects to the host and shows the current app list.
+// - If the app exists: connects to the host and navigates directly to the app list.
+function waitForHostAndNavigateToApp(serverUid, appId) {
+  var attempts = 0;
+  var interval = setInterval(function() {
+    attempts++;
+    if (hosts[serverUid]) {
+      clearInterval(interval);
+      var host = hosts[serverUid];
+      console.log('%c[index.js, waitForHostAndNavigateToApp]', 'color: green;', 'Host found for deep link, checking availability: ' + serverUid);
+
+      // Check whether the host is online before trying to connect
+      if (!host.online) {
+        hostChosen(host);
+        return;
+      }
+
+      // Host is online: check whether the requested app still exists
+      host.getAppListWithCacheFlush().then(function(appList) {
+        // Find the existing switch element
+        const sortAppsListSwitch = document.getElementById('sortAppsListSwitch');
+        // Defines the sort order based on the state of the switch
+        const sortOrder = sortAppsListSwitch.checked ? 'DESC' : 'ASC';
+        // If game grid is populated, sort the app list
+        const sortedAppList = sortTitles(appList, sortOrder);
+
+        if (_isSmartHubSupported) {
+          // Preserve existing image paths from the previous preview cache
+          var oldApps = (_previewApps[serverUid] && _previewApps[serverUid].apps) || [];
+
+          // Update the preview with the latest app list from this successful connection
+          _previewApps[serverUid] = {
+            hostname: host.hostname,
+            address: host.address,
+            apps: sortedAppList.map(function(app) {
+              var oldApp = oldApps.find(function(a) {
+                return a.id === app.id;
+              });
+              var newApp = {
+                id: app.id, title: app.title
+              };
+              if (oldApp) {
+                if (oldApp.imageUri) {
+                  newApp.imageUri = oldApp.imageUri;
+                }
+                if (oldApp.txtPath) {
+                  newApp.txtPath = oldApp.txtPath;
+                }
+              }
+              return newApp;
+            })
+          };
+          savePreviewApps();
+          updatePreviewData();
+        }
+
+        var appExists = appList.some(function(app) {
+          return app.id === appId;
+        });
+        if (appExists) {
+          // App still exists: connect, show the app list, and auto-launch the app
+          console.log('%c[index.js, waitForHostAndNavigateToApp]', 'color: green;', 'App ' + appId + ' found, launching app from deep link.');
+          hostChosen(host);
+          // Wait for the app list to render, then scroll to the app and launch it automatically.
+          // This ensures the app list is in the navigation stack so Back returns correctly:
+          // streaming session → app list → Moonlight home screen.
+          var gameStartAttempts = 0;
+          var gameStartInterval = setInterval(function() {
+            gameStartAttempts++;
+            var gameContainer = document.getElementById('game-container-' + appId);
+            if (gameContainer) {
+              clearInterval(gameStartInterval);
+              gameContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              startGame(host, appId);
+            } else if (gameStartAttempts > 30) {
+              clearInterval(gameStartInterval);
+              console.warn('%c[index.js, waitForHostAndNavigateToApp]', 'color: orange;', 'Warning: Timed out waiting for game container for app ' + appId + ' to appear.');
+            }
+          }, 200);
+        } else {
+          // App no longer exists: connect to host and show the current app list
+          console.warn('%c[index.js, waitForHostAndNavigateToApp]', 'color: orange;', 'App ' + appId + ' not found on host, showing current app list.');
+          snackbarLogLong('The selected app is no longer available on this host. Showing the current app list.');
+          hostChosen(host);
+        }
+      }, function() {
+        // Could not fetch app list (host may have gone offline during the check)
+        hostChosen(host);
+      });
+    } else if (attempts > 30) {
+      clearInterval(interval);
+      console.warn('%c[index.js, waitForHostAndNavigateToApp]', 'color: orange;', 'Warning: Timed out waiting for host ' + serverUid + ' to load.');
+    }
+  }, 1000);
+}
+
+// Handles deep link navigation when the app is launched from a Smart Hub Preview tile.
+// Reads the PAYLOAD from AppControl data and navigates to the appropriate host and app.
+function handleDeepLink() {
+  if (!_isSmartHubSupported) {
+    return;
+  }
+  try {
+    var reqAppControl = tizen.application.getCurrentApplication().getRequestedAppControl();
+    if (!reqAppControl) {
+      console.warn('%c[index.js, handleDeepLink]', 'color: green;', 'Warning: No requested app control found, skipping deep link handling!');
+      return;
+    }
+
+    var appControlData = reqAppControl.appControl.data;
+    console.log('%c[index.js, handleDeepLink]', 'color: green;', 'App control data: ' + JSON.stringify(appControlData));
+
+    for (var i = 0; i < appControlData.length; i++) {
+      if (appControlData[i].key === 'PAYLOAD') {
+        var payload = JSON.parse(appControlData[i].value[0]);
+        var actionData = JSON.parse(payload.values);
+        console.log('%c[index.js, handleDeepLink]', 'color: green;', 'Deep link action data: ', actionData);
+
+        if (actionData.serverUid && actionData.appId !== null && actionData.appId !== undefined) {
+          // App-level deep link from a preview tile: navigate to the specific host and app
+          waitForHostAndNavigateToApp(actionData.serverUid, actionData.appId);
+        } else if (actionData.serverUid) {
+          // Host-level deep link: navigate to the host's app list
+          waitForHostAndNavigate(actionData.serverUid);
+        }
+        break;
+      }
+    }
+  } catch (e) {
+    console.error('%c[index.js, handleDeepLink]', 'color: green;', 'Error: No deep link or error processing it: ' + e.message);
+  }
+}
+
+// Builds Smart Hub Preview tiles from the cached per-host app lists and sends the
+// preview data to the background service, which calls webapis.preview.setPreviewData().
+// The webapis.preview API is only accessible from within a Tizen background service.
+// The preview is populated only from successfully connected hosts (stored in _previewApps).
+function updatePreviewData() {
+  try {
+    var packageId = tizen.application.getCurrentApplication().appInfo.packageId;
+    if (!_isSmartHubSupported) {
+      console.log('%c[index.js, updatePreviewData]', 'color: green;', 'Smart Hub Preview is not supported on this device. Skipping!');
+      return;
+    }
+
+    // Build one section per host that has a cached app list
+    // Smart Hub supports a maximum of 40 tiles across all sections
+    var sections = [];
+    var totalTiles = 0;
+    var SMART_HUB_MAX_TILES = 40;
+    Object.keys(_previewApps).forEach(function(serverUid) {
+      var entry = _previewApps[serverUid];
+      if (!entry || !entry.apps || entry.apps.length === 0) {
+        console.error('%c[index.js, updatePreviewData]', 'color: green;', 'Error: No apps found for host ' + serverUid);
+        return;
+      }
+
+      // Stop adding sections once the Smart Hub tile limit is reached
+      if (totalTiles >= SMART_HUB_MAX_TILES) {
+        return;
+      }
+
+      // Only include as many apps as can fit within the remaining tile limit
+      var remainingTiles = SMART_HUB_MAX_TILES - totalTiles;
+      var apps = entry.apps.slice(0, remainingTiles);
+
+      // Create a tile for each app in the host's app list, including the title, subtitle, and action data
+      var tiles = apps.map(function(app, index) {
+        // Each tile object accepts a `position` attribute. By explicitly setting
+        // the global position, we override the native behavior and enforce our
+        // custom sorting (A-Z or Z-A).
+        var tile = {
+          title: app.title,
+          subtitle: entry.hostname,
+          action_data: JSON.stringify({
+            serverUid: serverUid, address: entry.address, appId: app.id
+          }),
+          is_playable: true,
+          position: totalTiles + index
+        };
+        if (app.imageUri) {
+          tile.image_url = app.imageUri;
+        }
+        if (app.txtPath) {
+          tile.txtPath = app.txtPath;
+        }
+        return tile;
+      });
+
+      // Update the total tile count after adding this host's tiles
+      totalTiles += tiles.length;
+
+      // Only add the section if it contains tiles
+      if (tiles.length > 0) {
+        sections.push({
+          title: entry.hostname, tiles: tiles
+        });
+      }
+    });
+
+    if (sections.length === 0) {
+      console.log('%c[index.js, updatePreviewData]', 'color: green;', 'No preview app data found, clearing Smart Hub Preview.');
+    }
+
+    var previewData = {
+      sections: sections
+    };
+    var serviceId = packageId + '.service';
+
+    console.log('%c[index.js, updatePreviewData]', 'color: green;', 'Launching Smart Hub service with preview data: ', previewData);
+
+    // Set up local message port to receive responses from the service
+    if (_smartHubLocalMessagePort && _smartHubMessagePortListener !== null) {
+      try {
+        _smartHubLocalMessagePort.removeMessagePortListener(_smartHubMessagePortListener);
+      } catch (e) {
+        // Ignore listener removal errors
+        console.error('%c[index.js, updatePreviewData]', 'color: green;', 'Error removing previous Smart Hub message port listener: ' + e.message);
+      }
+    }
+    _smartHubLocalMessagePort = tizen.messageport.requestLocalMessagePort(packageId);
+    _smartHubMessagePortListener = _smartHubLocalMessagePort.addMessagePortListener(function(uiData) {
+      console.log('%c[index.js, updatePreviewData]', 'color: green;', 'Received from Smart Hub service: ' + uiData[0].value);
+      if (uiData[0].value === 'Service stopping...' || uiData[0].value === 'Service exiting...') {
+        try {
+          _smartHubLocalMessagePort.removeMessagePortListener(_smartHubMessagePortListener);
+          _smartHubMessagePortListener = null;
+        } catch (e) {
+          // Ignore listener removal errors
+          console.error('%c[index.js, updatePreviewData]', 'color: green;', 'Error removing Smart Hub message port listener: ' + e.message);
+        }
+      }
+    });
+
+    // Launch the background service with the preview data via AppControl
+    tizen.application.launchAppControl(
+      new tizen.ApplicationControl(
+        'http://tizen.org/appcontrol/operation/pick', null, 'image/jpeg', null,
+        [new tizen.ApplicationControlData('Preview', [JSON.stringify(previewData)])]
+      ),
+      serviceId, function() {
+        console.log('%c[index.js, updatePreviewData]', 'color: green;', 'Preview data sent to service: ' + serviceId);
+      }, function(err) {
+        console.error('%c[index.js, updatePreviewData]', 'color: green;', 'Failed to launch Smart Hub service: ' + err.message);
+      }
+    );
+  } catch (e) {
+    console.error('%c[index.js, updatePreviewData]', 'color: green;', 'Error while updating Smart Hub preview data: ' + e.message);
+  }
+}
+
+function probeSmartHubSupport() {
+  return new Promise(function(resolve) {
+    // Check localStorage cache first
+    var cached = localStorage.getItem('smartHubSupported');
+    if (cached !== null) {
+      _isSmartHubSupported = cached === 'true';
+      console.log('%c[index.js, probeSmartHubSupport]', 'color: green;', 'Smart Hub support (cached): ' + _isSmartHubSupported);
+      resolve();
+      return;
+    }
+
+    // First launch: probe the service
+    var packageId = tizen.application.getCurrentApplication().appInfo.packageId;
+    var serviceId = packageId + '.service';
+
+    try {
+      var probePort = tizen.messageport.requestLocalMessagePort(packageId);
+      var probeListener = probePort.addMessagePortListener(function(data) {
+        var key = data[0].key;
+        if (key !== 'PROBE') {
+          return;
+        }
+
+        var value = data[0].value;
+        _isSmartHubSupported = (value === 'SMART_HUB_SUPPORTED');
+        localStorage.setItem('smartHubSupported', String(_isSmartHubSupported));
+        console.log('%c[index.js, probeSmartHubSupport]', 'color: green;', 'Smart Hub support (probed): ' + _isSmartHubSupported);
+        try {
+          probePort.removeMessagePortListener(probeListener);
+        } catch(e) {
+          console.error('%c[index.js, probeSmartHubSupport]', 'color: green;', 'Error removing Smart Hub probe listener: ' + e.message);
+        }
+        resolve();
+      });
+
+      // Launch service with Probe request
+      tizen.application.launchAppControl(
+        new tizen.ApplicationControl(
+          'http://tizen.org/appcontrol/operation/pick', null, null, null,
+          [new tizen.ApplicationControlData('Probe', ['check'])]
+        ),
+        serviceId, function() {
+          console.log('%c[index.js, probeSmartHubSupport]', 'color: green;', 'Probe sent to service.');
+        }, function(err) {
+          // Service launch failed — assume not supported
+          console.warn('%c[index.js, probeSmartHubSupport]', 'color: green;', 'Probe failed: ' + err.message);
+          _isSmartHubSupported = false;
+          localStorage.setItem('smartHubSupported', 'false');
+          resolve();
+        }
+      );
+    } catch (e) {
+      console.warn('%c[index.js, probeSmartHubSupport]', 'color: green;', 'Error probing Smart Hub support: ' + e.message);
+      _isSmartHubSupported = false;
+      localStorage.setItem('smartHubSupported', 'false');
+      resolve();
+    }
   });
 }
 
@@ -3959,6 +4592,13 @@ function onWindowLoad() {
   initSpecialKeys();
   loadSystemInfo();
   loadUserData();
+
+  probeSmartHubSupport().then(function() {
+    // Handle deep links from Smart Hub Preview tile clicks (initial launch)
+    handleDeepLink();
+    // Also handle deep links when the app is brought to the foreground via Smart Hub
+    window.addEventListener('appcontrol', handleDeepLink);
+  });
 }
 
 window.onload = onWindowLoad;
@@ -3969,7 +4609,7 @@ window.addEventListener('gamepadconnected', function(e) {
   const gamepadIndex = connectedGamepad.index;
   const rumbleFeedbackSwitch = document.getElementById('rumbleFeedbackSwitch');
   console.log('%c[index.js, gamepadconnected]', 'color: green;', 'Gamepad connected:\n' + JSON.stringify(connectedGamepad), connectedGamepad);
-  snackbarLog('Gamepad ' + gamepadIndex + ' has been connected.');
+  snackbarLog(t('Gamepad %1$s has been connected.', gamepadIndex));
   // Check if the rumble feedback switch is checked
   if (rumbleFeedbackSwitch.checked) {
     // Check if the connected gamepad has a vibrationActuator associated with it
@@ -3992,6 +4632,6 @@ window.addEventListener('gamepaddisconnected', function(e) {
   const disconnectedGamepad = e.gamepad;
   const gamepadIndex = disconnectedGamepad.index;
   console.log('%c[index.js, gamepaddisconnected]', 'color: green;', 'Gamepad disconnected:\n' + JSON.stringify(disconnectedGamepad), disconnectedGamepad);
-  snackbarLog('Gamepad ' + gamepadIndex + ' has been disconnected.');
+  snackbarLog(t('Gamepad %1$s has been disconnected.', gamepadIndex));
   console.warn('%c[index.js, gamepaddisconnected]', 'color: green;', 'Warning: Lost connection to gamepad ' + gamepadIndex + '. Please reconnect your gamepad!');
 });

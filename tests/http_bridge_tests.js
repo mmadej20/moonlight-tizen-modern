@@ -1,5 +1,6 @@
 const assert = require('assert');
 const fs = require('fs');
+const vm = require('vm');
 
 const {
   cancelAsyncRequest,
@@ -70,6 +71,50 @@ async function run() {
   bridge.reject(2, 'cancelled');
   await assert.rejects(second, (error) => error === 'cancelled');
   assert.strictEqual(bridge.pendingCount(), 0);
+
+  const openUrlCalls = [];
+  const boxArtError = new Error('box art request failed');
+  const utilsContext = {
+    console: { log() {}, warn() {}, error() {} },
+    navigator: { getGamepads: () => [] },
+    window: { btoa: () => '', atob: () => '' },
+    tizen: {
+      filesystem: {
+        openFile() { throw new Error('cache miss'); },
+      },
+    },
+    sendMessage(method, params) {
+      openUrlCalls.push({ method, params });
+      return Promise.reject(boxArtError);
+    },
+    Blob,
+    FileReader: function() {},
+    Uint8Array,
+    Int32Array,
+    Uint32Array,
+    Set,
+    Promise,
+    Math,
+  };
+  vm.runInNewContext(fs.readFileSync('wasm/static/js/utils.js', 'utf8'), utilsContext);
+  const boxArtHost = new utilsContext.NvHTTP('host', 'client');
+  boxArtHost._baseUrlHttps = 'https://host:47984';
+
+  const boxArtOutcome = await Promise.race([
+    boxArtHost.getBoxArt(42, false).then(
+      () => ({ status: 'resolved' }),
+      (error) => ({ status: 'rejected', error }),
+    ),
+    new Promise((resolve) => setTimeout(() => resolve({ status: 'timeout' }), 100)),
+  ]);
+  assert.strictEqual(boxArtOutcome.status, 'rejected', 'a failed box-art fetch settles by rejection');
+  assert.strictEqual(boxArtOutcome.error, boxArtError);
+  assert.strictEqual(openUrlCalls[0].method, 'openUrl');
+  assert.match(openUrlCalls[0].params[0], /\/appasset\?.*appid=42/);
+  assert.strictEqual(openUrlCalls[0].params[1], null);
+  assert.strictEqual(openUrlCalls[0].params[2], true);
+  assert.strictEqual(openUrlCalls[0].params[3], 10000,
+    'box-art retrieval supplies an explicit HTTP timeout');
 
   console.log('http_bridge_tests: PASS');
 }
