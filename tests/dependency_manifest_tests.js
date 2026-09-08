@@ -11,6 +11,7 @@ const stableWorkflow = fs.readFileSync('.github/workflows/release-stable.yml', '
 
 const expectedJavaScriptSuites = [
   'tests/audio_backend_behavior_tests.js',
+  'tests/auto_wol_behavior_tests.js',
   'tests/box_art_behavior_tests.js',
   'tests/common_log_capture_wiring_tests.js',
   'tests/connection_wiring_tests.js',

@@ -245,6 +245,7 @@ class MoonlightInstance {
     int callbackId, std::string serverMajorVersion, std::string address,
     int httpPort, std::string randomNumber,
     std::shared_ptr<HTTP_REQUEST_CONTEXT> requestContext);
+  void WakeOnLan_private(int callbackId, std::string macAddress);
 
   void LockMouse();
   void UnlockMouse();

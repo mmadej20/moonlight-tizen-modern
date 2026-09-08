@@ -124,6 +124,7 @@ function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   this.isNvidiaServerSoftware = false;
   this.gputype = '';
   this.supportedDisplayModes = {}; // key: y-resolution:x-resolution, value: array of supported frame rates
+  this.autoWolEnabled = false; // Per-host Auto Wake-on-LAN setting
 
   _self = this;
   console.log('%c[utils.js, NvHTTP]', 'color: gray;', 'NvHTTP Object: \n' + this);
@@ -536,142 +537,128 @@ NvHTTP.prototype = {
   // in the public documents directory so that the Smart Hub Preview background service process can access it directly.
   getBoxArt: function(appId, isSmartHubSupported) {
     return new Promise(function(resolve, reject) {
-      // Store the original PNG box art in the private directory
       var boxArtDir = 'wgt-private/' + this.hostname;
       var boxArtFileName = 'boxart-' + appId + '.png';
-
       var self = this;
+      var previewFileName = this.getPreviewImageFileName(appId);
 
-      // Try to load the cached original box art from private storage
+      var queuePreview = function(dataUrl, source) {
+        var previewPromise = self.generatePreviewImage(dataUrl, appId).then(function(previewDataUrl) {
+          if (previewDataUrl) self.savePreviewImage(appId, previewDataUrl);
+        }, function(error) {
+          console.warn('%c[utils.js, getBoxArt]', 'color: gray;',
+            'Warning: Failed to generate Smart Hub Preview box art from ' + source +
+            ' for app ID ' + appId + ': ' + error);
+        });
+        if (!window.previewPromises) window.previewPromises = [];
+        window.previewPromises.push(previewPromise);
+      };
+
+      var fetchBoxArt = function() {
+        return sendMessage('openUrl', [
+          self._baseUrlHttps + '/appasset?' + self._buildUidStr() + '&appid=' + appId + '&AssetType=2&AssetIdx=0', self.ppkstr, true, 10000
+        ]).then(function(boxArtBuffer) {
+          var blob = new Blob([boxArtBuffer], { type: 'image/png' });
+          var reader = new FileReader();
+          reader.onload = function() {
+            var dataUrl = reader.result;
+            console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Returning network-fetched box art: ', appId);
+            try {
+              tizen.filesystem.createDirectory(boxArtDir, true);
+              var fileHandleWrite = tizen.filesystem.openFile(boxArtDir + '/' + boxArtFileName, 'w');
+              fileHandleWrite.writeData(boxArtBuffer);
+              fileHandleWrite.close();
+              console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Saved original PNG box art: ' + boxArtFileName);
+            } catch (error) {
+              console.error('%c[utils.js, getBoxArt]', 'color: gray;', 'Error: Failed to cache original box art in ' + boxArtDir + ' for app ID ' + appId + ': ' + error.message);
+            }
+            if (isSmartHubSupported) queuePreview(dataUrl, 'network');
+            resolve(dataUrl);
+          };
+          reader.onerror = function() {
+            reject(reader.error || new Error('Failed to decode network box art'));
+          };
+          reader.readAsDataURL(blob);
+        }, function(error) {
+          console.error('%c[utils.js, getBoxArt]', 'color: gray;', 'Error: Failed to retrieve original box art from network: ', error);
+          reject(error);
+        });
+      };
+
+      var processCachedBoxArt = function(fileContentInBlob) {
+        var reader = new FileReader();
+        reader.onload = function() {
+          var dataUrl = reader.result;
+          console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Returning storage-cached box art: ', appId);
+          if (!isSmartHubSupported) {
+            resolve(dataUrl);
+            return;
+          }
+
+          try {
+            var previewFileHandle = tizen.filesystem.openFile('documents/' + previewFileName, 'r');
+            previewFileHandle.close();
+            console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Smart Hub Preview box art file already cached: ' + previewFileName);
+          } catch (previewReadError) {
+            queuePreview(dataUrl, 'storage');
+          }
+          resolve(dataUrl);
+        };
+        reader.onerror = function() {
+          console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to decode cached box art. Fetching it again.');
+          fetchBoxArt();
+        };
+        reader.readAsDataURL(new Blob([fileContentInBlob], { type: 'image/png' }));
+      };
+
       try {
-        // Open the cached original PNG box art for reading
         var fileHandleRead = tizen.filesystem.openFile(boxArtDir + '/' + boxArtFileName, 'r');
-        // readBlob() preserves the original PNG bytes on Tizen's filesystem API.
         var fileContentInBlob = fileHandleRead.readBlob();
         fileHandleRead.close();
         if (!fileContentInBlob || fileContentInBlob.size === 0) {
           throw new Error('Cached box art is empty');
         }
 
-        var cachedReader = new FileReader();
-        cachedReader.onload = function() {
-        var dataUrl = cachedReader.result;
-
-        console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Returning storage-cached box art: ', appId);
-
-        // Return the cached original box art directly when Smart Hub Preview is not supported
-        if (!isSmartHubSupported) {
-          resolve(dataUrl);
-          return;
-        }
-
-        // Check whether an optimized Smart Hub Preview has already been cached
-        var previewFileName = self.getPreviewImageFileName(appId);
-        var previewFilePath = 'documents/' + previewFileName;
-
-        // Try to open the cached preview box art to determine whether it already exists
-        try {
-          // Open the cached preview file to check whether it already exists
-          var previewFileHandle = tizen.filesystem.openFile(previewFilePath, 'r');
-          previewFileHandle.close();
-
-          console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Smart Hub Preview box art file already cached: ' + previewFileName);
-          // The preview already exists, so no additional processing is required
-          resolve(dataUrl);
-          return;
-        } catch (previewReadError) {
-          // The preview box art file does not exist, so generate it from the original box art
-          console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Smart Hub Preview box art file not found, generating: ' + previewFileName);
-        }
-
-        // Generate and save the optimized JPEG preview box art asynchronously from storage.
-        // The original PNG box art can be returned immediately without waiting for preview generation.
-        var previewPromise = self.generatePreviewImage(dataUrl, appId).then(function(previewDataUrl) {
-          if (previewDataUrl) {
-            self.savePreviewImage(appId, previewDataUrl);
-          }
-        }, function(error) {
-          console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to generate Smart Hub Preview box art from storage for app ID ' + appId + ': ' + error);
-        });
-
-        if (!window.previewPromises) {
-          window.previewPromises = [];
-        }
-        window.previewPromises.push(previewPromise);
-
-        resolve(dataUrl);
-        };
-        cachedReader.onerror = function() {
-          reject(cachedReader.error || new Error('Failed to decode cached box art'));
-        };
-        cachedReader.readAsDataURL(fileContentInBlob);
-      } catch (readError) {
-        // The original PNG box art is not available locally, so fetch it from the host
-        console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Could not read cached box art from internal storage!', readError.message);
-
-        // Fetch the new box art from the network
-        return sendMessage('openUrl', [
-          self._baseUrlHttps + '/appasset?' + self._buildUidStr() + '&appid=' + appId + '&AssetType=2&AssetIdx=0', self.ppkstr, true, 10000
-        ]).then(function(boxArtBuffer) {
-          // Convert the binary response into a Blob so it can be converted to a data URL
-          var blob = new Blob([boxArtBuffer], { type: 'image/png' });
-          var reader = new FileReader();
-
-          // Convert the fetched PNG into a data URL for display and caching
-          reader.onload = function() {
-            var dataUrl = reader.result;
-            // Always resolve for UI display regardless of caching outcome
-            console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Returning network-fetched box art: ', appId);
-
-            // Save the original PNG to private storage as true binary PNG for local HTTP server and future cache using modern Tizen API
-            try {
-              // Create the private directory if it does not already exist
-              tizen.filesystem.createDirectory(boxArtDir, true);
-              // Open the destination file for writing the original PNG data
-              var fileHandleWrite = tizen.filesystem.openFile(boxArtDir + '/' + boxArtFileName, 'w');
-
-              // Write the original PNG bytes to private storage and close the file
-              fileHandleWrite.writeData(boxArtBuffer);
-              fileHandleWrite.close();
-              console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Saved original PNG box art: ' + boxArtFileName);
-            } catch (error) {
-              // Failure to cache the original PNG box art does not prevent the fetched box art from being returned
-              console.error('%c[utils.js, getBoxArt]', 'color: gray;', 'Error: Failed to cache original box art in ' + boxArtDir + ' for app ID ' + appId + ': ' + error.message);
-            }
-
-            // Return the fetched box art directly when Smart Hub Preview is not supported
-            if (!isSmartHubSupported) {
-              resolve(dataUrl);
-              return;
-            }
-
-            // Generate and save the optimized JPEG preview box art asynchronously from network.
-            // The original PNG box art can be returned immediately without waiting for preview generation.
-            var previewPromise = self.generatePreviewImage(dataUrl, appId).then(function(previewDataUrl) {
-              if (previewDataUrl) {
-                self.savePreviewImage(appId, previewDataUrl);
+        var sunshineDefaultBoxArtHash = 'd9164ebd069b5f735eb8efc557801778498da37f572ef70e3d35604739e6c613';
+        if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) {
+          var hashReader = new FileReader();
+          hashReader.onload = function() {
+            window.crypto.subtle.digest('SHA-256', hashReader.result).then(function(hashBuffer) {
+              var hashHex = Array.from(new Uint8Array(hashBuffer)).map(function(byte) {
+                return byte.toString(16).padStart(2, '0');
+              }).join('');
+              if (hashHex !== sunshineDefaultBoxArtHash) {
+                processCachedBoxArt(fileContentInBlob);
+                return;
               }
+
+              console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Detected Sunshine default box art. Fetching it again for app ID ' + appId);
+              try {
+                tizen.filesystem.deleteFile(boxArtDir + '/' + boxArtFileName);
+              } catch (deleteError) {
+                console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to delete cached default box art: ' + deleteError.message);
+              }
+              try {
+                tizen.filesystem.deleteFile('documents/' + previewFileName);
+              } catch (deletePreviewError) {
+                console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to delete cached preview box art: ' + deletePreviewError.message);
+              }
+              fetchBoxArt();
             }, function(error) {
-              console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to generate Smart Hub Preview box art from network for app ID ' + appId + ': ' + error);
+              console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to hash cached box art: ' + error.message);
+              processCachedBoxArt(fileContentInBlob);
             });
-
-            if (!window.previewPromises) {
-              window.previewPromises = [];
-            }
-            window.previewPromises.push(previewPromise);
-
-            resolve(dataUrl);
           };
-
-          reader.onerror = function() {
-            reject(reader.error || new Error('Failed to decode network box art'));
+          hashReader.onerror = function() {
+            processCachedBoxArt(fileContentInBlob);
           };
-
-          reader.readAsDataURL(blob);
-        }, function(error) {
-          console.error('%c[utils.js, getBoxArt]', 'color: gray;', 'Error: Failed to retrieve original box art from network: ', error);
-          reject(error);
-        });
+          hashReader.readAsArrayBuffer(fileContentInBlob);
+        } else {
+          processCachedBoxArt(fileContentInBlob);
+        }
+      } catch (readError) {
+        console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Could not read cached box art from internal storage!', readError.message);
+        fetchBoxArt();
       }
     }.bind(this));
   },

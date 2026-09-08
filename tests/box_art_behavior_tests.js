@@ -20,6 +20,11 @@ function createContext(options) {
     if (this.onload) this.onload();
     else if (this.onloadend) this.onloadend();
   };
+  TestFileReader.prototype.readAsArrayBuffer = function(blob) {
+    this.result = options.arrayBuffer || new ArrayBuffer(0);
+    if (this.onload) this.onload();
+    else if (this.onloadend) this.onloadend();
+  };
 
   const context = {
     console: { log() {}, warn() {}, error() {} },
@@ -66,6 +71,7 @@ function createContext(options) {
   };
   context.window.atob = context.atob;
   context.window.btoa = context.btoa;
+  if (options.crypto) context.window.crypto = options.crypto;
   vm.runInNewContext(fs.readFileSync('wasm/static/js/utils.js', 'utf8'), context);
   return { context, opened, deleted, writes, sent };
 }
@@ -131,10 +137,35 @@ async function testCachedBlobAndReadFailureSettlement() {
   await assert.rejects(failedHost.getBoxArt(9, false), /network unavailable|reader failed/);
 }
 
+async function testSunshineDefaultBoxArtIsRefetchedPerHost() {
+  const defaultHash = 'd9164ebd069b5f735eb8efc557801778498da37f572ef70e3d35604739e6c613';
+  const digest = Uint8Array.from(defaultHash.match(/../g).map((value) => parseInt(value, 16))).buffer;
+  const harness = createContext({
+    cachedBlob: new Blob([new Uint8Array([1, 2, 3])]),
+    networkBytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    arrayBuffer: new Uint8Array([1, 2, 3]).buffer,
+    crypto: { subtle: { digest: () => Promise.resolve(digest) } },
+  });
+  const host = new harness.context.NvHTTP('host', 'client');
+  host.serverUid = 'server';
+  host._baseUrlHttps = 'https://host:47984';
+
+  await host.getBoxArt(42, true);
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.strictEqual(harness.sent.length, 1,
+    'Sunshine default artwork is fetched again instead of remaining cached forever');
+  assert(harness.deleted.includes('wgt-private/host/boxart-42.png'));
+  assert(harness.deleted.includes('documents/preview-server-42.jpg'),
+    'only this host\'s generated preview is invalidated');
+}
+
 async function main() {
   await testHostScopedPreviewFiles();
   await testNetworkPngBytesAreWrittenDirectly();
   await testCachedBlobAndReadFailureSettlement();
+  await testSunshineDefaultBoxArtIsRefetchedPerHost();
   console.log('box_art_behavior_tests: PASS');
 }
 
