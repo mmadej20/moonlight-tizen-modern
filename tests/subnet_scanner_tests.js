@@ -163,7 +163,7 @@ function createScanner(fakeFetch, fakeTimers, FakeAbortController, found, overri
   }, overrides));
 }
 
-function loadDiscoveryHarness(existingHosts, removedHostUids) {
+function loadDiscoveryHarness(existingHosts, removedHostUids, scannerOptions) {
   const callbacks = [];
   const added = [];
   const saved = [];
@@ -183,7 +183,13 @@ function loadDiscoveryHarness(existingHosts, removedHostUids) {
     addHostToGrid(host) { added.push(host); context.hosts[host.serverUid] = host; },
     beginBackgroundPollingOfHost() {},
     saveHosts() { saved.push(true); },
+    webapis: { network: { getIp: () => '192.168.1.5' } },
+    createSubnetScanner(options) {
+      return require('../wasm/static/js/mdns-browser/subnet_scanner.js')
+        .createSubnetScanner(Object.assign({}, scannerOptions, options));
+    },
   };
+  context.window = context;
   vm.runInNewContext(source, context);
   return { context, callbacks, added, saved };
 }
@@ -231,7 +237,58 @@ function testDeletedHostDoesNotReturnThroughDiscoveryCallback() {
   assert.deepStrictEqual(harness.saved, [], 'a stale discovery callback does not persist the deleted host');
 }
 
+async function testSharedScanPromiseAndAbortLifecycle() {
+  const fakeTimers = createFakeTimers();
+  const fakeFetch = createDeferredFetch({ abortSettles: false });
+  const harness = loadDiscoveryHarness({}, {}, {
+    fetch: fakeFetch.fakeFetch,
+    AbortController: createFakeAbortController(),
+    setTimeout: fakeTimers.setTimeout,
+    clearTimeout: fakeTimers.clearTimeout,
+  });
+  const first = harness.context.startSubnetScanner();
+  assert(first && typeof first.then === 'function', 'start exposes scan completion');
+  assert.strictEqual(harness.context.startSubnetScanner(), first, 'concurrent callers share exactly one Promise');
+  assert.strictEqual(fakeFetch.calls, 8, 'duplicate calls do not start additional workers');
+  fakeFetch.resolveNext({ ok: true });
+  await flushMicrotasks();
+  assert.strictEqual(harness.callbacks.length, 1, 'successful probe begins full host verification');
+  const oldAbortAdapter = harness.context.subnetScanAbortCtrl;
+  harness.context.abortSubnetScan();
+  await withDeadline(first, 'abort with a fetch implementation that does not settle');
+  assert.strictEqual(harness.context.subnetScanPromise, null);
+  assert.strictEqual(harness.context.subnetScanAbortCtrl, null);
+  harness.callbacks[0]({ online: true, serverUid: 'late-host', address: '192.168.1.1' });
+  assert.strictEqual(harness.added.length, 0, 'late full verification after abort does not add hosts');
+  const cancelledBodies = [];
+  fakeFetch.resolveAll((url) => ({ ok: true, body: { cancel() { cancelledBodies.push(url); } } }));
+  await flushMicrotasks();
+  assert.strictEqual(harness.callbacks.length, 1, 'late successful probes do not start host verification');
+  assert.strictEqual(cancelledBodies.length, 8, 'late probe responses still release their bodies');
+  assert.strictEqual(fakeTimers.pendingCount(), 0);
+
+  const second = harness.context.startSubnetScanner();
+  assert.notStrictEqual(second, first, 'abort permits a fresh scan');
+  oldAbortAdapter.abort();
+  assert.strictEqual(harness.context.subnetScanPromise, second, 'a stale abort adapter cannot cancel a newer scan');
+  await settleAll(fakeFetch, () => ({ ok: false }));
+  await withDeadline(second, 'completed shared scan');
+  assert.strictEqual(harness.context.subnetScanPromise, null, 'natural completion releases the shared slot');
+  assert.strictEqual(harness.context.subnetScanAbortCtrl, null);
+
+  harness.context.webapis.network.getIp = () => '999.1.2.3';
+  await withDeadline(harness.context.startSubnetScanner(), 'invalid local IP scan');
+  assert.strictEqual(harness.context.subnetScanPromise, null, 'invalid IP does not leave a settled Promise blocking future scans');
+  harness.context.webapis.network.getIp = () => '192.168.1.5';
+  const third = harness.context.startSubnetScanner();
+  harness.context.subnetScanAbortCtrl.abort();
+  await withDeadline(third, 'compatibility abort adapter');
+  fakeFetch.resolveAll(() => ({ ok: false }));
+  await flushMicrotasks();
+}
+
 async function run() {
+  await testSharedScanPromiseAndAbortLifecycle();
   testDiscoveryUpdatesBothBaseUrls();
   testDeletedHostDoesNotReturnThroughDiscoveryCallback();
   const FakeAbortController = createFakeAbortController();

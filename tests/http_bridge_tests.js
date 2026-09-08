@@ -49,6 +49,33 @@ const bridge = createMessageBridge(
 );
 
 async function run() {
+  const nativeCalls = [];
+  const nativeCancels = [];
+  const messagesContext = {
+    console: { log() {}, warn() {} },
+    Module: {
+      openUrl(...args) { nativeCalls.push(args); },
+      cancelRequest(id) { nativeCancels.push(id); return { type: 'resolve', ret: true }; },
+    },
+  };
+  const messagesSource = fs.readFileSync('wasm/platform/messages.js', 'utf8');
+  assert.doesNotMatch(messagesSource, /_httpLock/, 'HTTP requests must not share an upstream global lock');
+  vm.runInNewContext(messagesSource, messagesContext);
+  const pinRequest = messagesContext.sendMessage('openUrl', ['https://host/pair', 'cert', false, 0]);
+  const appsRequest = messagesContext.sendMessage('openUrl', ['https://host/applist', 'cert', false, 10000]);
+  assert.deepStrictEqual(nativeCalls, [
+    [1, 'https://host/pair', 'cert', false, 0],
+    [2, 'https://host/applist', 'cert', false, 10000],
+  ], 'ordinary requests dispatch while pairing is pending and keep the fifth timeout argument');
+  await appsRequest.cancel();
+  assert.deepStrictEqual(nativeCancels, [2], 'only the selected request is cancelled');
+  messagesContext.handlePromiseMessage(2, 'reject', 'cancelled');
+  await assert.rejects(appsRequest, (error) => error === 'cancelled');
+  messagesContext.handlePromiseMessage(1, 'resolve', 'paired');
+  assert.strictEqual(await pinRequest, 'paired', 'cancelling another request leaves pairing alive');
+  assert.strictEqual(messagesContext.messageBridge.pendingCount(), 0);
+  assert.strictEqual(messagesContext.handlePromiseMessage(2, 'resolve', 'late'), false);
+
   const request = bridge.sendMessage(
     'openUrl',
     ['http://host', null, false, 5000],

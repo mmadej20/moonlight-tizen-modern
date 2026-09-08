@@ -11,6 +11,7 @@ const stableWorkflow = fs.readFileSync('.github/workflows/release-stable.yml', '
 
 const expectedJavaScriptSuites = [
   'tests/audio_backend_behavior_tests.js',
+  'tests/box_art_behavior_tests.js',
   'tests/common_log_capture_wiring_tests.js',
   'tests/connection_wiring_tests.js',
   'tests/dependency_manifest_tests.js',
@@ -78,7 +79,7 @@ assert(!dockerfile.includes('/wasm/static/js/jquery-4.0.0.min.js'));
 assert(dockerfile.includes('AS builder'));
 assert(dockerfile.includes('FROM scratch AS artifact'));
 assert(dockerfile.includes('COPY --from=builder /home/moonlight/Moonlight*.wgt /home/moonlight/'));
-assert(config.includes('version="1.16.0"'));
-assert.strictEqual(pkg.version, '1.16.0');
+assert(config.includes('version="1.16.1"'));
+assert.strictEqual(pkg.version, '1.16.1');
 assert.strictEqual(lock.version, pkg.version);
 console.log('dependency_manifest_tests: PASS');

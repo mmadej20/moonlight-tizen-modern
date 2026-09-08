@@ -296,6 +296,7 @@ function createAppsContext() {
       }
     },
     stopPollingHosts: function() {},
+    endBackgroundPollingOfHost: function() {},
     showAppsMode: function() { state.modes += 1; },
     snackbarLogLong: function() {},
     sortTitles: function(apps) { return apps.slice(); },
@@ -495,6 +496,7 @@ function createAsyncRenderingContext() {
       }
     },
     stopPollingHosts: function() {},
+    endBackgroundPollingOfHost: function() {},
     showAppsMode: function() { state.modes += 1; },
     snackbarLogLong: function() {},
     sortTitles: function(apps) { return apps.slice(); },
@@ -694,10 +696,11 @@ async function testSavedCertificateAndHostStateSurviveReload() {
       this.macAddress = macAddress;
     },
     addHostToGrid: function() {},
-    startPollingHosts: function() {},
+    startPollingHosts: function() { return Promise.resolve(); },
+    stopPollingHosts: function() {},
     restoreUiAfterWasmLoad: function() {},
     updatePreviewData: function() {},
-    startSubnetScanner: function() {},
+    startSubnetScanner: function() { return Promise.resolve(); },
     snackbarLog: function() {},
     setTimeout: function() {},
     window: { i18n: null, previewPromises: [] }

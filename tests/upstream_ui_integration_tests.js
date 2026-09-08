@@ -1,6 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const vm = require('vm');
+const OperationGuard = require('../wasm/platform/operation_guard.js');
 
 function extractFunction(source, name) {
   const start = source.indexOf('function ' + name + '(');
@@ -263,6 +264,234 @@ function runLoadUserData(context) {
   context.loadUserDataCb();
 }
 
+function testLoadingUiPrecedesI18nAndLanguageIsReadOnce() {
+  const source = fs.readFileSync('wasm/platform/index.js', 'utf8');
+  const events = [];
+  let refreshCallback = null;
+  const noOp = function() {};
+  const contextTarget = {
+    Promise,
+    console: { log() {}, warn() {} },
+    changeUiModeForWasmLoad() { events.push('loading-ui'); },
+    loadSystemInfo() { events.push('system-info'); },
+    saveLanguagePreference: noOp,
+    initIpAddressFields: noOp,
+    filterUnsupportedResolutions: noOp,
+    DiagnosticLogs: { init: noOp },
+    Controller: { startWatching: noOp },
+    requestAnimationFrame: noOp,
+    clearTimeout: noOp,
+    setTimeout: noOp,
+    $() { return { on: noOp, resize: noOp }; },
+    window: {
+      i18n: {
+        onRefresh(callback) {
+          events.push('register-refresh');
+          refreshCallback = callback;
+        },
+        init() {
+          events.push('i18n-init');
+          refreshCallback();
+          return Promise.resolve('en-US');
+        },
+        populateLanguageMenu: noOp,
+      },
+      addEventListener: noOp,
+    },
+  };
+  const context = new Proxy(contextTarget, {
+    has() { return true; },
+    get(target, property) {
+      if (property === Symbol.unscopables) return undefined;
+      return property in target ? target[property] : noOp;
+    },
+  });
+  vm.runInNewContext(
+    extractFunction(source, 'attachListeners') + '\nthis.attachListeners = attachListeners;',
+    context,
+  );
+  context.attachListeners();
+  assert.deepStrictEqual(events.slice(0, 4), [
+    'loading-ui',
+    'register-refresh',
+    'i18n-init',
+    'system-info',
+  ]);
+  assert.strictEqual(events.filter((event) => event === 'register-refresh').length, 1);
+
+  const settingsHarness = createSettingsHarness({}, '7.0');
+  const requestedKeys = [];
+  settingsHarness.context.getData = function(key, callback) {
+    requestedKeys.push(key);
+    callback({ [key]: undefined });
+  };
+  runLoadUserData(settingsHarness.context);
+  assert.strictEqual(requestedKeys.filter((key) => key === 'languagePreference').length, 0,
+    'i18n.init owns the single persisted language read');
+}
+
+function createDeepLinkHarness() {
+  const source = fs.readFileSync('wasm/platform/index.js', 'utf8');
+  const timers = [];
+  const chosen = [];
+  const started = [];
+  const context = {
+    OperationGuard,
+    previewDeepLinkGenerationGate: OperationGuard.createGenerationGate(),
+    removedHostUids: {},
+    hosts: {},
+    isHostsLoaded: true,
+    isSubnetScanFinished: true,
+    _isSmartHubSupported: false,
+    _previewApps: {},
+    console: { log() {}, warn() {}, error() {} },
+    document: {
+      getElementById(id) {
+        if (id === 'sortAppsListSwitch') return { checked: false };
+        if (id.indexOf('game-container-') === 0) {
+          return { scrollIntoView() {} };
+        }
+        return null;
+      },
+    },
+    setInterval(callback, delay) {
+      const timer = { callback, delay, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearInterval(timer) { timer.cleared = true; },
+    sortTitles(apps) { return apps.slice(); },
+    hostChosen(host) { chosen.push(host); },
+    startGame(host, appId) { started.push({ host, appId }); },
+    snackbarLogLong() {},
+    updatePreviewData() {},
+    savePreviewApps() {},
+    t(value) { return value; },
+  };
+  const functions = ['isPreviewDeepLinkOperationCurrent', 'waitForHostAndNavigateToApp']
+    .map((name) => extractFunction(source, name)).join('\n');
+  vm.runInNewContext(functions + '\nthis.waitForHostAndNavigateToApp = waitForHostAndNavigateToApp;', context);
+  return { context, timers, chosen, started };
+}
+
+async function testPreviewDeepLinkRejectsStaleOwners() {
+  const replacementHarness = createDeepLinkHarness();
+  let resolveReplacementRequest;
+  const oldHost = {
+    online: true,
+    getAppListWithCacheFlush() {
+      return new Promise((resolve) => { resolveReplacementRequest = resolve; });
+    },
+  };
+  replacementHarness.context.hosts.server = oldHost;
+  replacementHarness.context.waitForHostAndNavigateToApp('server', 7);
+  replacementHarness.timers[0].callback();
+  replacementHarness.context.hosts.server = { online: true };
+  resolveReplacementRequest([{ id: 7, title: 'Old result' }]);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepStrictEqual(replacementHarness.chosen, [], 'a replaced host rejects its old app-list response');
+
+  const newerHarness = createDeepLinkHarness();
+  let resolveOlderDeepLink;
+  const currentHost = {
+    online: true,
+    getAppListWithCacheFlush() {
+      return new Promise((resolve) => { resolveOlderDeepLink = resolve; });
+    },
+  };
+  newerHarness.context.hosts.server = currentHost;
+  newerHarness.context.waitForHostAndNavigateToApp('server', 7);
+  newerHarness.timers[0].callback();
+  newerHarness.context.waitForHostAndNavigateToApp('server', 8);
+  resolveOlderDeepLink([{ id: 7, title: 'Older target' }]);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepStrictEqual(newerHarness.chosen, [], 'a newer deep link invalidates an older response');
+
+  const timerHarness = createDeepLinkHarness();
+  const timerHost = {
+    online: true,
+    getAppListWithCacheFlush() { return Promise.resolve([{ id: 7, title: 'Game' }]); },
+  };
+  timerHarness.context.hosts.server = timerHost;
+  timerHarness.context.waitForHostAndNavigateToApp('server', 7);
+  timerHarness.timers[0].callback();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.strictEqual(timerHarness.chosen.length, 1);
+  timerHarness.context.removedHostUids.server = true;
+  delete timerHarness.context.hosts.server;
+  timerHarness.timers[1].callback();
+  assert.deepStrictEqual(timerHarness.started, [], 'deletion invalidates a pending game launch timer');
+}
+
+function createPollingHarness() {
+  const timers = [];
+  const statusUpdates = [];
+  const context = {
+    activePolls: {},
+    pollGenerations: {},
+    console: { log() {}, error() {} },
+    updateHostStatusIndicator(host) { statusUpdates.push(host); },
+    window: {
+      setTimeout(callback, delay) {
+        const timer = { callback, delay, cleared: false };
+        timers.push(timer);
+        return timer;
+      },
+      clearTimeout(timer) { timer.cleared = true; },
+    },
+  };
+  const source = fs.readFileSync('wasm/platform/index.js', 'utf8');
+  const functions = ['beginBackgroundPollingOfHost', 'endBackgroundPollingOfHost']
+    .map((name) => extractFunction(source, name)).join('\n');
+  vm.runInNewContext(functions
+    + '\nthis.beginBackgroundPollingOfHost = beginBackgroundPollingOfHost;'
+    + '\nthis.endBackgroundPollingOfHost = endBackgroundPollingOfHost;', context);
+  return { context, timers, statusUpdates };
+}
+
+async function testStoppedPollCannotRescheduleAfterRefresh() {
+  const harness = createPollingHarness();
+  let resolveRefresh;
+  const host = {
+    serverUid: 'server',
+    refreshServerInfo() {
+      return new Promise((resolve) => { resolveRefresh = resolve; });
+    },
+    pollServer() { throw new Error('a stopped loop must not poll'); },
+    toString() { return 'server'; },
+  };
+
+  const initialRefresh = harness.context.beginBackgroundPollingOfHost(host);
+  harness.context.endBackgroundPollingOfHost(host);
+  resolveRefresh();
+  await initialRefresh;
+  assert.strictEqual(harness.timers.length, 0, 'a stopped initial refresh cannot schedule a timer');
+  assert.strictEqual(harness.statusUpdates.length, 0, 'a stale refresh cannot overwrite host status');
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(harness.context.activePolls, host.serverUid), false);
+
+  let pollCallback;
+  const activeHost = {
+    serverUid: 'active',
+    online: false,
+    _consecutivePollFailures: 3,
+    _pollCompletionCallbacks: ['stale'],
+    refreshServerInfo() { return Promise.resolve(); },
+    pollServer(callback) { pollCallback = callback; },
+    toString() { return 'active'; },
+  };
+  await harness.context.beginBackgroundPollingOfHost(activeHost);
+  assert.strictEqual(harness.timers.length, 1);
+  assert.strictEqual(harness.timers[0].delay, 5000, 'a successful initial refresh starts a delayed poll');
+  harness.timers[0].callback();
+  assert.strictEqual(typeof pollCallback, 'function');
+  assert.strictEqual(harness.timers.length, 1, 'the next poll waits for the current callback');
+  pollCallback(activeHost);
+  assert.strictEqual(harness.timers.length, 2, 'the next poll is scheduled only after completion');
+}
+
 function testNewSettingsRestoreWithoutOverwritingStoredValues() {
   const storedHarness = createSettingsHarness({
     languagePreference: 'pt-BR',
@@ -295,7 +524,10 @@ function testNewSettingsRestoreWithoutOverwritingStoredValues() {
 async function main() {
   await testStoredLanguageLoadsAndTranslates();
   testPreviewServiceExitsWhenApiIsMissing();
+  testLoadingUiPrecedesI18nAndLanguageIsReadOnce();
   testNewSettingsRestoreWithoutOverwritingStoredValues();
+  await testPreviewDeepLinkRejectsStaleOwners();
+  await testStoppedPollCannotRescheduleAfterRefresh();
   console.log('upstream_ui_integration_tests: PASS');
 }
 

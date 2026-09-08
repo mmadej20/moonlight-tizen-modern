@@ -19,7 +19,7 @@
  * re-enable the original findNvService() and replace this function with a
  * call to sendMessage('startMdnsDiscovery').
  */
-function findNvService(ipString) {
+function findNvService(ipString, isCurrentScan) {
   // Discovery is IPv4-only: Tizen has no mDNS/NetBIOS/local DNS to resolve
   // .local hostnames, and the HTTP subnet scanner only produces IPv4 addresses.
   var ip = ipString.replace('ipv4:', '');
@@ -31,6 +31,10 @@ function findNvService(ipString) {
 
   // Poll the discovered host and verify host status before adding it
   discoveredHost.pollServer(function(returnedDiscoveredHost) {
+    // Verification can outlive the initial subnet probe or a user-initiated abort.
+    if (isCurrentScan && !isCurrentScan()) {
+      return;
+    }
     // If the host is offline, do not add it to the grid or update its stored IP
     if (!returnedDiscoveredHost.online) {
       return;
@@ -81,13 +85,27 @@ function findNvService(ipString) {
  * mDNS is not used on Tizen.
  */
 var subnetScanner = null;
+var subnetDiscoveryGeneration = 0;
+var activeSubnetScan = null;
+window.subnetScanAbortCtrl = null;
+window.subnetScanPromise = null;
+
+window.abortSubnetScan = function() {
+  // Also invalidate host verification callbacks after probe completion.
+  subnetDiscoveryGeneration++;
+  if (subnetScanner) subnetScanner.cancel();
+  if (activeSubnetScan) activeSubnetScan.finish();
+};
 
 function startSubnetScanner() {
+  if (window.subnetScanPromise) return window.subnetScanPromise;
+
   try {
     var localIp = (typeof webapis !== 'undefined' && webapis.network) ? webapis.network.getIp() : null;
     // If the local IP cannot be determined, skip the subnet scan to avoid unnecessary network traffic
     if (!localIp) {
       console.warn('%c[main.js, startSubnetScanner]', 'color: orange;', 'Could not determine local IP — skipping auto-discovery!');
+      return Promise.resolve();
     } else {
       var parts = localIp.split('.');
       // Check if the IP address is in the expected IPv4 format
@@ -95,6 +113,7 @@ function startSubnetScanner() {
         return !/^\d+$/.test(part) || Number(part) > 255;
       })) {
         console.warn('%c[main.js, startSubnetScanner]', 'color: orange;', 'Unexpected IP format:', localIp);
+        return Promise.resolve();
       } else {
         var subnet = parts[0] + '.' + parts[1] + '.' + parts[2];
         console.log('%c[main.js, startSubnetScanner]', 'color: green;', 'Starting subnet /24 scan on', subnet + '.0/24');
@@ -102,15 +121,45 @@ function startSubnetScanner() {
           subnetScanner = createSubnetScanner({
             onFound: function(ip) {
               console.log('%c[main.js, startSubnetScanner]', 'color: green;', 'Found host with IP address:', ip);
-              findNvService('ipv4:' + ip);
+              var generation = subnetDiscoveryGeneration;
+              findNvService('ipv4:' + ip, function() {
+                return generation === subnetDiscoveryGeneration;
+              });
             },
           });
         }
-        subnetScanner.start(subnet);
+        subnetDiscoveryGeneration++;
+        var resolveScan;
+        var scan = {};
+        var promise = new Promise(function(resolve) { resolveScan = resolve; });
+        scan.finish = function() {
+          if (activeSubnetScan === scan) {
+            activeSubnetScan = null;
+            window.subnetScanPromise = null;
+            window.subnetScanAbortCtrl = null;
+          }
+          resolveScan();
+        };
+        activeSubnetScan = scan;
+        window.subnetScanPromise = promise;
+        // Compatibility adapter for upstream callers. Actual probe cancellation
+        // remains owned by the bounded scanner, including its generation guards.
+        window.subnetScanAbortCtrl = {
+          abort: function() {
+            if (activeSubnetScan === scan) window.abortSubnetScan();
+          },
+        };
+        Promise.resolve(subnetScanner.start(subnet)).then(scan.finish, function(error) {
+          console.error('%c[main.js, startSubnetScanner]', 'color: red;', 'Subnet scanner failed:', error);
+          scan.finish();
+        });
+        return promise;
       }
     }
   } catch (e) {
     console.error('%c[main.js, startSubnetScanner]', 'color: red;', 'Subnet scanner failed:', e);
+    window.abortSubnetScan();
+    return Promise.resolve();
   }
 };
 

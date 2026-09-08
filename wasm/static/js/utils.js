@@ -525,6 +525,12 @@ NvHTTP.prototype = {
     return this.getAppListWithCacheFlush();
   },
 
+  getPreviewImageFileName: function(appId) {
+    var owner = String(this.serverUid || this.hostname || 'unknown')
+      .replace(/[^A-Za-z0-9._-]/g, '_');
+    return 'preview-' + owner + '-' + appId + '.jpg';
+  },
+
   // Returns the original PNG box art based on the the given app Id and generates an optimized JPEG preview when Smart Hub Preview is supported.
   // The original PNG box art is stored in private storage, while the optimized JPEG preview is generated and stored asynchronously,
   // in the public documents directory so that the Smart Hub Preview background service process can access it directly.
@@ -540,22 +546,16 @@ NvHTTP.prototype = {
       try {
         // Open the cached original PNG box art for reading
         var fileHandleRead = tizen.filesystem.openFile(boxArtDir + '/' + boxArtFileName, 'r');
-        // Read the binary PNG data from the file (returns Uint8Array)
-        var fileData = fileHandleRead.readData();
-        // Close the file after the binary data has been read
+        // readBlob() preserves the original PNG bytes on Tizen's filesystem API.
+        var fileContentInBlob = fileHandleRead.readBlob();
         fileHandleRead.close();
-
-        // Convert the Uint8Array binary box art data to a base64 data URL for display
-        var binary = '';
-
-        // Convert each byte from the Uint8Array into a binary string
-        for (var i = 0; i < fileData.length; i++) {
-          binary += String.fromCharCode(fileData[i]);
+        if (!fileContentInBlob || fileContentInBlob.size === 0) {
+          throw new Error('Cached box art is empty');
         }
 
-        // Encode the binary string as base64 and create a PNG data URL
-        var base64Data = btoa(binary);
-        var dataUrl = 'data:image/png;base64,' + base64Data;
+        var cachedReader = new FileReader();
+        cachedReader.onload = function() {
+        var dataUrl = cachedReader.result;
 
         console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Returning storage-cached box art: ', appId);
 
@@ -566,7 +566,7 @@ NvHTTP.prototype = {
         }
 
         // Check whether an optimized Smart Hub Preview has already been cached
-        var previewFileName = 'preview-' + appId + '.jpg';
+        var previewFileName = self.getPreviewImageFileName(appId);
         var previewFilePath = 'documents/' + previewFileName;
 
         // Try to open the cached preview box art to determine whether it already exists
@@ -600,6 +600,11 @@ NvHTTP.prototype = {
         window.previewPromises.push(previewPromise);
 
         resolve(dataUrl);
+        };
+        cachedReader.onerror = function() {
+          reject(cachedReader.error || new Error('Failed to decode cached box art'));
+        };
+        cachedReader.readAsDataURL(fileContentInBlob);
       } catch (readError) {
         // The original PNG box art is not available locally, so fetch it from the host
         console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Could not read cached box art from internal storage!', readError.message);
@@ -613,7 +618,7 @@ NvHTTP.prototype = {
           var reader = new FileReader();
 
           // Convert the fetched PNG into a data URL for display and caching
-          reader.onloadend = function() {
+          reader.onload = function() {
             var dataUrl = reader.result;
             // Always resolve for UI display regardless of caching outcome
             console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Returning network-fetched box art: ', appId);
@@ -625,18 +630,8 @@ NvHTTP.prototype = {
               // Open the destination file for writing the original PNG data
               var fileHandleWrite = tizen.filesystem.openFile(boxArtDir + '/' + boxArtFileName, 'w');
 
-              // Extract the base64 payload from the PNG data URL and decode it into binary data
-              var base64Payload = dataUrl.split(',')[1];
-              var binaryStr = atob(base64Payload);
-              var bytes = new Uint8Array(binaryStr.length);
-
-              // Convert the decoded binary string into a Uint8Array for Tizen filesystem storage
-              for (var i = 0; i < binaryStr.length; i++) {
-                bytes[i] = binaryStr.charCodeAt(i);
-              }
-
               // Write the original PNG bytes to private storage and close the file
-              fileHandleWrite.writeData(bytes);
+              fileHandleWrite.writeData(boxArtBuffer);
               fileHandleWrite.close();
               console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Saved original PNG box art: ' + boxArtFileName);
             } catch (error) {
@@ -668,6 +663,10 @@ NvHTTP.prototype = {
             resolve(dataUrl);
           };
 
+          reader.onerror = function() {
+            reject(reader.error || new Error('Failed to decode network box art'));
+          };
+
           reader.readAsDataURL(blob);
         }, function(error) {
           console.error('%c[utils.js, getBoxArt]', 'color: gray;', 'Error: Failed to retrieve original box art from network: ', error);
@@ -683,6 +682,7 @@ NvHTTP.prototype = {
     return new Promise(function(resolve, reject) {
       var boxArtDir = 'wgt-private/' + this.hostname; // Private storage directory for original box art
       var previewBoxArtDir = 'documents'; // Public storage directory so the background service can read it
+      var previewFilePrefix = this.getPreviewImageFileName('').replace(/\.jpg$/, '');
 
       // Delete the original box art directory from private storage
       try {
@@ -707,8 +707,8 @@ NvHTTP.prototype = {
               // Safely check if the directory entry is a valid string
               if (files[i] && typeof files[i] === 'string') {
                 var filename = files[i];
-                // Check if the filename matches the patterns for cached preview box art images
-                if ((filename.startsWith('boxart-') && filename.endsWith('.png')) || (filename.startsWith('preview-') && filename.endsWith('.jpg'))) {
+                // Preview app IDs are host-local, so only delete this host's files.
+                if (filename.startsWith(previewFilePrefix) && filename.endsWith('.jpg')) {
                   try {
                     // Delete the matching cached preview box art files from public storage
                     tizen.filesystem.deleteFile(previewBoxArtDir + '/' + filename);
@@ -838,7 +838,7 @@ NvHTTP.prototype = {
   savePreviewImage: function(appId, previewDataUrl) {
     try {
       // Build the filename and path used by the local HTTP server
-      var filename = 'preview-' + appId + '.jpg';
+      var filename = this.getPreviewImageFileName(appId);
       var filePath = 'documents/' + filename;
 
       // Extract the Base64 payload from the data URL and convert it to binary data
