@@ -167,6 +167,7 @@ function loadDiscoveryHarness(existingHosts, removedHostUids, scannerOptions) {
   const callbacks = [];
   const added = [];
   const saved = [];
+  const macUpdates = [];
   const source = fs.readFileSync(
     path.join(__dirname, '../wasm/static/js/mdns-browser/main.js'),
     'utf8',
@@ -183,6 +184,12 @@ function loadDiscoveryHarness(existingHosts, removedHostUids, scannerOptions) {
     addHostToGrid(host) { added.push(host); context.hosts[host.serverUid] = host; },
     beginBackgroundPollingOfHost() {},
     saveHosts() { saved.push(true); },
+    updateMacAddress(host) {
+      macUpdates.push(host.macAddress);
+      if (host.macAddress && host.macAddress !== '00:00:00:00:00:00') {
+        existingHosts[host.serverUid].macAddress = host.macAddress;
+      }
+    },
     webapis: { network: { getIp: () => '192.168.1.5' } },
     createSubnetScanner(options) {
       return require('../wasm/static/js/mdns-browser/subnet_scanner.js')
@@ -191,7 +198,7 @@ function loadDiscoveryHarness(existingHosts, removedHostUids, scannerOptions) {
   };
   context.window = context;
   vm.runInNewContext(source, context);
-  return { context, callbacks, added, saved };
+  return { context, callbacks, added, saved, macUpdates };
 }
 
 function testDiscoveryUpdatesBothBaseUrls() {
@@ -218,7 +225,35 @@ function testDiscoveryUpdatesBothBaseUrls() {
   assert.strictEqual(stored.address, '192.168.1.20');
   assert.strictEqual(stored._baseUrlHttp, 'http://192.168.1.20:47989');
   assert.strictEqual(stored._baseUrlHttps, 'https://192.168.1.20:47984');
+  assert.strictEqual(stored.macAddress, '00:11:22:33:44:55');
+  assert.deepStrictEqual(harness.macUpdates, ['00:11:22:33:44:55']);
   assert.strictEqual(harness.saved.length, 1);
+}
+
+function testDiscoveryDoesNotOverwriteMacWithoutValidatedUpdate() {
+  const stored = {
+    address: '192.168.1.10',
+    localAddress: '192.168.1.10',
+    _baseUrlHttp: 'http://192.168.1.10:47989',
+    _baseUrlHttps: 'https://192.168.1.10:47984',
+    macAddress: '00:11:22:33:44:55',
+    online: false,
+    updateExternalAddressIP4() {},
+  };
+  const harness = loadDiscoveryHarness({ server: stored }, {});
+  harness.context.findNvService('ipv4:192.168.1.20');
+  harness.callbacks[0]({
+    online: true,
+    serverUid: 'server',
+    address: '192.168.1.20',
+    localAddress: '192.168.1.20',
+    _baseUrlHttp: 'http://192.168.1.20:47989',
+    _baseUrlHttps: 'https://192.168.1.20:47984',
+    macAddress: '',
+  });
+
+  assert.strictEqual(stored.macAddress, '00:11:22:33:44:55');
+  assert.deepStrictEqual(harness.macUpdates, ['']);
 }
 
 function testDeletedHostDoesNotReturnThroughDiscoveryCallback() {
@@ -290,6 +325,7 @@ async function testSharedScanPromiseAndAbortLifecycle() {
 async function run() {
   await testSharedScanPromiseAndAbortLifecycle();
   testDiscoveryUpdatesBothBaseUrls();
+  testDiscoveryDoesNotOverwriteMacWithoutValidatedUpdate();
   testDeletedHostDoesNotReturnThroughDiscoveryCallback();
   const FakeAbortController = createFakeAbortController();
   const fakeTimers = createFakeTimers();

@@ -161,11 +161,31 @@ async function testSunshineDefaultBoxArtIsRefetchedPerHost() {
     'only this host\'s generated preview is invalidated');
 }
 
+async function testLoopbackAddressesAreNeverPolledAsRemoteHosts() {
+  const harness = createContext({ networkBytes: new Uint8Array([1]) });
+  const host = new harness.context.NvHTTP('127.0.0.1', 'client', 'localhost');
+  host.hostname = 'gaming-pc';
+  host.localAddress = '::1';
+  host.externalIP = '192.168.1.25';
+  const attempted = [];
+  host.refreshServerInfoAtAddress = function(address) {
+    attempted.push(address);
+    return address === '192.168.1.25' ? Promise.resolve() : Promise.reject(new Error('offline'));
+  };
+
+  const selected = await new Promise((resolve, reject) => host.selectServerAddress(resolve, reject));
+  assert.strictEqual(selected, '192.168.1.25');
+  assert(!attempted.includes('127.0.0.1'));
+  assert(!attempted.includes('::1'));
+  assert(!attempted.includes('localhost'));
+}
+
 async function main() {
   await testHostScopedPreviewFiles();
   await testNetworkPngBytesAreWrittenDirectly();
   await testCachedBlobAndReadFailureSettlement();
   await testSunshineDefaultBoxArtIsRefetchedPerHost();
+  await testLoopbackAddressesAreNeverPolledAsRemoteHosts();
   console.log('box_art_behavior_tests: PASS');
 }
 
