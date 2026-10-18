@@ -345,6 +345,65 @@ function testUnexpectedTerminationUsesTheSingleStopPath() {
     'the stop thread is owned by StopConnection alone');
 }
 
+// Contract for the upstream commits that landed on master after the v1.18.0 tag.
+
+function testVideoSetupFailureIsReportedWithGuidance() {
+  assert.match(read('wasm/moonlight_wasm.hpp'), /#define ERROR_VIDEO_SETUP_FAILED -200/);
+
+  const player = read('wasm/wasmplayer.cpp');
+  assert.match(player, /ERROR_VIDEO_SETUP_FAILED/, 'media pipeline setup reports its own error code');
+  assert.match(player, /The TV rejected the video track[\s\S]{0,200}return ERROR_VIDEO_SETUP_FAILED/,
+    'a video track the TV refuses to add is a video setup failure');
+  // A stop requested by the user is not a video setup failure.
+  assert.match(player, /m_ConnectionCancelled[\s\S]{0,200}-1[\s\S]{0,200}ERROR_VIDEO_SETUP_FAILED/);
+
+  assert.match(read('wasm/connectionlistener.cpp'),
+    /STAGE_VIDEO_STREAM_START\s*&&\s*errorCode\s*==\s*ERROR_VIDEO_SETUP_FAILED/,
+    'the termination message explains the failure, so the stage dialog is skipped');
+
+  const guidance = 'The TV was unable to start the streaming with the selected video settings. ' +
+    'Try reducing the resolution or frame rate and consider changing the codec.';
+  assert.match(read('wasm/platform/messages.js'), /case -200:[\s\S]{0,160}unable to start the streaming/);
+  for (const locale of ['en-US', 'pt-BR']) {
+    const dictionary = JSON.parse(read('wasm/static/locales/' + locale + '.json'));
+    assert(Object.prototype.hasOwnProperty.call(dictionary, guidance), locale + ' translates the guidance');
+  }
+}
+
+function testHostPollingResumesAroundPairing() {
+  const index = read('wasm/platform/index.js');
+  const addHost = extractFunction(index, 'addHostDialog');
+  assert.match(addHost, /stopPollingHosts\(\);/, 'polling stops while the pairing dialog runs');
+  assert.strictEqual((addHost.match(/startPollingHosts\(\);/g) || []).length, 3,
+    'polling resumes after success and failure of both pairing flows');
+
+  const pairing = extractFunction(index, 'pairingDialog');
+  assert.match(pairing, /Ignored pairing failure due to cancellation\.'\);[\s\S]{0,200}onFailure\(\);/,
+    'cancelling the pairing dialog still lets the caller recover');
+
+  const endPolling = extractFunction(index, 'endBackgroundPollingOfHost');
+  assert.match(endPolling, /activePolls\.hasOwnProperty\(host\.serverUid\)/,
+    'polling that is still running its first refresh can be stopped');
+}
+
+function testFramePacingAndAddressFieldDefaultOnlyWhenUnset() {
+  for (const { stored, expected } of [
+    { stored: undefined, expected: true },
+    { stored: false, expected: false },
+    { stored: true, expected: true },
+  ]) {
+    const { context, switches } = createSettingsContext({ framePacing: stored, ipAddressFieldMode: stored });
+    runIndexFunction('loadUserDataCb', context);
+    assert.strictEqual(switches['#framePacingBtn'].state, expected, 'frame pacing for stored=' + stored);
+    assert.strictEqual(switches['#ipAddressFieldModeBtn'].state, expected, 'address field for stored=' + stored);
+  }
+  const { context, stores } = createSettingsContext({});
+  runIndexFunction('restoreDefaultsSettingsValues', context);
+  for (const key of ['framePacing', 'ipAddressFieldMode']) {
+    assert(stores.some((entry) => entry.key === key && entry.value === true), key + ' restores to on');
+  }
+}
+
 async function main() {
   const tests = [
     testStartStreamParameterOrderIsIdenticalEverywhere,
@@ -356,6 +415,9 @@ async function main() {
     testHostDerivedTextIsEscapedBeforeHtml,
     testPerformanceStatsKeepWindowFixes,
     testUnexpectedTerminationUsesTheSingleStopPath,
+    testVideoSetupFailureIsReportedWithGuidance,
+    testHostPollingResumesAroundPairing,
+    testFramePacingAndAddressFieldDefaultOnlyWhenUnset,
   ];
   const failures = [];
   for (const test of tests) {
