@@ -69,6 +69,83 @@ function cryptoRand(upper_bound) {
   return array[0] % upper_bound;
 }
 
+// Box art is downloaded over the same single HTTP thread as every other request. Opening a host with
+// a cold cache queues one download per app, and a request to start the stream waits behind all of
+// them. So at most two downloads run at once, downloads that are no longer wanted are dropped before
+// they reach the network, and the running ones can be cancelled.
+function createRequestLimiter(maxConcurrent) {
+  var queue = [];
+  var running = [];
+
+  function createStaleError() {
+    var error = new Error('Operation was superseded');
+    error.code = 'STALE_OPERATION';
+    return error;
+  }
+
+  function launch(entry) {
+    var request;
+    try {
+      request = entry.start();
+    } catch (error) {
+      entry.reject(error);
+      return;
+    }
+    running.push(request);
+    var release = function() {
+      var position = running.indexOf(request);
+      if (position >= 0) {
+        running.splice(position, 1);
+      }
+      pump();
+    };
+    Promise.resolve(request).then(function(value) {
+      release();
+      entry.resolve(value);
+    }, function(error) {
+      release();
+      entry.reject(error);
+    });
+  }
+
+  function pump() {
+    while (running.length < maxConcurrent && queue.length > 0) {
+      var entry = queue.shift();
+      if (entry.isStale && entry.isStale()) {
+        entry.reject(createStaleError());
+        continue;
+      }
+      launch(entry);
+    }
+  }
+
+  return {
+    run: function(start, isStale) {
+      return new Promise(function(resolve, reject) {
+        queue.push({start: start, isStale: isStale, resolve: resolve, reject: reject});
+        pump();
+      });
+    },
+    cancelAll: function() {
+      queue.splice(0).forEach(function(entry) {
+        entry.reject(createStaleError());
+      });
+      running.slice().forEach(function(request) {
+        if (typeof cancelAsyncRequest === 'function') {
+          cancelAsyncRequest(request);
+        }
+      });
+    }
+  };
+}
+
+var boxArtDownloads = createRequestLimiter(2);
+
+// Drops the queued box art downloads and cancels the running ones, for example when a stream starts
+function cancelBoxArtDownloads() {
+  boxArtDownloads.cancelAll();
+}
+
 // This map tracks gamepad IDs for each browser slot to avoid false
 // positives from placeholder gamepads that report as "connected"
 // but have never sent any input (timestamp = 0).
@@ -566,7 +643,7 @@ NvHTTP.prototype = {
   // Returns the original PNG box art based on the the given app Id and generates an optimized JPEG preview when Smart Hub Preview is supported.
   // The original PNG box art is stored in private storage, while the optimized JPEG preview is generated and stored asynchronously,
   // in the public documents directory so that the Smart Hub Preview background service process can access it directly.
-  getBoxArt: function(appId, isSmartHubSupported) {
+  getBoxArt: function(appId, isSmartHubSupported, isStale) {
     return new Promise(function(resolve, reject) {
       var boxArtDir = 'wgt-private/' + this.hostname;
       var boxArtFileName = 'boxart-' + appId + '.png';
@@ -586,9 +663,11 @@ NvHTTP.prototype = {
       };
 
       var fetchBoxArt = function() {
-        return sendMessage('openUrl', [
-          self._baseUrlHttps + '/appasset?' + self._buildUidStr() + '&appid=' + appId + '&AssetType=2&AssetIdx=0', self.ppkstr, true, 10000
-        ]).then(function(boxArtBuffer) {
+        return boxArtDownloads.run(function() {
+          return sendMessage('openUrl', [
+            self._baseUrlHttps + '/appasset?' + self._buildUidStr() + '&appid=' + appId + '&AssetType=2&AssetIdx=0', self.ppkstr, true, 10000
+          ]);
+        }, isStale).then(function(boxArtBuffer) {
           var blob = new Blob([boxArtBuffer], { type: 'image/png' });
           var reader = new FileReader();
           reader.onload = function() {

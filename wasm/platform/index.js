@@ -2726,7 +2726,9 @@ function showApps(host) {
             return a.id === app.id;
           }) : null;
           var boxArtPromise = new Promise(function(resolveBoxArt) {
-            Promise.resolve(host.getBoxArt(app.id, _isSmartHubSupported)).then(function(resolvedPromise) {
+            Promise.resolve(host.getBoxArt(app.id, _isSmartHubSupported, function() {
+              return !appsGenerationGate.isCurrent(appsGeneration);
+            })).then(function(resolvedPromise) {
               if (!appsGenerationGate.isCurrent(appsGeneration)) {
                 resolveBoxArt();
                 return;
@@ -2950,6 +2952,13 @@ function showStreamMode() {
   $('#listener').addClass('fullscreen');
   $('#loadingSpinner').css('display', 'inline-block');
 
+  // The app list is left behind, so drop its box art downloads. They share one HTTP thread with the
+  // requests that start the stream, which must not wait for them.
+  appsGenerationGate.cancel();
+  if (typeof cancelBoxArtDownloads === 'function') {
+    cancelBoxArtDownloads();
+  }
+
   isInGame = true;
   if (streamWatchdog) {
     streamWatchdog.start();
@@ -2997,6 +3006,11 @@ function startGame(host, appID) {
     return;
   }
   localStorage.setItem('lastOpenedApp_' + host.serverUid, appID);
+
+  // Say right away that the press was understood. The spinner only appears after the server info
+  // request below, which can take a moment on a slow network.
+  var pressedTitle = $('#game-container-' + appID + ' .game-text').first().text() || host.hostname;
+  snackbarLog('Starting %1$s...', pressedTitle);
 
   // Start the audio scheduler of the Web Audio backend while we are still running inside the
   // handler of the key press that started the stream, because the audio context of a device
