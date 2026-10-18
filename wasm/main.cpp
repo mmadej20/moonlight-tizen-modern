@@ -25,6 +25,11 @@ extern char* g_UniqueId;
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
+// The optimization level this module was built with (see MOONLIGHT_OPT_LEVEL in CMakeLists.txt)
+#ifndef MOONLIGHT_OPT_LEVEL_TEXT
+#define MOONLIGHT_OPT_LEVEL_TEXT "unknown"
+#endif
+
 // Requests the Wasm module to connect to the specified server
 #define MSG_START_REQUEST "startRequest"
 // Requests the Wasm module to stop streaming
@@ -412,6 +417,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   PostToJs("Setting the Disable connection warnings to: " + std::to_string(disableWarnings));
   PostToJs("Setting the Performance statistics to: " + std::to_string(performanceStats));
   ClLogMessage("Experimental RFI recovery requested: %s\n", speculativeRfi ? "enabled" : "disabled");
+  ClLogMessage("Build optimization: %s\n", MOONLIGHT_OPT_LEVEL_TEXT);
 
   // Populate the stream configuration
   LiInitializeStreamConfiguration(&m_StreamConfig);

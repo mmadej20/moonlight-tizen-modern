@@ -2,7 +2,15 @@ cmake_minimum_required(VERSION 3.10)
 
 project(MoonlightWasm VERSION 1.0)
 
-add_compile_options(-w -s WASM=1 -fno-ident -Os -flto -DSAMSUNG_WRT -DOS_WASM -DNDEBUG)
+# Optimization level of the whole module (the application, Opus, ENet, reedsolomon). The module was built for size
+# (-Os) before; -O2 trades some size for speed, which matters for the audio decoder and the other threads on the TV.
+# Pass -DMOONLIGHT_OPT_LEVEL=-Os (docker build --build-arg OPT_LEVEL=-Os) to build for size again.
+set(MOONLIGHT_OPT_LEVEL "-O2" CACHE STRING "Optimization level of the WASM module (-O2, -Os, ...)")
+if(NOT MOONLIGHT_OPT_LEVEL MATCHES "^-O[0-3sz]$")
+    message(FATAL_ERROR "MOONLIGHT_OPT_LEVEL must be an optimization level such as -O2 or -Os, got '${MOONLIGHT_OPT_LEVEL}'")
+endif()
+
+add_compile_options(-w -s WASM=1 -fno-ident ${MOONLIGHT_OPT_LEVEL} -flto -DSAMSUNG_WRT -DOS_WASM -DNDEBUG)
 
 add_library(moonlight-rs STATIC
     moonlight-common-c/reedsolomon/rs.c)
@@ -264,12 +272,14 @@ set_target_properties(moonlight-wasm
         COMPILE_FLAGS
             "-s USE_CRYPTO=1 -s USE_SSL=1 -s USE_CURL=1")
 target_compile_features(moonlight-wasm PUBLIC cxx_std_17)
+# The level goes into the module, so that every stream log says which build it came from
+target_compile_definitions(moonlight-wasm PRIVATE MOONLIGHT_OPT_LEVEL_TEXT="${MOONLIGHT_OPT_LEVEL}")
 set_target_properties(moonlight-wasm
     PROPERTIES
         LINK_FLAGS
             "--bind \
              -pthread \
-             -Os \
+             ${MOONLIGHT_OPT_LEVEL} \
              -flto \
              -s TOTAL_MEMORY=134217728 \
              -s TOTAL_STACK=16777216 \

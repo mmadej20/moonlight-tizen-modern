@@ -14,6 +14,7 @@ const expectedJavaScriptSuites = [
   'tests/auto_wol_behavior_tests.js',
   'tests/box_art_behavior_tests.js',
   'tests/box_art_queue_tests.js',
+  'tests/build_flags_tests.js',
   'tests/common_log_capture_wiring_tests.js',
   'tests/connection_wiring_tests.js',
   'tests/controller_filter_wiring_tests.js',
