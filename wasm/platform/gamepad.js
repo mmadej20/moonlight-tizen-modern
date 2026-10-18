@@ -4,6 +4,8 @@ function createGamepadController(environment) {
   var listenersInstalled = false;
   var snapshots = Object.create(null);
   var axisEpsilon = 0.001;
+  // What the loop did so far, so that the log can say how busy it was before it was paused for a stream
+  var stats = { polls: 0, events: 0 };
 
   function createSnapshot(gamepad) {
     return {
@@ -25,6 +27,7 @@ function createGamepadController(environment) {
   }
 
   function dispatchChanges(changes) {
+    stats.events += 1;
     environment.dispatchEvent(new environment.CustomEvent('gamepadinputchanged', {
       detail: { changes: changes },
     }));
@@ -90,6 +93,7 @@ function createGamepadController(environment) {
   }
 
   function poll() {
+    stats.polls += 1;
     var gamepads = readGamepads();
     if (!gamepads) {
       return;
@@ -172,6 +176,9 @@ function createGamepadController(environment) {
   return {
     startWatching: startWatching,
     stopWatching: stopWatching,
+    getStats: function() {
+      return { polls: stats.polls, events: stats.events };
+    },
   };
 }
 

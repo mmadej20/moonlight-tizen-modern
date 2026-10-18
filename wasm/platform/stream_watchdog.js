@@ -27,6 +27,7 @@
     var startedWall = 0;
     var lastTickPerf = 0;
     var ticks = 0;
+    var windowLatenessMs = 0;
 
     function readRecord() {
       try {
@@ -77,13 +78,21 @@
       var gap = currentPerf - lastTickPerf;
       lastTickPerf = currentPerf;
 
+      // A tick that arrives late shows how long the main thread was busy. The worst one of each window is logged.
+      var lateness = gap - INTERVAL_MS;
+      if (lateness > windowLatenessMs) {
+        windowLatenessMs = lateness;
+      }
+
       var record = snapshot('streaming', {});
       if (gap > STALL_THRESHOLD_MS) {
         log('Main thread stalled for ' + Math.round(gap) + ' ms (heartbeat expected every ' +
           INTERVAL_MS + ' ms). ' + record.health + ' ' + record.memory);
       }
       if ((ticks - 1) % HEALTH_LOG_EVERY_TICKS === 0) {
-        log('StreamHealth up=' + record.upSeconds + 's ' + record.health + ' ' + record.memory);
+        log('StreamHealth up=' + record.upSeconds + 's ' + record.health + ' ' + record.memory +
+          ' mainJitterMaxMs=' + Math.round(windowLatenessMs));
+        windowLatenessMs = 0;
       }
       writeRecord(record);
     }
@@ -96,6 +105,7 @@
       startedWall = now();
       lastTickPerf = perfNow();
       ticks = 0;
+      windowLatenessMs = 0;
       writeRecord(snapshot('streaming', {}));
       timer = options.setInterval(tick, INTERVAL_MS);
     }

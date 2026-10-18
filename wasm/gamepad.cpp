@@ -68,6 +68,12 @@ struct ControllerSlotState {
 
 static ControllerSlotState slotState[kMaxControllers];
 
+// Whether every poll asks the main thread once (see gamepad_sampling.hpp) or once per slot. Only the input thread
+// polls, and StartStream resets these while that thread is not running.
+static bool s_UseBulkGamepadSampling = true;
+static bool s_LoggedSamplingMode = false;
+static bool s_LoggedSamplingFailure = false;
+
 // Detect controller family from Gamepad.id (PS / Xbox / Nintendo / Unknown)
 static uint8_t GetControllerType(const char* id) {
   // Guard against null or empty id strings
@@ -230,6 +236,10 @@ void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback, bool mouseE
     slotState[i].announced = false;
   }
 
+  // Every stream log states how the controllers are read
+  s_LoggedSamplingMode = false;
+  s_LoggedSamplingFailure = false;
+
   // Store the new settings for use during polling
   rumbleFeedbackSwitch = rumbleFeedback;
   mouseEmulationSwitch = mouseEmulation;
@@ -237,20 +247,73 @@ void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback, bool mouseE
   flipXYfaceButtonsSwitch = flipXYfaceButtons;
 }
 
-// Function to poll gamepad input
-void MoonlightInstance::PollGamepads() {
+// The way to read the controllers when the bulk call is not available: one synchronous call to the main thread to
+// sample, one for the slot count and one for every slot
+static GamepadSample SampleGamepadSlotsPerCall(EmscriptenGamepadEvent* events) {
   // Guard check if sampling gamepad data is not successful
   if (emscripten_sample_gamepad_data() != EMSCRIPTEN_RESULT_SUCCESS) {
-    ClLogMessage("Failed to sample gamepad data!\n");
-    return;
+    MoonlightInstance::ClLogMessage("Failed to sample gamepad data!\n");
+    return {false, 0, 0, false};
   }
 
   // Query how many gamepad slots the browser currently exposes
   const auto numGamepads = emscripten_get_num_gamepads();
   // Guard check if retrieving the number of gamepads is not supported
   if (numGamepads == EMSCRIPTEN_RESULT_NOT_SUPPORTED) {
-    ClLogMessage("Failed to get number of gamepads!\n");
-    return;
+    MoonlightInstance::ClLogMessage("Failed to get number of gamepads!\n");
+    return {false, 0, 0, false};
+  }
+
+  // Cap at the protocol maximum of 16 controllers
+  const int limit = std::min(numGamepads, kMaxControllers);
+
+  // Read every browser slot once so later logic can work from a stable snapshot
+  uint32_t presentMask = 0;
+  for (int i = 0; i < limit; ++i) {
+    // Check if the gamepad status retrieval is successful for the current slot
+    if (emscripten_get_gamepad_status(i, &events[i]) == EMSCRIPTEN_RESULT_SUCCESS) {
+      presentMask |= 1u << i;
+    }
+  }
+  return {true, limit, presentMask, false};
+}
+
+// Function to poll gamepad input. Returns whether a controller is in use.
+bool MoonlightInstance::PollGamepads() {
+  // The state of the slots in this poll. Only the input thread polls, and only the slots that the sample reports as
+  // present are read, so the array is not cleared between polls (clearing 16 slots 200 times per second is waste).
+  static EmscriptenGamepadEvent events[kMaxControllers];
+
+  GamepadSample sample = {false, 0, 0, false};
+  if (s_UseBulkGamepadSampling) {
+    sample = DecodeGamepadSample(SampleGamepadSlots(events, kMaxControllers));
+    if (sample.unavailable) {
+      // This build cannot do it, so every poll uses the per-call API from now on
+      s_UseBulkGamepadSampling = false;
+      s_LoggedSamplingMode = false;
+    } else if (!sample.ok) {
+      // The browser threw while it was read. The per-call API would throw the same way inside a call that the main
+      // thread runs for this thread, so skip this poll and try again at the next one.
+      if (!s_LoggedSamplingFailure) {
+        s_LoggedSamplingFailure = true;
+        ClLogMessage("Gamepad sampling: the browser failed to read the controllers, trying again\n");
+      }
+      m_StreamHealth.SetActiveControllers(0);
+      return false;
+    }
+  }
+  if (!s_UseBulkGamepadSampling) {
+    sample = SampleGamepadSlotsPerCall(events);
+  }
+  if (!s_LoggedSamplingMode) {
+    s_LoggedSamplingMode = true;
+    ClLogMessage("Gamepad sampling: %s\n", s_UseBulkGamepadSampling
+      ? "one call to the main thread per poll"
+      : "one call to the main thread per slot (the bulk call is not available)");
+  }
+  if (!sample.ok) {
+    m_StreamHealth.SetActiveControllers(0);
+    return false;
   }
 
   // Prevent repeated trigger while the button combo is held down
@@ -262,21 +325,15 @@ void MoonlightInstance::PollGamepads() {
   std::vector<int> arrived;
 
   // Cap at the protocol maximum of 16 controllers
-  const int limit = std::min(numGamepads, kMaxControllers);
+  const int limit = std::min(sample.count, kMaxControllers);
 
-  // Temporary storage for this poll's gamepad events and presence flags
-  EmscriptenGamepadEvent events[kMaxControllers]{};
+  // Presence flags of this poll
   bool slotPresent[kMaxControllers] = { false };
-
-  // See matching logic in "[utils.js] getConnectedGamepadMask()" – these must stay in sync!
-
-  // Read every browser slot once so later logic can work from a stable snapshot
   for (int i = 0; i < limit; ++i) {
-    // Check if the gamepad status retrieval is successful for the current slot
-    if (emscripten_get_gamepad_status(i, &events[i]) == EMSCRIPTEN_RESULT_SUCCESS) {
-      slotPresent[i] = true;
-    }
+    slotPresent[i] = GamepadSlotPresent(sample, i);
   }
+
+  // See matching logic in "[utils.js] getConnectedGamepadMask()" - these must stay in sync!
 
   // Decide per slot: still real, removed, or newly arrived
   for (int i = 0; i < kMaxControllers; ++i) {
@@ -313,6 +370,8 @@ void MoonlightInstance::PollGamepads() {
       arrived.push_back(i);
     }
   }
+
+  m_StreamHealth.SetActiveControllers(__builtin_popcount(static_cast<unsigned short>(activeGamepadMask)));
 
   // Send zeroed events for removed / replaced controllers so the host cleans up
   for (int i : removed) {
@@ -376,7 +435,7 @@ void MoonlightInstance::PollGamepads() {
     if (buttonFlags == STOP_STREAM_BUTTONS) {
       // Terminate the connection
       stopStream();
-      return;
+      return false;
     } else if (buttonFlags == PERF_STATS_BUTTONS) {
       if (!comboTriggered[gamepadID]) {
         // Toggle performance stats overlay
@@ -474,8 +533,11 @@ void MoonlightInstance::PollGamepads() {
       LiSendMultiControllerEvent(
         gamepadID, activeGamepadMask, buttonFlags, leftTrigger,
         rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY);
+      m_StreamHealth.ControllerSent();
     }
   }
+
+  return activeGamepadMask != 0;
 }
 
 // Function to send controller rumble feedback for gamepad

@@ -141,6 +141,8 @@ class StreamHealth {
     m_AudioAppend.Reset();
     m_InputPoll.Reset();
     m_MainCall.Reset();
+    m_ActiveControllers.store(0);
+    m_ControllerSent.store(0);
   }
 
   void VideoSubmitted(int64_t nowMs) {
@@ -164,6 +166,11 @@ class StreamHealth {
   // A worker thread waiting for the main thread (a synchronous call into JavaScript)
   BlockingSection& MainCall() { return m_MainCall; }
 
+  // Controllers that are in use right now, and the controller states sent to the host so far. An idle controller
+  // that still produces a state packet every few milliseconds shows up as a count that grows by itself.
+  void SetActiveControllers(int count) { m_ActiveControllers.store(count); }
+  void ControllerSent() { m_ControllerSent.fetch_add(1); }
+
   // One line describing the stream; the per-window maxima are reset by every call
   std::string Snapshot(int64_t nowMs, std::size_t heapUsedBytes, std::size_t heapTotalBytes) {
     const int64_t videoAge =
@@ -171,14 +178,15 @@ class StreamHealth {
     const int64_t audioAge =
       m_HasAudio.load() ? stream_health_detail::Since(nowMs, m_LastAudioMs.load()) : -1;
 
-    char buffer[512];
+    char buffer[640];
     std::snprintf(
       buffer, sizeof(buffer),
       "video=%llu/%lldms audio=%llu/%lldms"
       " videoAppendCalls=%llu videoAppendMaxMs=%lld videoAppendBlockedMs=%lld"
       " audioAppendCalls=%llu audioAppendMaxMs=%lld audioAppendBlockedMs=%lld"
       " inputPolls=%llu inputPollMaxMs=%lld inputPollBlockedMs=%lld"
-      " mainCalls=%llu mainCallMaxMs=%lld mainCallBlockedMs=%lld heap=%lluMB/%lluMB",
+      " mainCalls=%llu mainCallMaxMs=%lld mainCallBlockedMs=%lld"
+      " controllers=%d controllerSent=%llu heap=%lluMB/%lluMB",
       static_cast<unsigned long long>(m_VideoCount.load()),
       static_cast<long long>(videoAge),
       static_cast<unsigned long long>(m_AudioCount.load()),
@@ -195,6 +203,8 @@ class StreamHealth {
       static_cast<unsigned long long>(m_MainCall.Count()),
       static_cast<long long>(m_MainCall.TakeMaxMs()),
       static_cast<long long>(m_MainCall.BlockedMs(nowMs)),
+      static_cast<int>(m_ActiveControllers.load()),
+      static_cast<unsigned long long>(m_ControllerSent.load()),
       static_cast<unsigned long long>(heapUsedBytes >> 20),
       static_cast<unsigned long long>(heapTotalBytes >> 20));
     return buffer;
@@ -208,6 +218,8 @@ class StreamHealth {
   std::atomic<uint32_t> m_LastAudioMs{0};
   std::atomic<bool> m_HasVideo{false};
   std::atomic<bool> m_HasAudio{false};
+  std::atomic<int32_t> m_ActiveControllers{0};
+  std::atomic<uint32_t> m_ControllerSent{0};
   BlockingSection m_VideoAppend;
   BlockingSection m_AudioAppend;
   BlockingSection m_InputPoll;

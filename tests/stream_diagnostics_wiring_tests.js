@@ -60,8 +60,8 @@ assert.match(audio, /ScopedSection\s+\w+\(g_Instance->Health\(\)\.AudioAppend\(\
   'the audio append is timed');
 const inputThread = main.slice(main.indexOf('void* MoonlightInstance::InputThreadFunc('));
 assert.match(inputThread.slice(0, inputThread.indexOf('usleep')),
-  /ScopedSection\s+\w+\(me->m_StreamHealth\.InputPoll\(\)\);[\s\S]*PollGamepads\(\);/,
-  'every input round is timed, because it asks the main thread for the gamepad state');
+  /ScopedSection\s+\w+\(me->m_StreamHealth\.InputPoll\(\)\);[\s\S]*PollGamepads\(\)\)?;/,
+  'every gamepad poll is timed, because it asks the main thread for the gamepad state');
 assert.match(main, /g_Instance->Health\(\)\.MainCall\(\)/);
 for (const name of ['PostToJs', 'PostPromiseMessage']) {
   const body = main.slice(main.indexOf('void ' + name + '('));

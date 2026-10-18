@@ -141,6 +141,40 @@ function createRequestLimiter(maxConcurrent) {
 
 var boxArtDownloads = createRequestLimiter(2);
 
+// Telemetry of one app list: where the pictures came from and how long the downloads took, so that a slow list can
+// be told apart from a slow host or a full queue. The list resets it when it starts and writes the summary to the
+// diagnostic log when every picture has settled.
+var boxArtNow = function() {
+  return Date.now();
+};
+
+function createBoxArtStats() {
+  return {
+    startedAt: boxArtNow(),
+    requested: 0, cached: 0, downloaded: 0, failed: 0, dropped: 0,
+    downloadMsTotal: 0, downloadMsMax: 0,
+    slotWaits: 0, slotWaitMsTotal: 0, slotWaitMsMax: 0
+  };
+}
+
+var boxArtStats = createBoxArtStats();
+
+function resetBoxArtStats() {
+  boxArtStats = createBoxArtStats();
+}
+
+function describeBoxArtStats() {
+  var stats = boxArtStats;
+  var average = function(total, count) {
+    return count > 0 ? Math.round(total / count) : 0;
+  };
+  return 'Box art: ' + stats.requested + ' requested in ' + (boxArtNow() - stats.startedAt) + ' ms: ' +
+    'cached=' + stats.cached + ' downloaded=' + stats.downloaded + ' failed=' + stats.failed +
+    ' dropped=' + stats.dropped + '; ' +
+    'downloads avg ' + average(stats.downloadMsTotal, stats.downloaded) + ' ms max ' + stats.downloadMsMax + ' ms, ' +
+    'waited for a slot avg ' + average(stats.slotWaitMsTotal, stats.slotWaits) + ' ms max ' + stats.slotWaitMsMax + ' ms';
+}
+
 // Drops the queued box art downloads and cancels the running ones, for example when a stream starts
 function cancelBoxArtDownloads() {
   boxArtDownloads.cancelAll();
@@ -644,6 +678,7 @@ NvHTTP.prototype = {
   // The original PNG box art is stored in private storage, while the optimized JPEG preview is generated and stored asynchronously,
   // in the public documents directory so that the Smart Hub Preview background service process can access it directly.
   getBoxArt: function(appId, isSmartHubSupported, isStale) {
+    boxArtStats.requested += 1;
     return new Promise(function(resolve, reject) {
       var boxArtDir = 'wgt-private/' + this.hostname;
       var boxArtFileName = 'boxart-' + appId + '.png';
@@ -663,11 +698,23 @@ NvHTTP.prototype = {
       };
 
       var fetchBoxArt = function() {
+        var stats = boxArtStats;
+        var requestedAt = boxArtNow();
+        var startedAt = requestedAt;
         return boxArtDownloads.run(function() {
+          startedAt = boxArtNow();
+          var waited = startedAt - requestedAt;
+          stats.slotWaits += 1;
+          stats.slotWaitMsTotal += waited;
+          stats.slotWaitMsMax = Math.max(stats.slotWaitMsMax, waited);
           return sendMessage('openUrl', [
             self._baseUrlHttps + '/appasset?' + self._buildUidStr() + '&appid=' + appId + '&AssetType=2&AssetIdx=0', self.ppkstr, true, 10000
           ]);
         }, isStale).then(function(boxArtBuffer) {
+          var took = boxArtNow() - startedAt;
+          stats.downloaded += 1;
+          stats.downloadMsTotal += took;
+          stats.downloadMsMax = Math.max(stats.downloadMsMax, took);
           var blob = new Blob([boxArtBuffer], { type: 'image/png' });
           var reader = new FileReader();
           reader.onload = function() {
@@ -690,6 +737,11 @@ NvHTTP.prototype = {
           };
           reader.readAsDataURL(blob);
         }, function(error) {
+          if (error && error.code === 'STALE_OPERATION') {
+            stats.dropped += 1;
+          } else {
+            stats.failed += 1;
+          }
           console.error('%c[utils.js, getBoxArt]', 'color: gray;', 'Error: Failed to retrieve original box art from network: ', error);
           reject(error);
         });
@@ -699,6 +751,7 @@ NvHTTP.prototype = {
         var reader = new FileReader();
         reader.onload = function() {
           var dataUrl = reader.result;
+          boxArtStats.cached += 1;
           console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Returning storage-cached box art: ', appId);
           if (!isSmartHubSupported) {
             resolve(dataUrl);

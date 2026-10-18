@@ -478,6 +478,10 @@ function showHostsMode() {
   $('#main-content').removeClass('fullscreen');
   $('#listener').removeClass('fullscreen');
 
+  // The interface gamepad loop may still be paused from a stream that ended some other way
+  if (typeof Controller !== 'undefined' && Controller) {
+    Controller.startWatching();
+  }
   Navigation.start();
   Navigation.pop();
   // Stop any existing polls before starting new ones to prevent setInterval leaks.
@@ -2527,6 +2531,14 @@ function showAppsMode() {
   $('#wasm_module').css('display', 'none');
 
   isInGame = false;
+  if (typeof Controller !== 'undefined' && Controller) {
+    // Starting is idempotent, so this is also right when the stream view was never shown
+    Controller.startWatching();
+    if (isUiGamepadPaused) {
+      isUiGamepadPaused = false;
+      logDiagnostic('UI gamepad watching resumed after the stream');
+    }
+  }
   stopStreamWatchdog('returned to the apps view');
   // We want to eventually poll on the app screen, but we can't now because
   // it slows down box art loading and we don't update the UI live anyway.
@@ -2643,6 +2655,11 @@ function showApps(host) {
         endBackgroundPollingOfHost(host);
 
         var boxArtPromises = [];
+
+        // Every list gets its own summary of cached and downloaded pictures
+        if (typeof resetBoxArtStats === 'function') {
+          resetBoxArtStats();
+        }
 
         // Reset preview promises for this showApps invocation
         window.previewPromises = [];
@@ -2820,6 +2837,10 @@ function showApps(host) {
         resolve(sortedAppList);
 
         Promise.all(settledPromises).then(function() {
+          // Written even when the list was left on the way, to show that the pictures were cut short
+          if (typeof describeBoxArtStats === 'function') {
+            logDiagnostic(describeBoxArtStats());
+          }
           if (!appsGenerationGate.isCurrent(appsGeneration)) return;
           // Resume background polling now that all box art downloads are complete
           beginBackgroundPollingOfHost(host);
@@ -2910,6 +2931,30 @@ function quitAppDialog() {
 }
 
 var streamWatchdog = null; // Records a heartbeat while streaming, so that a frozen application leaves evidence behind
+var isUiGamepadPaused = false; // True while the interface gamepad loop is paused for a stream
+
+// Adds a line to the diagnostic log from JavaScript, for what the native side cannot see
+function logDiagnostic(line) {
+  try {
+    DiagnosticLogs.appendLine(line);
+  } catch (error) {
+    // The log is an aid. A problem with it must never get in the way of the application.
+  }
+}
+
+// Times the stages between pressing an app and the connection being up
+var startTimeline = StartTimeline.create({
+  now: function() { return Date.now(); }
+});
+
+// The connection is up: write where the time of the start went
+function finishStartTimeline() {
+  startTimeline.mark('connection');
+  var summary = startTimeline.finish();
+  if (summary) {
+    logDiagnostic(summary);
+  }
+}
 
 // Creates the stream watchdog and reports when the previous run ended while streaming
 function initStreamWatchdog() {
@@ -2963,6 +3008,16 @@ function showStreamMode() {
   if (streamWatchdog) {
     streamWatchdog.start();
   }
+
+  // The native input thread reads the controllers during the stream, so the loop that polls them for menu
+  // navigation only costs the main thread work. It resumes together with the app list.
+  if (typeof Controller !== 'undefined' && Controller) {
+    Controller.stopWatching();
+    isUiGamepadPaused = true;
+    var uiGamepadStats = Controller.getStats();
+    logDiagnostic('UI gamepad watching paused for the stream (polls=' + uiGamepadStats.polls +
+      ' events=' + uiGamepadStats.events + ' since the app started)');
+  }
   fullscreenWasmModule();
   handleOnScreenOverlays();
   Navigation.stop();
@@ -3006,6 +3061,7 @@ function startGame(host, appID) {
     return;
   }
   localStorage.setItem('lastOpenedApp_' + host.serverUid, appID);
+  startTimeline.begin();
 
   // Say right away that the press was understood. The spinner only appears after the server info
   // request below, which can take a moment on a slow network.
@@ -3021,7 +3077,9 @@ function startGame(host, appID) {
 
   // Refresh the server info, because the user might have quit the game
   host.refreshServerInfo().then(function(ret) {
+    startTimeline.mark('server info');
     host.getAppById(appID).then(function(appToStart) {
+      startTimeline.mark('app lookup');
       if (host.currentGame != 0 && host.currentGame != appID) {
         host.getAppById(host.currentGame).then(function(currentApp) {
           // Find the existing overlay and dialog elements
@@ -3144,6 +3202,7 @@ function startGame(host, appID) {
           0x030002, // Surround channel mask << 16 | Surround channel count
           gamepadMask // Connect gamepad mask
         ).then(function(launchResult) {
+          startTimeline.mark('launch');
           $xml = $($.parseXML(launchResult.toString()));
           $root = $xml.find('root');
           var status_code = $root.attr('status_code');
@@ -3168,7 +3227,11 @@ function startGame(host, appID) {
             framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
             audioBackend, audioConfig, audioSync, audioJitterMs, playHostAudio, decryptHostAudio, videoCodec, hdrMode, fullRange,
             gameMode, disableWarnings, performanceStats, speculativeRfi
-          ]);
+          ]).then(function() {
+            startTimeline.mark('native start');
+          }, function(error) {
+            logDiagnostic('Stream start request was rejected: ' + error);
+          });
         }, function(failedResumeApp) {
           console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to resume app with id: ' + appID + '\n Returned error was: ' + failedResumeApp + '!');
           snackbarLog('Failed to resume %1$s', appToStart.title);
@@ -3193,6 +3256,7 @@ function startGame(host, appID) {
         0x030002, // Surround channel mask << 16 | Surround channel count
         gamepadMask // Connect gamepad mask
       ).then(function(launchResult) {
+        startTimeline.mark('launch');
         $xml = $($.parseXML(launchResult.toString()));
         $root = $xml.find('root');
         var status_code = $root.attr('status_code');
@@ -3222,7 +3286,11 @@ function startGame(host, appID) {
           framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
           audioBackend, audioConfig, audioSync, audioJitterMs, playHostAudio, decryptHostAudio, videoCodec, hdrMode, fullRange,
           gameMode, disableWarnings, performanceStats, speculativeRfi
-        ]);
+        ]).then(function() {
+          startTimeline.mark('native start');
+        }, function(error) {
+          logDiagnostic('Stream start request was rejected: ' + error);
+        });
       }, function(failedLaunchApp) {
         console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to launch app with id: ' + appID + '\n Returned error was: ' + failedLaunchApp + '!');
         snackbarLog('Failed to launch %1$s', appToStart.title);
@@ -4634,15 +4702,26 @@ function loadHTTPCertsCb() {
         // to guarantee that the 254 scanner requests don't choke the network stack and cause known hosts to timeout.
         startPollingHosts().then(() => {
           if (typeof startSubnetScanner === 'function') {
+            if (!shouldRunStartupSubnetScan(hosts)) {
+              // Every known host just answered, so the sweep of 254 addresses would find nothing new
+              isSubnetScanFinished = true;
+              logDiagnostic('Subnet scan skipped: every known host is online');
+              return;
+            }
             snackbarLog('Scanning the local network to discover new hosts...');
             // Stop background polling while sweeping the subnet to prevent network exhaustion
             stopPollingHosts();
+            var subnetScanStartedAt = Date.now();
+            logDiagnostic('Subnet scan started (' + Object.keys(hosts).length + ' known hosts, not all online)');
+            var finishSubnetScan = function(outcome) {
+              isSubnetScanFinished = true;
+              logDiagnostic('Subnet scan finished in ' + (Date.now() - subnetScanStartedAt) + ' ms' + outcome);
+              startPollingHosts();
+            };
             startSubnetScanner().then(() => {
-              isSubnetScanFinished = true;
-              startPollingHosts();
+              finishSubnetScan('');
             }).catch(() => {
-              isSubnetScanFinished = true;
-              startPollingHosts();
+              finishSubnetScan(' (failed)');
             });
           } else {
             isSubnetScanFinished = true;
@@ -4651,6 +4730,23 @@ function loadHTTPCertsCb() {
       });
     });
   });
+}
+
+// The sweep of the local network is 254 probes, 8 at a time, up to 3 s each on a quiet address, with the polling of
+// the known hosts paused meanwhile. It is needed to find a host that is new or has a new address, so it only runs
+// when there is no known host or one of them did not answer.
+function shouldRunStartupSubnetScan(knownHosts) {
+  var knownCount = 0;
+  for (var serverUid in knownHosts) {
+    if (!knownHosts[serverUid]) {
+      continue;
+    }
+    knownCount += 1;
+    if (!knownHosts[serverUid].online) {
+      return true;
+    }
+  }
+  return knownCount === 0;
 }
 
 function isPreviewDeepLinkOperationCurrent(generation, serverUid, host) {

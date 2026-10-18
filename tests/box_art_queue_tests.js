@@ -7,7 +7,8 @@ const vm = require('vm');
 // Box art shares one HTTP thread with every other request. These tests pin the rules that keep a cold
 // cache (one download per app) from delaying the request that starts a stream.
 
-function createHarness() {
+function createHarness(options) {
+  const settings = options || {};
   const sent = [];
   const cancelled = [];
 
@@ -25,6 +26,9 @@ function createHarness() {
       filesystem: {
         createDirectory() {},
         openFile(path, mode) {
+          if (mode === 'r' && settings.cached) {
+            return { readBlob() { return new Blob([new Uint8Array([1, 2, 3])]); }, close() {} };
+          }
           if (mode === 'r') throw new Error('cache miss');
           return { writeData() {}, close() {} };
         },
@@ -143,7 +147,70 @@ async function testStartingAStreamCancelsRunningAndQueuedDownloads() {
   await again;
 }
 
+// Telemetry: how long the app list takes to get its pictures, and where the time goes. The summary is written to the
+// diagnostic log after every list, so a slow list can be told apart from a slow host or a full queue.
+async function testBoxArtStatsCountSourcesAndTimes() {
+  const { context, host, sent } = createHarness();
+  let now = 1000;
+  context.boxArtNow = () => now;
+  context.resetBoxArtStats();
+
+  const results = [1, 2, 3].map((id) => host.getBoxArt(id, false).catch((error) => error));
+  await flush();
+  assert.strictEqual(sent.length, 2, 'two downloads start at once');
+
+  now = 1500;
+  sent[0].resolve(new Uint8Array([1])); // took 500 ms
+  await flush();
+  assert.strictEqual(sent.length, 3, 'the third download waited 500 ms for a slot and starts now');
+
+  now = 2500;
+  sent[1].resolve(new Uint8Array([2])); // took 1500 ms
+  await flush();
+
+  now = 2700;
+  sent[2].reject(new Error('boom')); // failed after 1200 ms
+  await Promise.all(results);
+
+  now = 3000;
+  assert.strictEqual(context.describeBoxArtStats(),
+    'Box art: 3 requested in 2000 ms: cached=0 downloaded=2 failed=1 dropped=0; ' +
+    'downloads avg 1000 ms max 1500 ms, waited for a slot avg 167 ms max 500 ms');
+
+  context.resetBoxArtStats();
+  assert.match(context.describeBoxArtStats(), /^Box art: 0 requested in 0 ms: cached=0 downloaded=0 failed=0 dropped=0; downloads avg 0 ms max 0 ms/,
+    'a new list starts from zero');
+}
+
+async function testBoxArtStatsCountCachedPictures() {
+  const { context, host, sent } = createHarness({ cached: true });
+  context.boxArtNow = () => 5000;
+  context.resetBoxArtStats();
+  const art = await host.getBoxArt(7, false);
+  assert.match(art, /^data:image\/png;base64,/);
+  assert.strictEqual(sent.length, 0, 'a cached picture needs no download');
+  assert.match(context.describeBoxArtStats(), /1 requested in 0 ms: cached=1 downloaded=0 failed=0 dropped=0/);
+}
+
+async function testBoxArtStatsCountDroppedPicturesApart() {
+  const { context, host, sent } = createHarness();
+  context.boxArtNow = () => 100;
+  context.resetBoxArtStats();
+  let outdated = false;
+  const results = [1, 2, 3, 4].map((id) => host.getBoxArt(id, false, () => outdated).catch((error) => error));
+  await flush();
+  outdated = true;
+  sent[0].resolve(new Uint8Array([1]));
+  sent[1].resolve(new Uint8Array([2]));
+  await Promise.all(results);
+  assert.match(context.describeBoxArtStats(), /4 requested.*cached=0 downloaded=2 failed=0 dropped=2/,
+    'pictures of a list that the user left are dropped, not failed');
+}
+
 async function main() {
+  await testBoxArtStatsCountSourcesAndTimes();
+  await testBoxArtStatsCountCachedPictures();
+  await testBoxArtStatsCountDroppedPicturesApart();
   await testAtMostTwoDownloadsRunAtOnceInOrder();
   await testFailedDownloadFreesItsSlot();
   await testQueuedDownloadsOfAnOutdatedListNeverReachTheNetwork();

@@ -321,6 +321,10 @@ function handleMessage(msg) {
       }
     });
   } else if (msg === 'Connection Established') {
+    // Write where the time of this start went
+    if (typeof finishStartTimeline === 'function') {
+      finishStartTimeline();
+    }
     // Prepare the screen for video stream
     $('#loadingSpinner').css('display', 'none');
     $('body').css('backgroundColor', 'transparent');

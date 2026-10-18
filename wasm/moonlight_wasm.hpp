@@ -16,6 +16,7 @@
 #include <opus_multistream.h>
 
 #include "connection_lifecycle.hpp"
+#include "gamepad_sampling.hpp"
 #include "http_queue_metrics.hpp"
 #include "lib.hpp"
 #include "media_operation_epoch.hpp"
@@ -134,7 +135,8 @@ class MoonlightInstance {
   void ReportMouseMovement();
 
   void HandleGamepadInputState(bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons);
-  void PollGamepads();
+  // Returns whether a controller is in use, which sets how soon the next poll is due
+  bool PollGamepads();
 
   void MouseLockLost();
   void DidLockMouse(int32_t result);

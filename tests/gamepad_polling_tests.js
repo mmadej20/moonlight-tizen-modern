@@ -286,14 +286,22 @@ function run() {
   emptyArrayController.stopWatching();
 
   const nativeSource = fs.readFileSync(path.join(__dirname, '../wasm/gamepad.cpp'), 'utf8');
-  const pollStart = nativeSource.indexOf('void MoonlightInstance::PollGamepads()');
+  const pollStart = nativeSource.indexOf('bool MoonlightInstance::PollGamepads()');
   const pollEnd = nativeSource.indexOf('// Function to send controller rumble feedback', pollStart);
   assert(pollStart >= 0 && pollEnd > pollStart, 'PollGamepads implementation is present');
   const pollGamepads = nativeSource.slice(pollStart, pollEnd);
   assert.strictEqual(
-    (pollGamepads.match(/emscripten_sample_gamepad_data\(\)/g) || []).length,
+    (pollGamepads.match(/SampleGamepadSlots\(/g) || []).length,
     1,
-    'PollGamepads samples native gamepad data once before its controller loop'
+    'PollGamepads samples native gamepad data once, for all slots, before its controller loop'
+  );
+  const perCallStart = nativeSource.indexOf('static GamepadSample SampleGamepadSlotsPerCall(');
+  const perCallEnd = nativeSource.indexOf('bool MoonlightInstance::PollGamepads()', perCallStart);
+  assert(perCallStart >= 0 && perCallEnd > perCallStart, 'the per-call fallback is present');
+  assert.strictEqual(
+    (nativeSource.slice(perCallStart, perCallEnd).match(/emscripten_sample_gamepad_data\(\)/g) || []).length,
+    1,
+    'the per-call fallback also samples native gamepad data once per poll'
   );
 
   console.log('gamepad_polling_tests: PASS');

@@ -23,7 +23,7 @@ int main() {
          " videoAppendCalls=0 videoAppendMaxMs=0 videoAppendBlockedMs=0"
          " audioAppendCalls=0 audioAppendMaxMs=0 audioAppendBlockedMs=0"
          " inputPolls=0 inputPollMaxMs=0 inputPollBlockedMs=0"
-         " mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 heap=64MB/128MB");
+         " mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 controllers=0 controllerSent=0 heap=64MB/128MB");
 
   // Ages are measured from the last submitted packet, counts keep growing.
   health.VideoSubmitted(2000);
@@ -76,6 +76,17 @@ int main() {
   }
   assert(Contains(health.Snapshot(7200, 0, 0), "inputPolls=1 inputPollMaxMs=60 inputPollBlockedMs=0"));
 
+  // Controller telemetry: how many controllers are in use and how many states were sent to the host. Comparing the
+  // sent count with the time shows whether idle controllers still flood the control stream.
+  health.Reset(8000);
+  health.SetActiveControllers(2);
+  for (int i = 0; i < 5; ++i) {
+    health.ControllerSent();
+  }
+  assert(Contains(health.Snapshot(8100, 0, 0), "controllers=2 controllerSent=5"));
+  health.Reset(8200);
+  assert(Contains(health.Snapshot(8300, 0, 0), "controllers=0 controllerSent=0"));
+
   // A new stream starts from zero.
   health.Reset(9000);
   assert(health.Snapshot(9100, 1 * MB, 2 * MB) ==
@@ -83,7 +94,7 @@ int main() {
          " videoAppendCalls=0 videoAppendMaxMs=0 videoAppendBlockedMs=0"
          " audioAppendCalls=0 audioAppendMaxMs=0 audioAppendBlockedMs=0"
          " inputPolls=0 inputPollMaxMs=0 inputPollBlockedMs=0"
-         " mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 heap=1MB/2MB");
+         " mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 controllers=0 controllerSent=0 heap=1MB/2MB");
 
   // Times are kept as the low 32 bits of the clock (the Samsung toolchain has no working 64-bit compare-exchange),
   // so ages must stay right across the wrap of the 32-bit counter.

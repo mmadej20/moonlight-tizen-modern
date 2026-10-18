@@ -225,14 +225,16 @@ OperationOutcome MoonlightInstance::CloseMediaSource() {
 void* MoonlightInstance::InputThreadFunc(void* context) {
   MoonlightInstance* me = static_cast<MoonlightInstance*>(context);
 
+  GamepadPollSchedule schedule;
+
   while (me->m_Running.load()) {
-    {
-      // Polling asks the main thread for the gamepad state, so the time of one round also
+    if (schedule.ShouldPoll()) {
+      // Polling asks the main thread for the gamepad state, so the time of one poll also
       // measures how responsive the main thread is
       ScopedSection pollSection(me->m_StreamHealth.InputPoll());
-      me->PollGamepads();
-      me->ReportMouseMovement();
+      schedule.Polled(me->PollGamepads());
     }
+    me->ReportMouseMovement();
 
     // Poll every 5 ms
     usleep(5 * 1000);

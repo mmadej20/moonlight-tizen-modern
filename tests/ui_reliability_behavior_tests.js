@@ -702,10 +702,11 @@ async function testSavedCertificateAndHostStateSurviveReload() {
     updatePreviewData: function() {},
     startSubnetScanner: function() { return Promise.resolve(); },
     snackbarLog: function() {},
+    logDiagnostic: function() {},
     setTimeout: function() {},
     window: { i18n: null, previewPromises: [] }
   };
-  const loadHTTPCertsCb = loadFunctions(['loadHTTPCertsCb'], context).loadHTTPCertsCb;
+  const loadHTTPCertsCb = loadFunctions(['loadHTTPCertsCb', 'shouldRunStartupSubnetScan'], context).loadHTTPCertsCb;
   loadHTTPCertsCb();
   await flush();
 

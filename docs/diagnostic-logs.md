@@ -61,8 +61,11 @@ Send the whole log. A stream that ended in an orderly way is recorded as such an
 | --- | --- |
 | `video=<n>/<age>ms`, `audio=<n>/<age>ms` | Packets handed to the player and the age of the newest one. A growing age means that part stopped. `-1` means none yet. |
 | `videoAppend*`, `audioAppend*` | The call into the platform media pipeline: number of calls, the longest call in the last second, and `BlockedMs`, which is above 0 while a thread is inside the call right now. |
-| `inputPoll*` | One round of the input thread. It asks the main thread for the gamepad state about 200 times per second, so a long `inputPollMaxMs` or a growing `inputPollBlockedMs` means the main thread is not answering. |
+| `inputPoll*` | One poll of the controllers by the input thread: a single synchronous call to the main thread, every 5 ms while a controller is in use and every 25 ms while none is (`inputPolls` therefore grows by about 200 or 40 per second). A long `inputPollMaxMs` or a growing `inputPollBlockedMs` means the main thread is not answering. |
 | `mainCall*` | Worker threads waiting for the main thread through synchronous messages to the interface. |
+| `controllers=<n>` | Controllers in use at the last poll. |
+| `controllerSent=<n>` | Controller states sent to the host since the stream started. Compare it with the elapsed time: an idle controller that still makes this number grow by itself is sending states nobody needs. |
+| `mainJitterMaxMs=<n>` | Added by the interface at the end of the line: the worst lateness of the one second heartbeat timer in the last 10 s. It is how long the main thread was busy, for example in a garbage collection, even when nothing stalled for seconds. |
 | `heap=<used>/<total>MB` | The wasm heap, which has a fixed size. Close to the total means the stream may be running out of memory. |
 
 How to read the last heartbeat:
@@ -75,6 +78,19 @@ How to read the last heartbeat:
 **Main thread stalls.** `Main thread stalled for <n> ms` is added after the thread recovers whenever a heartbeat arrives more than 2.5 s late.
 
 **HTTP queue.** All HTTP requests share one thread. `HTTP request /path waited <n> ms in the queue` is logged when a request waited 1 s or more, and `HTTP request /path ran for <n> ms` when one ran for 3 s or more. Only the path is logged, never the query string.
+
+## Start-up and input telemetry
+
+These lines are written by the interface (they start with `[js <time>]`) or by the input code, once per event.
+
+| Line | Meaning |
+| --- | --- |
+| `Stream start took <n> ms: server info <a> ms, app lookup <b> ms, launch <c> ms, native start <d> ms, connection <e> ms` | Where the time between pressing an app and the connection being up went. `launch` is the host starting the game, `native start` is the TV creating the connection thread, `connection` is the RTSP handshake plus the media pipeline set up on the TV. |
+| `Stream start request was rejected: <code>` | The native side refused to start the stream. This answer was ignored before. |
+| `Box art: <n> requested in <t> ms: cached=<c> downloaded=<d> failed=<f> dropped=<x>; downloads avg <a> ms max <m> ms, waited for a slot avg <w> ms max <wm> ms` | One line per app list, when every picture has settled. `dropped` pictures belonged to a list that was left (or a stream started) before their turn. A large `waited for a slot` with small `downloads` means the queue, not the host, is slow. |
+| `Subnet scan skipped: every known host is online` / `Subnet scan started (...)` / `Subnet scan finished in <n> ms` | The sweep of the local network (254 probes) now only runs when there is no known host or one of them does not answer. |
+| `UI gamepad watching paused for the stream (polls=<n> events=<m> since the app started)` / `... resumed after the stream` | The interface stops polling the controllers during a stream; the native input thread does it. |
+| `Gamepad sampling: one call to the main thread per poll` | The controllers are read with one synchronous call per poll. The other text, `one call to the main thread per slot (the bulk call is not available)`, means the old way is used. `the browser failed to read the controllers` means the browser threw and the poll was skipped. |
 
 ## Audio diagnostic telemetry
 

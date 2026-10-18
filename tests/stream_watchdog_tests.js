@@ -80,6 +80,30 @@ function testMainThreadStallIsReportedWithTheHealthAtThatMoment() {
   assert.strictEqual(h.logs.some((line) => line.startsWith('Main thread stalled')), false);
 }
 
+function testMainThreadLatenessIsReportedPerHealthWindow() {
+  // The heartbeat timer fires on the main thread, so a tick that arrives late measures how long the main thread was
+  // busy (a garbage collection, a heavy script). The worst one of each ten second window goes into the health line,
+  // which makes a smooth main thread comparable with a janky one even when nothing stalled for seconds.
+  const h = createHarness();
+  h.watchdog.start({});
+  h.tick(); // tick 1, on time
+  for (let tick = 2; tick <= 11; tick += 1) {
+    h.tick(tick === 5 ? 1400 : 1000);
+  }
+  for (let tick = 12; tick <= 21; tick += 1) {
+    h.tick(tick === 15 ? 1090 : 1000);
+  }
+  const healthLines = h.logs.filter((line) => line.startsWith('StreamHealth '));
+  assert.strictEqual(healthLines.length, 3);
+  assert(healthLines[0].endsWith('mainJitterMaxMs=0'), healthLines[0]);
+  assert(healthLines[1].endsWith('mainJitterMaxMs=400'), 'the late tick of the window is reported: ' + healthLines[1]);
+  assert(healthLines[2].endsWith('mainJitterMaxMs=90'), 'each window starts again from zero: ' + healthLines[2]);
+
+  h.tick(900); // a tick that comes early is not lateness
+  for (let tick = 23; tick <= 31; tick += 1) h.tick();
+  assert(h.logs.filter((line) => line.startsWith('StreamHealth ')).pop().endsWith('mainJitterMaxMs=0'));
+}
+
 function testCleanStopRecordsIdleAndStopsTheTimer() {
   const h = createHarness();
   h.watchdog.start({});
@@ -164,6 +188,7 @@ function testStartingAgainReplacesThePreviousTimer() {
 testHeartbeatIsStoredEverySecondWhileStreaming();
 testHealthIsLoggedEveryTenSecondsAndOnTheFirstTick();
 testMainThreadStallIsReportedWithTheHealthAtThatMoment();
+testMainThreadLatenessIsReportedPerHealthWindow();
 testCleanStopRecordsIdleAndStopsTheTimer();
 testUncleanExitIsReportedOnceAfterARestart();
 testNothingIsReportedAfterACleanStopOrOnFirstRun();

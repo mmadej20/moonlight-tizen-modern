@@ -90,7 +90,7 @@ function testStartStreamParameterOrderIsIdenticalEverywhere() {
   assertStreamTail('moonlight_wasm.hpp startStream', cppParameterNames(freeDeclaration[1]));
   assertStreamTail('messages.js comment', splitTopLevel(comment[1].replace(/\s+/g, ' ')));
 
-  const requests = Array.from(index.matchAll(/sendMessage\('startRequest', \[([\s\S]*?)\]\);/g));
+  const requests = Array.from(index.matchAll(/sendMessage\('startRequest', \[([\s\S]*?)\]\)[.;]/g));
   assert.strictEqual(requests.length, 2, 'resume and launch both send a start request');
   requests.forEach((request, number) => {
     assertStreamTail('index.js startRequest #' + (number + 1), splitTopLevel(request[1]));
