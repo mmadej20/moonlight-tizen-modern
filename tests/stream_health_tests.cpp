@@ -23,7 +23,7 @@ int main() {
          " videoAppendCalls=0 videoAppendMaxMs=0 videoAppendBlockedMs=0"
          " audioAppendCalls=0 audioAppendMaxMs=0 audioAppendBlockedMs=0"
          " inputPolls=0 inputPollMaxMs=0 inputPollBlockedMs=0"
-         " mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 controllers=0 controllerSent=0 heap=64MB/128MB");
+         " mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 controllers=0 controllerSent=0 controllerSkipped=0 rumbleReceived=0 rumblePosted=0 heap=64MB/128MB");
 
   // Ages are measured from the last submitted packet, counts keep growing.
   health.VideoSubmitted(2000);
@@ -83,9 +83,24 @@ int main() {
   for (int i = 0; i < 5; ++i) {
     health.ControllerSent();
   }
-  assert(Contains(health.Snapshot(8100, 0, 0), "controllers=2 controllerSent=5"));
+  assert(Contains(health.Snapshot(8100, 0, 0), "controllers=2 controllerSent=5 controllerSkipped=0"));
+
+  // States that were not sent because nothing changed, and the rumble messages that the host sends, counted apart
+  // from the ones that are passed on to the interface.
+  for (int i = 0; i < 7; ++i) {
+    health.ControllerSkipped();
+  }
+  for (int i = 0; i < 9; ++i) {
+    health.RumbleReceived();
+  }
+  for (int i = 0; i < 4; ++i) {
+    health.RumblePosted();
+  }
+  assert(Contains(health.Snapshot(8150, 0, 0), "controllerSent=5 controllerSkipped=7 rumbleReceived=9 rumblePosted=4"));
+
   health.Reset(8200);
-  assert(Contains(health.Snapshot(8300, 0, 0), "controllers=0 controllerSent=0"));
+  assert(Contains(health.Snapshot(8300, 0, 0),
+                  "controllers=0 controllerSent=0 controllerSkipped=0 rumbleReceived=0 rumblePosted=0"));
 
   // A new stream starts from zero.
   health.Reset(9000);
@@ -94,7 +109,7 @@ int main() {
          " videoAppendCalls=0 videoAppendMaxMs=0 videoAppendBlockedMs=0"
          " audioAppendCalls=0 audioAppendMaxMs=0 audioAppendBlockedMs=0"
          " inputPolls=0 inputPollMaxMs=0 inputPollBlockedMs=0"
-         " mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 controllers=0 controllerSent=0 heap=1MB/2MB");
+         " mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 controllers=0 controllerSent=0 controllerSkipped=0 rumbleReceived=0 rumblePosted=0 heap=1MB/2MB");
 
   // Times are kept as the low 32 bits of the clock (the Samsung toolchain has no working 64-bit compare-exchange),
   // so ages must stay right across the wrap of the 32-bit counter.

@@ -74,6 +74,9 @@ static bool s_UseBulkGamepadSampling = true;
 static bool s_LoggedSamplingMode = false;
 static bool s_LoggedSamplingFailure = false;
 
+// What the host already knows about each controller. Only the input thread uses it while a stream runs.
+static ControllerSendFilter s_ControllerSendFilter;
+
 // Detect controller family from Gamepad.id (PS / Xbox / Nintendo / Unknown)
 static uint8_t GetControllerType(const char* id) {
   // Guard against null or empty id strings
@@ -240,6 +243,9 @@ void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback, bool mouseE
   s_LoggedSamplingMode = false;
   s_LoggedSamplingFailure = false;
 
+  // A new connection knows no controller state yet
+  s_ControllerSendFilter.ResetAll();
+
   // Store the new settings for use during polling
   rumbleFeedbackSwitch = rumbleFeedback;
   mouseEmulationSwitch = mouseEmulation;
@@ -376,6 +382,7 @@ bool MoonlightInstance::PollGamepads() {
   // Send zeroed events for removed / replaced controllers so the host cleans up
   for (int i : removed) {
     LiSendMultiControllerEvent(i, activeGamepadMask & ~(1 << i), 0, 0, 0, 0, 0, 0, 0);
+    s_ControllerSendFilter.Reset(i);
   }
 
   // Announce new (or re-arrived) controllers so Sunshine can pick the right profile
@@ -404,6 +411,8 @@ bool MoonlightInstance::PollGamepads() {
     // On failure leave un-announced; next poll will retry
     if (LiSendControllerArrivalEvent(i, activeGamepadMask, type, buttons, capabilities) == 0) {
       slotState[i].announced = true;
+      // The host starts from a fresh controller, so its first state is sent at once
+      s_ControllerSendFilter.Reset(i);
     }
   }
 
@@ -529,11 +538,25 @@ bool MoonlightInstance::PollGamepads() {
         LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
       }
     } else {
-      // If mouse emulation is inactive, then send gamepad input to the desired handler (acts as a gamepad)
-      LiSendMultiControllerEvent(
-        gamepadID, activeGamepadMask, buttonFlags, leftTrigger,
-        rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY);
-      m_StreamHealth.ControllerSent();
+      // If mouse emulation is inactive, then send gamepad input to the desired handler (acts as a gamepad).
+      // The host keeps the last state, so it only gets a change, plus a reminder every 100 ms.
+      const ControllerState state{
+        buttonFlags,
+        static_cast<unsigned char>(leftTrigger),
+        static_cast<unsigned char>(rightTrigger),
+        static_cast<short>(leftStickX),
+        static_cast<short>(leftStickY),
+        static_cast<short>(rightStickX),
+        static_cast<short>(rightStickY),
+        activeGamepadMask};
+      if (s_ControllerSendFilter.ShouldSend(gamepadID, state, StreamHealth::NowMs())) {
+        LiSendMultiControllerEvent(
+          gamepadID, state.activeMask, state.buttonFlags, state.leftTrigger,
+          state.rightTrigger, state.leftStickX, state.leftStickY, state.rightStickX, state.rightStickY);
+        m_StreamHealth.ControllerSent();
+      } else {
+        m_StreamHealth.ControllerSkipped();
+      }
     }
   }
 

@@ -143,6 +143,9 @@ class StreamHealth {
     m_MainCall.Reset();
     m_ActiveControllers.store(0);
     m_ControllerSent.store(0);
+    m_ControllerSkipped.store(0);
+    m_RumbleReceived.store(0);
+    m_RumblePosted.store(0);
   }
 
   void VideoSubmitted(int64_t nowMs) {
@@ -170,6 +173,12 @@ class StreamHealth {
   // that still produces a state packet every few milliseconds shows up as a count that grows by itself.
   void SetActiveControllers(int count) { m_ActiveControllers.store(count); }
   void ControllerSent() { m_ControllerSent.fetch_add(1); }
+  // A controller state that was not sent because it equals the one the host already has
+  void ControllerSkipped() { m_ControllerSkipped.fetch_add(1); }
+
+  // Rumble messages from the host, and the ones passed on to the interface (the rest repeated the previous value)
+  void RumbleReceived() { m_RumbleReceived.fetch_add(1); }
+  void RumblePosted() { m_RumblePosted.fetch_add(1); }
 
   // One line describing the stream; the per-window maxima are reset by every call
   std::string Snapshot(int64_t nowMs, std::size_t heapUsedBytes, std::size_t heapTotalBytes) {
@@ -178,7 +187,7 @@ class StreamHealth {
     const int64_t audioAge =
       m_HasAudio.load() ? stream_health_detail::Since(nowMs, m_LastAudioMs.load()) : -1;
 
-    char buffer[640];
+    char buffer[768];
     std::snprintf(
       buffer, sizeof(buffer),
       "video=%llu/%lldms audio=%llu/%lldms"
@@ -186,7 +195,8 @@ class StreamHealth {
       " audioAppendCalls=%llu audioAppendMaxMs=%lld audioAppendBlockedMs=%lld"
       " inputPolls=%llu inputPollMaxMs=%lld inputPollBlockedMs=%lld"
       " mainCalls=%llu mainCallMaxMs=%lld mainCallBlockedMs=%lld"
-      " controllers=%d controllerSent=%llu heap=%lluMB/%lluMB",
+      " controllers=%d controllerSent=%llu controllerSkipped=%llu"
+      " rumbleReceived=%llu rumblePosted=%llu heap=%lluMB/%lluMB",
       static_cast<unsigned long long>(m_VideoCount.load()),
       static_cast<long long>(videoAge),
       static_cast<unsigned long long>(m_AudioCount.load()),
@@ -205,6 +215,9 @@ class StreamHealth {
       static_cast<long long>(m_MainCall.BlockedMs(nowMs)),
       static_cast<int>(m_ActiveControllers.load()),
       static_cast<unsigned long long>(m_ControllerSent.load()),
+      static_cast<unsigned long long>(m_ControllerSkipped.load()),
+      static_cast<unsigned long long>(m_RumbleReceived.load()),
+      static_cast<unsigned long long>(m_RumblePosted.load()),
       static_cast<unsigned long long>(heapUsedBytes >> 20),
       static_cast<unsigned long long>(heapTotalBytes >> 20));
     return buffer;
@@ -220,6 +233,9 @@ class StreamHealth {
   std::atomic<bool> m_HasAudio{false};
   std::atomic<int32_t> m_ActiveControllers{0};
   std::atomic<uint32_t> m_ControllerSent{0};
+  std::atomic<uint32_t> m_ControllerSkipped{0};
+  std::atomic<uint32_t> m_RumbleReceived{0};
+  std::atomic<uint32_t> m_RumblePosted{0};
   BlockingSection m_VideoAppend;
   BlockingSection m_AudioAppend;
   BlockingSection m_InputPoll;

@@ -16,6 +16,7 @@
 #include <opus_multistream.h>
 
 #include "connection_lifecycle.hpp"
+#include "controller_send_filter.hpp"
 #include "gamepad_sampling.hpp"
 #include "http_queue_metrics.hpp"
 #include "lib.hpp"
