@@ -2530,7 +2530,13 @@ function showAppsMode() {
   $('body').css('backgroundColor', '#282C38');
   $('#wasm_module').css('display', 'none');
 
+  var streamWasShown = isInGame;
   isInGame = false;
+  if (streamWasShown) {
+    // The stream is over: silence the controllers and write what the rumble throttle did
+    rumbleThrottle.stopAll();
+    logDiagnostic(rumbleThrottle.describe());
+  }
   if (typeof Controller !== 'undefined' && Controller) {
     // Starting is idempotent, so this is also right when the stream view was never shown
     Controller.startWatching();
@@ -2947,6 +2953,39 @@ var startTimeline = StartTimeline.create({
   now: function() { return Date.now(); }
 });
 
+// Rumble from the host reaches a controller through this throttle: the latest value is applied at most every 50 ms,
+// a start from silence and a stop at once. The effect is the one the interface always used.
+var rumbleUnsupportedLogged = {};
+var rumbleThrottle = RumbleThrottle.create({
+  now: function() { return Date.now(); },
+  setTimeout: function(callback, delay) { return window.setTimeout(callback, delay); },
+  clearTimeout: function(timer) { window.clearTimeout(timer); },
+  play: function(gamepadIdx, weakMagnitude, strongMagnitude) {
+    const gamepads = navigator.getGamepads();
+    const gamepad = gamepads[gamepadIdx];
+    // Check if the gamepad exists and if it has a vibrationActuator associated with it
+    if (gamepad && gamepad.vibrationActuator && typeof gamepad.vibrationActuator.playEffect === 'function') {
+      return gamepad.vibrationActuator.playEffect('dual-rumble', {
+        startDelay: 0,
+        duration: 5000, // Moonlight should be sending another rumble event when stopping
+        weakMagnitude: weakMagnitude,
+        strongMagnitude: strongMagnitude,
+      });
+    }
+    if (!rumbleUnsupportedLogged[gamepadIdx]) {
+      rumbleUnsupportedLogged[gamepadIdx] = true;
+      console.warn('%c[index.js, rumble]', 'color: green;', 'Warning: Gamepad ' + gamepadIdx + ' does not support the rumble feature!');
+    }
+    return undefined;
+  }
+});
+
+// Called by the native side for every rumble change of the host. The two motors arrive as 16 bit numbers: the high
+// frequency motor is the weak one and the low frequency motor is the strong one.
+function handleRumble(controllerNumber, lowFreqMotor, highFreqMotor) {
+  rumbleThrottle.update(controllerNumber, highFreqMotor / 65535, lowFreqMotor / 65535);
+}
+
 // The connection is up: write where the time of the start went
 function finishStartTimeline() {
   startTimeline.mark('connection');
@@ -2968,6 +3007,7 @@ function initStreamWatchdog() {
       setItem: function(key, value) { window.localStorage.setItem(key, value); }
     },
     getHealth: function() { return Module.getStreamHealth(); },
+    getExtra: function() { return rumbleThrottle.describe(); },
     getMemory: function() {
       var memory = window.performance && window.performance.memory;
       if (!memory) {

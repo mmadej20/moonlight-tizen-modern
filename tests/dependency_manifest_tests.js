@@ -28,6 +28,8 @@ const expectedJavaScriptSuites = [
   'tests/pairing_cancellation_behavior_tests.js',
   'tests/pairing_ownership_wiring_tests.js',
   'tests/pairing_timeout_behavior_tests.js',
+  'tests/rumble_throttle_tests.js',
+  'tests/rumble_wiring_tests.js',
   'tests/start_responsiveness_wiring_tests.js',
   'tests/start_timeline_tests.js',
   'tests/stream_diagnostics_wiring_tests.js',

@@ -24,6 +24,7 @@
 #include "operation_latch.hpp"
 #include "owned_pthread.hpp"
 #include "request_registry.hpp"
+#include "rumble_dedupe.hpp"
 #include "stop_sequence.hpp"
 #include "stream_health.hpp"
 

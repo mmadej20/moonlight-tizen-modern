@@ -55,6 +55,16 @@
       }
     }
 
+    // A provider that fails or returns nothing adds nothing
+    function describeOptional(provider) {
+      try {
+        var value = provider();
+        return value ? String(value) : '';
+      } catch (error) {
+        return '';
+      }
+    }
+
     function snapshot(state, extra) {
       var record = {
         v: 1,
@@ -90,8 +100,10 @@
           INTERVAL_MS + ' ms). ' + record.health + ' ' + record.memory);
       }
       if ((ticks - 1) % HEALTH_LOG_EVERY_TICKS === 0) {
+        // What only JavaScript knows (for example the rumble counters) goes at the end of the line
+        var extra = options.getExtra ? describeOptional(options.getExtra) : '';
         log('StreamHealth up=' + record.upSeconds + 's ' + record.health + ' ' + record.memory +
-          ' mainJitterMaxMs=' + Math.round(windowLatenessMs));
+          ' mainJitterMaxMs=' + Math.round(windowLatenessMs) + (extra ? ' ' + extra : ''));
         windowLatenessMs = 0;
       }
       writeRecord(record);

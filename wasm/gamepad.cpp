@@ -77,6 +77,9 @@ static bool s_LoggedSamplingFailure = false;
 // What the host already knows about each controller. Only the input thread uses it while a stream runs.
 static ControllerSendFilter s_ControllerSendFilter;
 
+// The last rumble values passed on to the interface. Only the thread of the control stream uses it while a stream runs.
+static RumbleDedupe s_RumbleDedupe;
+
 // Detect controller family from Gamepad.id (PS / Xbox / Nintendo / Unknown)
 static uint8_t GetControllerType(const char* id) {
   // Guard against null or empty id strings
@@ -243,8 +246,9 @@ void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback, bool mouseE
   s_LoggedSamplingMode = false;
   s_LoggedSamplingFailure = false;
 
-  // A new connection knows no controller state yet
+  // A new connection knows no controller state yet, and nothing vibrates
   s_ControllerSendFilter.ResetAll();
+  s_RumbleDedupe.Reset();
 
   // Store the new settings for use during polling
   rumbleFeedbackSwitch = rumbleFeedback;
@@ -565,13 +569,21 @@ bool MoonlightInstance::PollGamepads() {
 
 // Function to send controller rumble feedback for gamepad
 void MoonlightInstance::ClControllerRumble(unsigned short controllerNumber, unsigned short lowFreqMotor, unsigned short highFreqMotor) {
-  const float weakMagnitude = static_cast<float>(highFreqMotor) / static_cast<float>(UINT16_MAX);
-  const float strongMagnitude = static_cast<float>(lowFreqMotor) / static_cast<float>(UINT16_MAX);
+  m_StreamHealth.RumbleReceived();
 
   // Check if the rumble feedback switch is checked
-  if (rumbleFeedbackSwitch) {
-    std::ostringstream ss;
-    ss << controllerNumber << "," << weakMagnitude << "," << strongMagnitude;
-    PostToJs(std::string("controllerRumble: ") + ss.str());
+  if (!rumbleFeedbackSwitch) {
+    return;
+  }
+
+  // The host repeats values, so only a change is passed on. The call does not wait for the interface (this is the
+  // thread of the control stream) and carries three plain numbers: the interface turns them into magnitudes.
+  if (s_RumbleDedupe.ShouldPost(controllerNumber, lowFreqMotor, highFreqMotor)) {
+    m_StreamHealth.RumblePosted();
+    MAIN_THREAD_ASYNC_EM_ASM({
+      if (typeof handleRumble === 'function') {
+        handleRumble($0, $1, $2);
+      }
+    }, controllerNumber, lowFreqMotor, highFreqMotor);
   }
 }

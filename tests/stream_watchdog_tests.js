@@ -104,6 +104,40 @@ function testMainThreadLatenessIsReportedPerHealthWindow() {
   assert(h.logs.filter((line) => line.startsWith('StreamHealth ')).pop().endsWith('mainJitterMaxMs=0'));
 }
 
+function testAnExtraDescriptionIsAppendedToTheHealthLine() {
+  // The interface adds what only JavaScript knows (the rumble counters) to the periodic line, and a provider that
+  // fails or returns nothing changes nothing.
+  const logs = [];
+  const timers = [];
+  const clock = { wall: Date.parse('2026-10-18T10:00:00.000Z'), perf: 5000 };
+  let extra = 'Rumble: received=9 played=3 coalesced=6 errors=0';
+  const watchdog = StreamWatchdog.create({
+    now: () => clock.wall,
+    perfNow: () => clock.perf,
+    setInterval: (callback) => { timers.push(callback); return timers.length; },
+    clearInterval: () => {},
+    storage: { getItem: () => null, setItem: () => {} },
+    getHealth: () => 'video=1/1ms',
+    getExtra: () => { if (extra instanceof Error) throw extra; return extra; },
+    log: (line) => logs.push(line),
+  });
+  watchdog.start({});
+  clock.wall += 1000;
+  clock.perf += 1000;
+  timers[0]();
+  assert(logs[0].endsWith('mainJitterMaxMs=0 Rumble: received=9 played=3 coalesced=6 errors=0'), logs[0]);
+
+  logs.length = 0;
+  for (let i = 0; i < 10; i += 1) { clock.wall += 1000; clock.perf += 1000; timers[0](); }
+  extra = new Error('broken');
+  clock.wall += 1000; clock.perf += 1000;
+  timers[0]();
+  extra = '';
+  for (let i = 0; i < 10; i += 1) { clock.wall += 1000; clock.perf += 1000; timers[0](); }
+  logs.forEach((line) => assert(line.endsWith('mainJitterMaxMs=0') || line.includes('Rumble: received=9'), line));
+  assert(logs.some((line) => line.endsWith('mainJitterMaxMs=0')), 'an empty or failing provider adds nothing');
+}
+
 function testCleanStopRecordsIdleAndStopsTheTimer() {
   const h = createHarness();
   h.watchdog.start({});
@@ -189,6 +223,7 @@ testHeartbeatIsStoredEverySecondWhileStreaming();
 testHealthIsLoggedEveryTenSecondsAndOnTheFirstTick();
 testMainThreadStallIsReportedWithTheHealthAtThatMoment();
 testMainThreadLatenessIsReportedPerHealthWindow();
+testAnExtraDescriptionIsAppendedToTheHealthLine();
 testCleanStopRecordsIdleAndStopsTheTimer();
 testUncleanExitIsReportedOnceAfterARestart();
 testNothingIsReportedAfterACleanStopOrOnFirstRun();
