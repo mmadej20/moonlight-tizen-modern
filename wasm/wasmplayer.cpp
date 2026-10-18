@@ -304,6 +304,14 @@ bool MoonlightInstance::WaitForMediaStage(const char* stage, OperationLatch& lat
   return false;
 }
 
+int MoonlightInstance::MediaSetupFailureCode() const {
+  // A stop requested by the user is not a video setup failure, so it keeps the generic error code
+  if (m_ConnectionCancelled.load()) {
+    return -1;
+  }
+  return ERROR_VIDEO_SETUP_FAILED;
+}
+
 int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height, int redrawRate, void* context, int drFlags) {
   MoonlightInstance* instance = g_Instance;
   if (!instance->m_Source || !instance->m_Source->IsValid()) {
@@ -329,7 +337,7 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
     return -1;
   }
   if (!instance->WaitForMediaStage("initial source close", instance->m_InitialSourceCloseLatch)) {
-    return -1;
+    return instance->MediaSetupFailureCode();
   }
 
   // The Web Audio backend renders the audio itself in platform/audio.js, so the EMSS audio
@@ -422,8 +430,9 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
       }
     );
     if (!add_track_result) {
-      ClLogMessage("Failed to add EMSS video track\n");
-      return -1;
+      // Fail now, because a track that was never added will never open
+      ClLogMessage("The TV rejected the video track (%s, %dx%d at %d FPS)\n", mimetype, width, height, redrawRate);
+      return ERROR_VIDEO_SETUP_FAILED;
     }
     instance->m_VideoTrack = std::move(*add_track_result);
     const auto videoListenerResult =
@@ -450,7 +459,7 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
     return -1;
   }
   if (!instance->WaitForMediaStage("source open", instance->m_SourceOpenLatch)) {
-    return -1;
+    return instance->MediaSetupFailureCode();
   }
 
   const auto playResult = instance->m_MediaElement.Play(
@@ -470,7 +479,7 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   if ((instance->m_AudioBackend == AudioBackend::Emss &&
        !instance->WaitForMediaStage("audio track open", instance->m_AudioTrackOpenLatch)) ||
       !instance->WaitForMediaStage("video track open", instance->m_VideoTrackOpenLatch)) {
-    return -1;
+    return instance->MediaSetupFailureCode();
   }
 
   ClLogMessage("Started\n");

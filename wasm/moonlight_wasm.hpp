@@ -1,4 +1,5 @@
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <queue>
 #include <vector>
@@ -93,6 +94,10 @@ enum class AudioBackend {
 };
 
 constexpr const char* kCanvasName = "#wasm_module";
+
+// Error code reported when the TV rejects the video stream or doesn't start it in time,
+// which usually means the TV doesn't support the selected resolution or frame rate
+#define ERROR_VIDEO_SETUP_FAILED -200
 
 class MoonlightInstance {
   public:
@@ -237,6 +242,9 @@ class MoonlightInstance {
   };
 
   bool WaitForMediaStage(const char* stage, OperationLatch& latch);
+  // Error to report when a media pipeline setup step did not complete: -1 when the user cancelled
+  // the stream, ERROR_VIDEO_SETUP_FAILED when the TV rejected the stream or never completed the step
+  int MediaSetupFailureCode() const;
 
   void OpenUrl_private(
     int callbackId, std::string url, std::string ppk, bool binaryResponse,

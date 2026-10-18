@@ -374,7 +374,7 @@ function testHostPollingResumesAroundPairing() {
   const index = read('wasm/platform/index.js');
   const addHost = extractFunction(index, 'addHostDialog');
   assert.match(addHost, /stopPollingHosts\(\);/, 'polling stops while the pairing dialog runs');
-  assert.strictEqual((addHost.match(/startPollingHosts\(\);/g) || []).length, 3,
+  assert.strictEqual((addHost.match(/startPollingHosts\(\);/g) || []).length, 4,
     'polling resumes after success and failure of both pairing flows');
 
   const pairing = extractFunction(index, 'pairingDialog');
@@ -382,7 +382,8 @@ function testHostPollingResumesAroundPairing() {
     'cancelling the pairing dialog still lets the caller recover');
 
   const endPolling = extractFunction(index, 'endBackgroundPollingOfHost');
-  assert.match(endPolling, /activePolls\.hasOwnProperty\(host\.serverUid\)/,
+  assert.match(endPolling,
+    /hasOwnProperty(?:\.call\(activePolls,\s*(?:host\.)?serverUid\)|\((?:host\.)?serverUid\))/,
     'polling that is still running its first refresh can be stopped');
 }
 

@@ -643,7 +643,7 @@ function hostChosen(host, onSuccessCallback) {
     }, function() {
       // Reset the flag to indicate that a host failed due to unsuccessful pairing
       isHostOpening = false;
-      // Start polling the host after pairing flow
+      // Resume background polling after the pairing flow
       startPollingHosts();
     });
   } else {
@@ -942,6 +942,8 @@ function addHostDialog() {
       addHostDialog.close();
       isDialogOpen = false;
       Navigation.pop();
+      // Avoid delay from other polling during pairing
+      stopPollingHosts();
       // Check if we already have record of this host. If so, we'll
       // need the PPK string to ensure our pairing status is accurate.
       if (hosts[_nvhttpHost.serverUid] != null) {
@@ -952,13 +954,20 @@ function addHostDialog() {
         // Use the host in the array directly to ensure the PPK propagates after pairing
         pairingDialog(hosts[_nvhttpHost.serverUid], function() {
           saveHosts();
+          startPollingHosts();
+        }, function() {
+          // Resume background polling after the pairing flow
+          startPollingHosts();
         });
       } else {
         pairingDialog(_nvhttpHost, function() {
-          // Host must be in the grid before starting background polling
+          // Add the host to the grid after successful pairing
           addHostToGrid(_nvhttpHost);
-          beginBackgroundPollingOfHost(_nvhttpHost);
           saveHosts();
+          startPollingHosts();
+        }, function() {
+          // Resume background polling after the pairing flow
+          startPollingHosts();
         });
       }
     }.bind(this), function(failure) {
@@ -1072,6 +1081,8 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
       isPairingInProgress = false;
       if (wasPairingCanceled) {
         console.log('%c[index.js, pairingDialog]', 'color: green;', 'Ignored pairing failure due to cancellation.');
+        // Still let the caller recover, so the host can be selected again and the hosts are polled again
+        onFailure();
         return;
       }
       console.error('%c[index.js, pairingDialog]', 'color: green;', 'Error: Failed API object:\n', nvhttpHost, '\n' + nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
@@ -1915,8 +1926,12 @@ function navigationGuideDialog() {
 
 // Fetch the latest version and release notes from GitHub API
 function fetchLatestRelease() {
+  // Check if the REPO_OWNER and REPO_NAME are set to placeholders and apply fallback values
+  const repoOwner = (REPO_OWNER === '__REPO_OWNER__') ? 'brightcraft' : REPO_OWNER;
+  const repoName = (REPO_NAME === '__REPO_NAME__') ? 'moonlight-tizen' : REPO_NAME;
+
   // GitHub API endpoint to get the latest released version
-  const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`;
+  const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
 
   // Fetch the latest release data from the GitHub API
   return fetch(apiUrl).then(response => {
@@ -4005,11 +4020,11 @@ function restoreDefaultsSettingsValues() {
   $('#bitrateSlider')[0].MaterialSlider.change(defaultBitrate);
   storeData('bitrate', defaultBitrate, null);
 
-  const defaultFramePacing = false;
+  const defaultFramePacing = true;
   document.querySelector('#framePacingBtn').MaterialSwitch.off();
   storeData('framePacing', defaultFramePacing, null);
 
-  const defaultIpAddressFieldMode = false;
+  const defaultIpAddressFieldMode = true;
   document.querySelector('#ipAddressFieldModeBtn').MaterialSwitch.off();
   storeData('ipAddressFieldMode', defaultIpAddressFieldMode, null);
 
@@ -4245,7 +4260,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored framePacing preferences.');
   getData('framePacing', function(previousValue) {
     if (previousValue.framePacing == null) {
-      document.querySelector('#framePacingBtn').MaterialSwitch.off(); // Set the default state
+      document.querySelector('#framePacingBtn').MaterialSwitch.on(); // Set the default state
     } else if (previousValue.framePacing == false) {
       document.querySelector('#framePacingBtn').MaterialSwitch.off();
     } else {
@@ -4256,7 +4271,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored ipAddressFieldMode preferences.');
   getData('ipAddressFieldMode', function(previousValue) {
     if (previousValue.ipAddressFieldMode == null) {
-      document.querySelector('#ipAddressFieldModeBtn').MaterialSwitch.off(); // Set the default state
+      document.querySelector('#ipAddressFieldModeBtn').MaterialSwitch.on(); // Set the default state
     } else if (previousValue.ipAddressFieldMode == false) {
       document.querySelector('#ipAddressFieldModeBtn').MaterialSwitch.off();
     } else {
