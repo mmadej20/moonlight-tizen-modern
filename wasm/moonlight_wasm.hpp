@@ -22,6 +22,7 @@
 #include "operation_latch.hpp"
 #include "owned_pthread.hpp"
 #include "request_registry.hpp"
+#include "stop_sequence.hpp"
 #include "stream_health.hpp"
 
 #include "samsung/wasm/elementary_media_stream_source.h"

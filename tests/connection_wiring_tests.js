@@ -32,6 +32,15 @@ assert.match(main, /m_StopThread\.Join\(\)/);
 assert.doesNotMatch(main, /pthread_create\(/);
 assert.doesNotMatch(main, /pthread_join\(/);
 assert.match(main, /m_TerminationReported\.exchange/);
+// Teardown always reports the end of the stream and returns to idle, even when a thread cannot be joined.
+assert.match(main, /RunStopSequence\(sequence\)/);
+assert.match(main, /sequence\.markIdle\s*=/);
+assert.match(main, /m_ConnectionLifecycle\.AbortStart\(\)/);
+assert.doesNotMatch(
+  main,
+  /startGuard\.Release\(\);\s*m_ConnectionLifecycle\.BeginStop\(\);/,
+  'a start that fails before creating threads must not enter the stopping state without a stop thread',
+);
 assert.doesNotMatch(
   listener,
   /ClConnectionTerminated[\s\S]*LiStopConnection\(\)/,

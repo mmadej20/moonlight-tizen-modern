@@ -129,56 +129,55 @@ void MoonlightInstance::StopConnection(int errorCode) {
 void* MoonlightInstance::StopThreadFunc(void* context) {
   MoonlightInstance* me = static_cast<MoonlightInstance*>(context);
 
+  StopSequence sequence;
   // We must join the connection thread first, because LiStopConnection must
   // not be invoked during LiStartConnection.
-  int result = me->m_ConnectionThread.Join();
-  if (result != 0) {
-    ClLogMessage("Failed to join the connection thread: %d\n", result);
-    PostToJs(
-      "DialogMsg: Connection teardown could not join the connection thread "
-      "(error " + std::to_string(result) + ")");
-    return nullptr;
-  }
+  sequence.joinConnectionThread = [me] { return me->m_ConnectionThread.Join(); };
+  sequence.releaseRemoteInputs = [me] {
+    // Force raise all modifier keys to avoid leaving them down after disconnecting
+    LiSendKeyboardEvent(0xA0, KEY_ACTION_UP, 0);
+    LiSendKeyboardEvent(0xA1, KEY_ACTION_UP, 0);
+    LiSendKeyboardEvent(0xA2, KEY_ACTION_UP, 0);
+    LiSendKeyboardEvent(0xA3, KEY_ACTION_UP, 0);
+    LiSendKeyboardEvent(0xA4, KEY_ACTION_UP, 0);
+    LiSendKeyboardEvent(0xA5, KEY_ACTION_UP, 0);
 
-  // Force raise all modifier keys to avoid leaving them down after disconnecting
-  LiSendKeyboardEvent(0xA0, KEY_ACTION_UP, 0);
-  LiSendKeyboardEvent(0xA1, KEY_ACTION_UP, 0);
-  LiSendKeyboardEvent(0xA2, KEY_ACTION_UP, 0);
-  LiSendKeyboardEvent(0xA3, KEY_ACTION_UP, 0);
-  LiSendKeyboardEvent(0xA4, KEY_ACTION_UP, 0);
-  LiSendKeyboardEvent(0xA5, KEY_ACTION_UP, 0);
-
-  // Not running anymore
-  me->m_Running.store(false);
-
+    // Not running anymore
+    me->m_Running.store(false);
+  };
   // We also need to stop this thread after the connection thread, because it
   // depends on being initialized there.
-  result = me->m_InputThread.Join();
-  if (result != 0) {
-    ClLogMessage("Failed to join the input thread: %d\n", result);
+  sequence.joinInputThread = [me] { return me->m_InputThread.Join(); };
+  sequence.stopConnection = [] { LiStopConnection(); };
+  sequence.closeMediaSource = [me] {
+    const OperationOutcome closeOutcome = me->CloseMediaSource();
+    if (closeOutcome == OperationOutcome::Timeout) {
+      ClLogMessage("EMSS close timed out\n");
+    } else if (closeOutcome == OperationOutcome::Failure) {
+      ClLogMessage("EMSS close failed\n");
+    }
+  };
+  sequence.onJoinFailure = [me](const char* thread, int result) {
+    // The stream still ends, so report why instead of the graceful code
+    int expected = 0;
+    me->m_StopErrorCode.compare_exchange_strong(expected, result);
+    ClLogMessage("Failed to join the %s thread: %d\n", thread, result);
     PostToJs(
-      "DialogMsg: Connection teardown could not join the input thread "
-      "(error " + std::to_string(result) + ")");
-    return nullptr;
-  }
+      std::string("DialogMsg: Connection teardown could not join the ") + thread +
+      " thread (error " + std::to_string(result) + ")");
+  };
+  sequence.notifyStopped = [me] {
+    const int stopErrorCode = me->m_StopErrorCode.load();
+    emscripten_sync_run_in_main_runtime_thread(
+      EM_FUNC_SIG_VI, onConnectionStopped, stopErrorCode);
+  };
+  sequence.markIdle = [me] {
+    if (!me->m_ConnectionLifecycle.MarkIdle()) {
+      ClLogMessage("Connection lifecycle failed to transition to idle\n");
+    }
+  };
 
-  // Stop the connection
-  LiStopConnection();
-
-  const OperationOutcome closeOutcome = me->CloseMediaSource();
-  if (closeOutcome == OperationOutcome::Timeout) {
-    ClLogMessage("EMSS close timed out\n");
-  } else if (closeOutcome == OperationOutcome::Failure) {
-    ClLogMessage("EMSS close failed\n");
-  }
-
-  const int stopErrorCode = me->m_StopErrorCode.load();
-  emscripten_sync_run_in_main_runtime_thread(
-    EM_FUNC_SIG_VI, onConnectionStopped, stopErrorCode);
-  if (!me->m_ConnectionLifecycle.MarkIdle()) {
-    ClLogMessage("Connection lifecycle failed to transition to idle\n");
-  }
-
+  RunStopSequence(sequence);
   return nullptr;
 }
 
@@ -354,8 +353,9 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   const int stopThreadJoinResult = m_StopThread.Join();
   if (stopThreadJoinResult != 0) {
     ClLogMessage("Failed to join the stop thread: %d\n", stopThreadJoinResult);
+    // Nothing was created yet, so give the start slot back instead of leaving the lifecycle stuck
     startGuard.Release();
-    m_ConnectionLifecycle.BeginStop();
+    m_ConnectionLifecycle.AbortStart();
     return MessageResult::Reject(emscripten::val(stopThreadJoinResult));
   }
 

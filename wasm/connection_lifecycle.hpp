@@ -74,6 +74,12 @@ class ConnectionLifecycle {
     return false;
   }
 
+  // A start failed before any thread or media source was created, so the slot goes back to idle
+  bool AbortStart() {
+    ConnectionState expected = ConnectionState::Starting;
+    return state_.compare_exchange_strong(expected, ConnectionState::Idle);
+  }
+
   bool MarkIdle() {
     ConnectionState expected = ConnectionState::Stopping;
     return state_.compare_exchange_strong(expected, ConnectionState::Idle);

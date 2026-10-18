@@ -86,6 +86,22 @@ int main() {
   assert(stopOrder.load() == 2);
   assert(guardedStartup.state() == ConnectionState::Stopping);
 
+  // A start that fails before anything was created must give the slot back, otherwise every later
+  // start is refused as a wrong state until the application is restarted.
+  ConnectionLifecycle abortedStart;
+  assert(!abortedStart.AbortStart());
+  assert(abortedStart.state() == ConnectionState::Idle);
+  assert(abortedStart.TryStart());
+  assert(abortedStart.AbortStart());
+  assert(abortedStart.state() == ConnectionState::Idle);
+  assert(abortedStart.TryStart());
+  assert(abortedStart.MarkRunning());
+  assert(!abortedStart.AbortStart());
+  assert(abortedStart.state() == ConnectionState::Running);
+  assert(abortedStart.BeginStop());
+  assert(!abortedStart.AbortStart());
+  assert(abortedStart.state() == ConnectionState::Stopping);
+
   ConnectionLifecycle competingStops;
   assert(competingStops.TryStart());
   assert(competingStops.MarkRunning());
