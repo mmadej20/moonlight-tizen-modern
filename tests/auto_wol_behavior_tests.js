@@ -51,7 +51,7 @@ function testAutoWakeOnLanIsHostScopedAndCancellationSafe() {
     'late Wake-on-LAN scans and polls must be ignored after cancellation');
   assert.match(index, /var errorMessage = '';/,
     'the failure message must remain available to the dialog close handler');
-  assert.match(index, /autoWolDialog\(host,[\s\S]*?\n\s*return;\n\s*}/,
+  assert.match(index, /autoWolDialog\(host,[\s\S]*?\r?\n\s*return;\r?\n\s*}/,
     'opening Auto WOL must not also show the ordinary offline-host failure path');
 }
 
