@@ -64,7 +64,9 @@ Send the whole log. A stream that ended in an orderly way is recorded as such an
 | `inputPoll*` | One poll of the controllers by the input thread: a single synchronous call to the main thread, every 5 ms while a controller is in use and every 25 ms while none is (`inputPolls` therefore grows by about 200 or 40 per second). A long `inputPollMaxMs` or a growing `inputPollBlockedMs` means the main thread is not answering. |
 | `mainCall*` | Worker threads waiting for the main thread through synchronous messages to the interface. |
 | `controllers=<n>` | Controllers in use at the last poll. |
-| `controllerSent=<n>` | Controller states sent to the host since the stream started. Compare it with the elapsed time: an idle controller that still makes this number grow by itself is sending states nobody needs. |
+| `controllerSent=<n>` | Controller states sent to the host since the stream started. A state is sent when it differs from the previous one, plus a reminder every 100 ms, so an idle controller adds about 10 per second (it used to add about 110). |
+| `controllerSkipped=<n>` | Controller states that were not sent because they equal the one the host already has. |
+| `rumbleReceived=<n>` / `rumblePosted=<n>` | Rumble messages from the host, and the ones passed on to the interface. The rest repeated the previous values of the controller. |
 | `mainJitterMaxMs=<n>` | Added by the interface at the end of the line: the worst lateness of the one second heartbeat timer in the last 10 s. It is how long the main thread was busy, for example in a garbage collection, even when nothing stalled for seconds. |
 | `heap=<used>/<total>MB` | The wasm heap, which has a fixed size. Close to the total means the stream may be running out of memory. |
 
@@ -90,6 +92,9 @@ These lines are written by the interface (they start with `[js <time>]`) or by t
 | `Box art: <n> requested in <t> ms: cached=<c> downloaded=<d> failed=<f> dropped=<x>; downloads avg <a> ms max <m> ms, waited for a slot avg <w> ms max <wm> ms` | One line per app list, when every picture has settled. `dropped` pictures belonged to a list that was left (or a stream started) before their turn. A large `waited for a slot` with small `downloads` means the queue, not the host, is slow. |
 | `Subnet scan skipped: every known host is online` / `Subnet scan started (...)` / `Subnet scan finished in <n> ms` | The sweep of the local network (254 probes) now only runs when there is no known host or one of them does not answer. |
 | `UI gamepad watching paused for the stream (polls=<n> events=<m> since the app started)` / `... resumed after the stream` | The interface stops polling the controllers during a stream; the native input thread does it. |
+| `Rumble: received=<n> played=<m> coalesced=<k> errors=<e>` | Added to the periodic `StreamHealth` line and written once when the stream ends. `received` is what reached the interface, `played` is how many effects were started on the controller (at most one every 50 ms per controller), `coalesced` is what was merged into a later value or ignored because it changed by less than 2%, `errors` is failures of the platform call. |
+| `HTTP request <path> timing: dns <a> ms, connect <b> ms, tls <c> ms, host <d> ms, transfer <e> ms, total <t> ms (result <r>)` | Written for every request that took a second or more (the path only). `tls` is the handshake that this device does in software (it is missing for plain HTTP), `host` is the wait for the host to start answering. It says whether a slow start is the TV or the host. |
+| `Build optimization: -O2` | The optimization level the module was built with (-O2 or -Os), written at every stream start so that two exported logs can be compared. |
 | `Gamepad sampling: one call to the main thread per poll` | The controllers are read with one synchronous call per poll. The other text, `one call to the main thread per slot (the bulk call is not available)`, means the old way is used. `the browser failed to read the controllers` means the browser threw and the poll was skipped. |
 
 ## Audio diagnostic telemetry
