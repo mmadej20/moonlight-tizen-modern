@@ -494,6 +494,7 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
 
   if (decodeOutcome.outcome == AudioPacketOutcome::Appended) {
     s_AudioSyncController.CommitAppend(ntp.count(), s_frameDuration.count());
+    g_Instance->m_StreamHealth.AudioSubmitted(StreamHealth::NowMs());
   }
 
   const auto callbackEnd = std::chrono::steady_clock::now();

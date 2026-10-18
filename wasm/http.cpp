@@ -180,6 +180,35 @@ void MoonlightInstance::OpenUrl_private(
   m_HttpRequests.Remove(callbackId);
 }
 
+bool MoonlightInstance::PostHttpJob(std::string label, std::function<void()> job) {
+  const auto queuedAt = std::chrono::steady_clock::now();
+  const int queued = m_HttpQueueMetrics.Enqueued();
+  const bool posted = m_Dispatcher.post_job(
+    [this, label, queuedAt, queued, job]() {
+      const auto startedAt = std::chrono::steady_clock::now();
+      const int stillWaiting = m_HttpQueueMetrics.Started();
+      const auto waited =
+        std::chrono::duration_cast<std::chrono::milliseconds>(startedAt - queuedAt);
+      if (HttpQueueMetrics::ShouldLogWait(waited)) {
+        ClLogMessage("HTTP request %s waited %lld ms in the queue (%d queued with it, %d still waiting)\n",
+                     label.c_str(), static_cast<long long>(waited.count()), queued, stillWaiting);
+      }
+
+      job();
+
+      const auto ran = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - startedAt);
+      if (HttpQueueMetrics::ShouldLogSlow(ran)) {
+        ClLogMessage("HTTP request %s ran for %lld ms\n", label.c_str(), static_cast<long long>(ran.count()));
+      }
+    },
+    false);
+  if (!posted) {
+    m_HttpQueueMetrics.Started();
+  }
+  return posted;
+}
+
 void MoonlightInstance::OpenUrl(int callbackId, std::string url,
                                 std::string ppk, bool binaryResponse,
                                 int timeoutMs) {
@@ -189,11 +218,11 @@ void MoonlightInstance::OpenUrl(int callbackId, std::string url,
     return;
   }
 
-  if (!m_Dispatcher.post_job(
+  if (!PostHttpJob(
+        HttpUrlPathForLog(url),
         [this, callbackId, url, ppk, binaryResponse, requestContext]() {
           OpenUrl_private(callbackId, url, ppk, binaryResponse, requestContext);
-        },
-        false)) {
+        })) {
     m_HttpRequests.Remove(callbackId);
     PostPromiseMessage(
       callbackId, "reject", "Request dispatcher is unavailable.");

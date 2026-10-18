@@ -51,6 +51,19 @@ const PREVIOUS = 'wgt-private/moonlight-diagnostics-previous.log';
   assert((await storage.read(CURRENT)).includes('Network dropped 1 frame'));
   assert.strictEqual(manager.pending, '');
 
+  // Events detected by JavaScript share the log, tagged with the wall clock because they have no stream clock
+  await manager.appendLine('main thread stalled for 4200 ms', new Date('2026-10-18T10:00:00.000Z'));
+  assert((await storage.read(CURRENT)).includes(
+    '[js 2026-10-18T10:00:00.000Z] main thread stalled for 4200 ms\n'));
+  await manager.appendLine('first line\n\n', new Date('2026-10-18T10:00:01.000Z'));
+  const afterTrailingNewlines = await storage.read(CURRENT);
+  assert(afterTrailingNewlines.endsWith('[js 2026-10-18T10:00:01.000Z] first line\n'));
+  assert(!afterTrailingNewlines.endsWith('\n\n'), 'trailing newlines must not be doubled');
+  await manager.appendLine('credentials rikey=TOPSECRET', new Date('2026-10-18T10:00:02.000Z'));
+  const afterSecret = await storage.read(CURRENT);
+  assert(!afterSecret.includes('TOPSECRET'), 'JavaScript lines are redacted like native lines');
+  assert(afterSecret.includes('[REDACTED]'));
+
   manager.selectSession('previous');
   assert.strictEqual(manager.selectedPath(), PREVIOUS);
   manager.selectSession('current');

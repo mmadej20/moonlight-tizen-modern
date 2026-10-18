@@ -25,11 +25,14 @@ if (nativeLogCalls.some((call) => /\brikey(?:id)?\b/.test(call))) {
 
 assert.deepStrictEqual(secretLogViolations, []);
 assert.ok(
-  (mainSource.match(/if\s*\(!m_Dispatcher\.post_job\(/g) || []).length >= 2,
+  (mainSource.match(/if\s*\(!(?:m_Dispatcher\.post_job|PostHttpJob)\(/g) || []).length >= 2,
   'STUN and pairing requests must reject when dispatcher submissions close',
 );
 assert.match(mainSource, /Request dispatcher is unavailable\./);
-assert.match(httpSource, /if\s*\(!m_Dispatcher\.post_job\(/);
+assert.match(httpSource, /if\s*\(!PostHttpJob\(/);
+assert.match(httpSource, /const bool posted = m_Dispatcher\.post_job\(/,
+  'the shared helper must hand a closed dispatcher back to the caller, which rejects the promise');
+assert.match(httpSource, /return posted;/);
 assert.match(httpSource, /m_HttpRequests\.Remove\(callbackId\);/);
 
 const cancelledIds = [];

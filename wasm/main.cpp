@@ -360,6 +360,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   }
 
   m_ConnectionCancelled.store(false);
+  m_StreamHealth.Reset(StreamHealth::NowMs());
   m_WebAudioGeneration = EM_ASM_INT({
     return typeof _audGeneration === 'number' ? _audGeneration : 0;
   });
@@ -578,6 +579,13 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   return MessageResult::Resolve();
 }
 
+std::string MoonlightInstance::GetStreamHealth() {
+  return m_StreamHealth.Snapshot(
+    StreamHealth::NowMs(),
+    reinterpret_cast<std::size_t>(sbrk(0)),
+    emscripten_get_heap_size());
+}
+
 MessageResult MoonlightInstance::StopStream() {
   // Begin connection teardown
   StopConnection(0);
@@ -640,13 +648,13 @@ void MoonlightInstance::Pair(int callbackId, std::string serverMajorVersion, std
     return;
   }
 
-  if (!m_Dispatcher.post_job(
+  if (!PostHttpJob(
+        "pair",
         [this, callbackId, serverMajorVersion, address, httpPort, randomNumber,
          requestContext]() {
           Pair_private(callbackId, serverMajorVersion, address, httpPort,
                        randomNumber, requestContext);
-        },
-        false)) {
+        })) {
     m_HttpRequests.Remove(callbackId);
     PostPromiseMessage(
       callbackId, "reject", "Request dispatcher is unavailable.");
@@ -837,7 +845,42 @@ void wakeOnLan(int callbackId, std::string macAddress) {
   g_Instance->WakeOnLan(callbackId, macAddress);
 }
 
+namespace {
+
+// Records how long a worker thread waits for the main thread. The main thread itself is skipped,
+// because it never waits for anyone here.
+class MainThreadCallScope {
+ public:
+  MainThreadCallScope()
+      : m_Active(g_Instance != nullptr && !emscripten_is_main_runtime_thread()) {
+    if (m_Active) {
+      m_StartMs = StreamHealth::NowMs();
+      g_Instance->Health().MainCallBegin(m_StartMs);
+    }
+  }
+
+  ~MainThreadCallScope() {
+    if (m_Active) {
+      g_Instance->Health().MainCallEnd(m_StartMs, StreamHealth::NowMs());
+    }
+  }
+
+  MainThreadCallScope(const MainThreadCallScope&) = delete;
+  MainThreadCallScope& operator=(const MainThreadCallScope&) = delete;
+
+ private:
+  bool m_Active;
+  int64_t m_StartMs{0};
+};
+
+}  // namespace
+
+std::string getStreamHealth() {
+  return g_Instance->GetStreamHealth();
+}
+
 void PostToJs(std::string msg) {
+  MainThreadCallScope waiting;
   MAIN_THREAD_EM_ASM({
     const msg = UTF8ToString($0);
     handleMessage(msg);
@@ -852,6 +895,7 @@ void PostToJsAsync(std::string msg) {
 }
 
 void PostPromiseMessage(int callbackId, const std::string& type, const std::string& response) {
+  MainThreadCallScope waiting;
   MAIN_THREAD_EM_ASM({
     const type = UTF8ToString($1);
     const response = UTF8ToString($2);
@@ -860,6 +904,7 @@ void PostPromiseMessage(int callbackId, const std::string& type, const std::stri
 }
 
 void PostPromiseMessage(int callbackId, const std::string& type, const std::vector<uint8_t>& response) {
+  MainThreadCallScope waiting;
   MAIN_THREAD_EM_ASM({
     const type = UTF8ToString($1);
     const response = HEAPU8.slice($2, $2 + $3);
@@ -874,6 +919,7 @@ EMSCRIPTEN_BINDINGS(handle_message) {
   emscripten::function("cancelRequest", &cancelRequest);
   emscripten::function("toggleStats", &toggleStats);
   emscripten::function("drainDiagnosticLogs", &DrainDiagnosticLogs);
+  emscripten::function("getStreamHealth", &getStreamHealth);
   emscripten::function("stun", &stun);
   emscripten::function("pair", &pair);
   emscripten::function("wakeOnLan", &wakeOnLan);

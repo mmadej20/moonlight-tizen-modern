@@ -766,6 +766,7 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   if (pacingCommitOutcome == PacingCommitOutcome::Cancelled) {
     return DR_OK;
   }
+  g_Instance->m_StreamHealth.VideoSubmitted(StreamHealth::NowMs());
 
   const uint64_t nowMs = LiGetMillis();
   const uint64_t windowDurationMs = nowMs - m_ActiveWndVideoStats.measurementStartTimestamp;

@@ -100,6 +100,7 @@ function attachListeners() {
   initIpAddressFields();
   filterUnsupportedResolutions();
   DiagnosticLogs.init();
+  initStreamWatchdog();
 
   $('#addHostContainer').on('click', addHostDialog);
   $('#settingsBtn').on('click', showSettings);
@@ -2526,6 +2527,7 @@ function showAppsMode() {
   $('#wasm_module').css('display', 'none');
 
   isInGame = false;
+  stopStreamWatchdog('returned to the apps view');
   // We want to eventually poll on the app screen, but we can't now because
   // it slows down box art loading and we don't update the UI live anyway.
   stopPollingHosts();
@@ -2905,6 +2907,40 @@ function quitAppDialog() {
   }
 }
 
+var streamWatchdog = null; // Records a heartbeat while streaming, so that a frozen application leaves evidence behind
+
+// Creates the stream watchdog and reports when the previous run ended while streaming
+function initStreamWatchdog() {
+  streamWatchdog = StreamWatchdog.create({
+    now: function() { return Date.now(); },
+    perfNow: function() { return performance.now(); },
+    setInterval: function(callback, delay) { return window.setInterval(callback, delay); },
+    clearInterval: function(timer) { window.clearInterval(timer); },
+    storage: {
+      getItem: function(key) { return window.localStorage.getItem(key); },
+      setItem: function(key, value) { window.localStorage.setItem(key, value); }
+    },
+    getHealth: function() { return Module.getStreamHealth(); },
+    getMemory: function() {
+      var memory = window.performance && window.performance.memory;
+      if (!memory) {
+        return 'jsHeap=unavailable';
+      }
+      return 'jsHeap=' + Math.round(memory.usedJSHeapSize / 1048576) + 'MB/' +
+        Math.round(memory.totalJSHeapSize / 1048576) + 'MB';
+    },
+    log: function(line) { DiagnosticLogs.appendLine(line); }
+  });
+  streamWatchdog.reportUncleanExit();
+}
+
+// Records that the stream ended in an orderly way
+function stopStreamWatchdog(reason) {
+  if (streamWatchdog) {
+    streamWatchdog.stop(reason);
+  }
+}
+
 // Handle layout elements when displaying the Stream view
 function showStreamMode() {
   console.log('%c[index.js, showStreamMode]', 'color: green;', 'Entering "Show Stream" mode.');
@@ -2915,6 +2951,9 @@ function showStreamMode() {
   $('#loadingSpinner').css('display', 'inline-block');
 
   isInGame = true;
+  if (streamWatchdog) {
+    streamWatchdog.start();
+  }
   fullscreenWasmModule();
   handleOnScreenOverlays();
   Navigation.stop();

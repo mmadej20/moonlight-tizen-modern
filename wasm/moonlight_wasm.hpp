@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <queue>
 #include <vector>
@@ -15,11 +16,13 @@
 #include <opus_multistream.h>
 
 #include "connection_lifecycle.hpp"
+#include "http_queue_metrics.hpp"
 #include "lib.hpp"
 #include "media_operation_epoch.hpp"
 #include "operation_latch.hpp"
 #include "owned_pthread.hpp"
 #include "request_registry.hpp"
+#include "stream_health.hpp"
 
 #include "samsung/wasm/elementary_media_stream_source.h"
 #include "samsung/wasm/elementary_media_stream_source_listener.h"
@@ -174,6 +177,10 @@ class MoonlightInstance {
   static void FormatVideoStats(VIDEO_STATS& stats, char* output, int length);
   void TogglePerformanceStats();
 
+  // One line with the stream counters, see stream_health.hpp
+  std::string GetStreamHealth();
+  StreamHealth& Health() { return m_StreamHealth; }
+
   static int AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int arFlags);
   static void AudDecCleanup(void);
   static void AudDecDecodeAndPlaySample(char* sampleData, int sampleLength);
@@ -246,6 +253,10 @@ class MoonlightInstance {
   // the stream, ERROR_VIDEO_SETUP_FAILED when the TV rejected the stream or never completed the step
   int MediaSetupFailureCode() const;
 
+  // Posts a request to the shared HTTP dispatcher thread. The label (a URL path or a request kind)
+  // is only used to log requests that waited long in the queue or ran for long.
+  bool PostHttpJob(std::string label, std::function<void()> job);
+
   void OpenUrl_private(
     int callbackId, std::string url, std::string ppk, bool binaryResponse,
     std::shared_ptr<HTTP_REQUEST_CONTEXT> requestContext);
@@ -316,6 +327,8 @@ class MoonlightInstance {
 
   Dispatcher m_Dispatcher;
   HttpRequestRegistry m_HttpRequests;
+  HttpQueueMetrics m_HttpQueueMetrics;
+  StreamHealth m_StreamHealth;
 
   std::mutex m_Mutex;
   EmssReadyState m_EmssReadyState;

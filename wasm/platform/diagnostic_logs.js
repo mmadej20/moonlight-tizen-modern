@@ -268,6 +268,15 @@
     });
   };
 
+  // Adds a line that was detected by JavaScript. Native lines carry the stream clock, which does not
+  // exist for events such as a stalled main thread or a previous run that ended unexpectedly.
+  DiagnosticLogManager.prototype.appendLine = function(text, when) {
+    var stamp = (when instanceof Date ? when : new Date()).toISOString();
+    var line = '[js ' + stamp + '] ' + String(text == null ? '' : text).replace(/[\r\n]+$/, '') + '\n';
+    this.pending = trimDiagnosticLog(this.pending + redactDiagnosticText(line), PENDING_LIMIT_BYTES);
+    return this.persistPending();
+  };
+
   DiagnosticLogManager.prototype.selectedPath = function() {
     return this.selectedSession === 'previous' ? PREVIOUS_FILE : CURRENT_FILE;
   };
