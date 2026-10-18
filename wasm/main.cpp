@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <optional>
 #include <errors.h>
 #include <pairing.h>
 #include <iostream>
@@ -225,8 +226,13 @@ void* MoonlightInstance::InputThreadFunc(void* context) {
   MoonlightInstance* me = static_cast<MoonlightInstance*>(context);
 
   while (me->m_Running.load()) {
-    me->PollGamepads();
-    me->ReportMouseMovement();
+    {
+      // Polling asks the main thread for the gamepad state, so the time of one round also
+      // measures how responsive the main thread is
+      ScopedSection pollSection(me->m_StreamHealth.InputPoll());
+      me->PollGamepads();
+      me->ReportMouseMovement();
+    }
 
     // Poll every 5 ms
     usleep(5 * 1000);
@@ -583,7 +589,8 @@ std::string MoonlightInstance::GetStreamHealth() {
   return m_StreamHealth.Snapshot(
     StreamHealth::NowMs(),
     reinterpret_cast<std::size_t>(sbrk(0)),
-    emscripten_get_heap_size());
+    // This Emscripten has no emscripten_get_heap_size(); the heap has a fixed size, read it from JavaScript
+    static_cast<std::size_t>(EM_ASM_INT({ return HEAP8.length; })));
 }
 
 MessageResult MoonlightInstance::StopStream() {
@@ -851,17 +858,9 @@ namespace {
 // because it never waits for anyone here.
 class MainThreadCallScope {
  public:
-  MainThreadCallScope()
-      : m_Active(g_Instance != nullptr && !emscripten_is_main_runtime_thread()) {
-    if (m_Active) {
-      m_StartMs = StreamHealth::NowMs();
-      g_Instance->Health().MainCallBegin(m_StartMs);
-    }
-  }
-
-  ~MainThreadCallScope() {
-    if (m_Active) {
-      g_Instance->Health().MainCallEnd(m_StartMs, StreamHealth::NowMs());
+  MainThreadCallScope() {
+    if (g_Instance != nullptr && !emscripten_is_main_runtime_thread()) {
+      m_Section.emplace(g_Instance->Health().MainCall());
     }
   }
 
@@ -869,8 +868,7 @@ class MainThreadCallScope {
   MainThreadCallScope& operator=(const MainThreadCallScope&) = delete;
 
  private:
-  bool m_Active;
-  int64_t m_StartMs{0};
+  std::optional<ScopedSection> m_Section;
 };
 
 }  // namespace

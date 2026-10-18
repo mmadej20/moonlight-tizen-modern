@@ -81,7 +81,53 @@ stronie `streamTerminated`, ścieżka błędu `showApps` (zawsze wywołuje `show
 4. Natywny licznik żywotności wątków wideo i audio (log tylko przy anomalii), by odróżnić zatrzymanie renderera od
    zatrzymania transportu.
 
-## 5. Pytania do użytkownika
+## 5. Odpowiedzi użytkownika i zmiana oceny
+
+Odpowiedzi użytkownika po pierwszej wersji tej analizy:
+
+- Co widać: zamrożony obraz, po chwili urwany dźwięk, brak reakcji na kontroler i brak możliwości powrotu do menu.
+  Aplikację trzeba zamknąć przytrzymaniem Back na pilocie TV.
+- Kiedy: po pierwszych minutach streamu.
+- Jak często: prawie zawsze przy pierwszym streamie danego dnia, potem działa bez problemu.
+- Sieć i profil: Wi-Fi, profil 5.5.
+
+Co z tego wynika:
+
+- To **nie jest zawieszenie na starcie**, więc kolejka okładek (punkt 3A) może być tylko czynnikiem pobocznym.
+- Obraz zamarza od razu, a dźwięk urywa się dopiero po chwili, bo bufor audio w TV się opróżnia. To sygnatura
+  **jednoczesnego zatrzymania wszystkiego, co dotyka wątku głównego lub potoku mediów**, a nie samej sieci.
+- Utrata sieci kończy się w logach rozłączeniem ENet po ok. 8 s i powrotem do listy aplikacji. Tutaj nic takiego nie
+  następuje, a lokalne wyjścia ze streamu (czerwony przycisk pilota i kombinacja na padzie) też nie działają.
+  To wskazuje na zamrożony wątek główny albo cały proces, a nie na zerwane Wi-Fi.
+- Korelacja z pierwszym streamem dnia: TV po rozruchu wykonuje w tle własne zadania (pamięć, CPU, Wi-Fi), a
+  aplikacja raz na dobę sprawdza aktualizacje (`checkForAppUpdatesAtStartup`). Nie ma dowodu, że któreś z nich jest
+  przyczyną. Dlatego zamiast kolejnych hipotez dodano narzędzia, które to rozstrzygną.
+
+## 6. Co wdrożono (2026-10-18)
+
+1. **Strażnik strumienia**: tętno zapisywane co sekundę, raport „poprzednie uruchomienie skończyło się podczas
+   streamu" przy kolejnym starcie, wykrywanie przestojów wątku głównego.
+2. **Zdrowie streamu** po stronie natywnej: liczniki pakietów wideo i audio, czas wywołań `AppendPacket`, czas rundy
+   wątku wejścia (sonda responsywności wątku głównego), czas oczekiwania wątków roboczych na wątek główny, rozmiar sterty.
+3. **Log kolejki HTTP**: żądania czekające w kolejce co najmniej 1 s lub trwające co najmniej 3 s (tylko ścieżka URL).
+4. **Okładki**: najwyżej 2 pobierania naraz, porzucanie przestarzałych, anulowanie przy wejściu do streamu, natychmiastowa
+   informacja „Starting …" po wciśnięciu aplikacji.
+5. **Odporność cyklu życia**: zatrzymanie zawsze powiadamia interfejs i wraca do stanu bezczynności; nieudany start oddaje
+   miejsce przez `AbortStart`.
+
+Jak odczytać wynik po następnym zawieszeniu: sekcja „Diagnosing a freeze" w `docs/diagnostic-logs.md`.
+
+## 7. Pozostałe hipotezy do rozstrzygnięcia po zebraniu danych
+
+- Zablokowane wywołanie platformowego `AppendPacket` (potok mediów Samsunga): pokaże to `videoAppendBlockedMs`.
+- Zablokowany lub zagłodzony wątek główny (pytania o gamepad są synchronicznie przekazywane do wątku głównego ok. 200
+  razy na sekundę): pokaże to `inputPollMaxMs` i `inputPollBlockedMs`.
+- Wyczerpanie sztywnej sterty 128 MB: pokaże to `heap`.
+- Zabicie lub zamrożenie całej aplikacji przez TV: wszystkie liczniki zatrzymają się razem z tętnem.
+- Jeśli wątek główny okaże się winny, kolejny krok to wyprowadzenie z wątków roboczych synchronicznych wywołań
+  `PostToJs` i zapytań o gamepad.
+
+## 8. Pytania (pierwotne, już odpowiedziane powyżej)
 
 - Co dokładnie widać: zamrożony obraz z działającym dźwiękiem, czarny ekran ze spinnerem, nieruchoma lista aplikacji, brak reakcji pilota?
 - Kiedy: zaraz po wciśnięciu aplikacji, w pierwszych minutach streamu, czy po wielu minutach?

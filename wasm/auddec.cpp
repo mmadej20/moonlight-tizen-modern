@@ -197,7 +197,10 @@ static DecodeAppendResult DecodeAndAppendPacket(
 
   // Attempt to append the packet to the audio track for rendering
   const auto appendStart = std::chrono::steady_clock::now();
-  const auto appendResult = track->AppendPacket(pkt);
+  const auto appendResult = [&] {
+    ScopedSection appendSection(g_Instance->Health().AudioAppend());
+    return track->AppendPacket(pkt);
+  }();
   const auto appendEnd = std::chrono::steady_clock::now();
   const auto appendUs = ElapsedUs(appendStart, appendEnd);
   const auto appendResultCode =

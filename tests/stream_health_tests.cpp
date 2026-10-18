@@ -3,48 +3,87 @@
 #include <cassert>
 #include <string>
 
+namespace {
+
+constexpr std::size_t MB = 1u << 20;
+
+bool Contains(const std::string& text, const std::string& part) {
+  return text.find(part) != std::string::npos;
+}
+
+}  // namespace
+
 int main() {
   StreamHealth health;
 
   // Before any media arrives, ages are reported as -1 so a stalled start is distinguishable from a stall mid-stream.
   health.Reset(1000);
-  assert(health.Snapshot(1500, 64u << 20, 128u << 20) ==
-         "video=0/-1ms audio=0/-1ms mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 heap=64MB/128MB");
+  assert(health.Snapshot(1500, 64 * MB, 128 * MB) ==
+         "video=0/-1ms audio=0/-1ms"
+         " videoAppendCalls=0 videoAppendMaxMs=0 videoAppendBlockedMs=0"
+         " audioAppendCalls=0 audioAppendMaxMs=0 audioAppendBlockedMs=0"
+         " inputPolls=0 inputPollMaxMs=0 inputPollBlockedMs=0"
+         " mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 heap=64MB/128MB");
 
   // Ages are measured from the last submitted packet, counts keep growing.
   health.VideoSubmitted(2000);
   health.VideoSubmitted(2016);
   health.AudioSubmitted(2005);
-  assert(health.Snapshot(2100, 70u << 20, 128u << 20) ==
-         "video=2/84ms audio=1/95ms mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 heap=70MB/128MB");
+  const std::string packets = health.Snapshot(2100, 70 * MB, 128 * MB);
+  assert(Contains(packets, "video=2/84ms audio=1/95ms"));
+  assert(Contains(packets, "heap=70MB/128MB"));
 
-  // A worker thread that waits for the main thread is visible while the call is in flight.
-  health.MainCallBegin(3000);
-  assert(health.Snapshot(3400, 70u << 20, 128u << 20).find("mainCallBlockedMs=400") != std::string::npos);
-  health.MainCallEnd(3000, 3450);
-  std::string afterCall = health.Snapshot(3500, 70u << 20, 128u << 20);
-  assert(afterCall.find("mainCalls=1") != std::string::npos);
-  assert(afterCall.find("mainCallMaxMs=450") != std::string::npos);
-  assert(afterCall.find("mainCallBlockedMs=0") != std::string::npos);
+  // A section that is entered and not left shows how long its thread has been stuck. This is what tells a
+  // wedged platform call (an append that never returns) from a stalled main thread (a poll that never returns).
+  health.VideoAppend().Begin(3000);
+  assert(Contains(health.Snapshot(3400, 0, 0), "videoAppendBlockedMs=400"));
+  assert(Contains(health.Snapshot(3400, 0, 0), "audioAppendBlockedMs=0"));
+  health.VideoAppend().End(3000, 3450);
+  const std::string afterAppend = health.Snapshot(3500, 0, 0);
+  assert(Contains(afterAppend, "videoAppendCalls=1 videoAppendMaxMs=450 videoAppendBlockedMs=0"));
 
   // The per-window maximum is reset by each snapshot, the call counter is cumulative.
-  std::string nextWindow = health.Snapshot(4500, 70u << 20, 128u << 20);
-  assert(nextWindow.find("mainCallMaxMs=0") != std::string::npos);
-  assert(nextWindow.find("mainCalls=1") != std::string::npos);
+  const std::string nextWindow = health.Snapshot(4500, 0, 0);
+  assert(Contains(nextWindow, "videoAppendCalls=1 videoAppendMaxMs=0"));
+
+  // Sections are independent of each other.
+  health.InputPoll().Begin(5000);
+  health.InputPoll().End(5000, 5003);
+  health.AudioAppend().Begin(5100);
+  health.AudioAppend().End(5100, 5101);
+  health.MainCall().Begin(5200);
+  health.MainCall().End(5200, 5260);
+  const std::string independent = health.Snapshot(5300, 0, 0);
+  assert(Contains(independent, "audioAppendCalls=1 audioAppendMaxMs=1"));
+  assert(Contains(independent, "inputPolls=1 inputPollMaxMs=3"));
+  assert(Contains(independent, "mainCalls=1 mainCallMaxMs=60"));
 
   // Several threads can wait at once: the blocked time counts from the first one that started waiting.
-  health.MainCallBegin(5000);
-  health.MainCallBegin(5200);
-  assert(health.Snapshot(5300, 0, 0).find("mainCallBlockedMs=300") != std::string::npos);
-  health.MainCallEnd(5000, 5300);
-  assert(health.Snapshot(5400, 0, 0).find("mainCallBlockedMs=400") != std::string::npos);
-  health.MainCallEnd(5200, 5450);
-  assert(health.Snapshot(5500, 0, 0).find("mainCallBlockedMs=0") != std::string::npos);
+  health.MainCall().Begin(6000);
+  health.MainCall().Begin(6200);
+  assert(Contains(health.Snapshot(6300, 0, 0), "mainCallBlockedMs=300"));
+  health.MainCall().End(6000, 6300);
+  assert(Contains(health.Snapshot(6400, 0, 0), "mainCallBlockedMs=400"));
+  health.MainCall().End(6200, 6450);
+  assert(Contains(health.Snapshot(6500, 0, 0), "mainCallBlockedMs=0"));
+
+  // The scope guard enters and leaves a section around a block of code.
+  health.Reset(7000);
+  {
+    ScopedSection scope(health.InputPoll(), 7100);
+    assert(Contains(health.Snapshot(7150, 0, 0), "inputPollBlockedMs=50"));
+    scope.Finish(7160);
+  }
+  assert(Contains(health.Snapshot(7200, 0, 0), "inputPolls=1 inputPollMaxMs=60 inputPollBlockedMs=0"));
 
   // A new stream starts from zero.
   health.Reset(9000);
-  assert(health.Snapshot(9100, 1u << 20, 2u << 20) ==
-         "video=0/-1ms audio=0/-1ms mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 heap=1MB/2MB");
+  assert(health.Snapshot(9100, 1 * MB, 2 * MB) ==
+         "video=0/-1ms audio=0/-1ms"
+         " videoAppendCalls=0 videoAppendMaxMs=0 videoAppendBlockedMs=0"
+         " audioAppendCalls=0 audioAppendMaxMs=0 audioAppendBlockedMs=0"
+         " inputPolls=0 inputPollMaxMs=0 inputPollBlockedMs=0"
+         " mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 heap=1MB/2MB");
 
   return 0;
 }

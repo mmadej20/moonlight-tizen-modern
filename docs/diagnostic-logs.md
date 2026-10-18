@@ -37,6 +37,45 @@ The TV retains its local copy whether export succeeds or fails. Exported data is
 - **Wrong host:** edit the Host field on the TV; it is only prefilled from the latest streaming host.
 - **No previous session:** complete or start a second stream so the first session rotates into Previous session.
 
+## Diagnosing a freeze
+
+The log is written by the application's main thread, so a frozen main thread stops the log exactly like a crash. These additions make a freeze leave evidence.
+
+**Heartbeat.** While the stream view is shown, the application stores one small record per second (`moonlightStreamHeartbeat` in local storage): wall clock time, how long the stream had been running, the stream health line below and the JavaScript heap use. It never contains the host address.
+
+**After a freeze:**
+
+1. Close the application (hold Back) and start it again.
+2. Open **Settings > Diagnostic Logs** and select **Current session** before starting another stream. Starting a stream rotates that log into Previous session.
+3. The log ends with this line, added by the new run:
+
+```text
+[js 2026-10-18T10:21:07.000Z] Previous run ended while streaming: last heartbeat 2026-10-18T10:19:42.000Z, the stream had been running 347 s, 85 s ago. Last health: video=...
+```
+
+Send the whole log. A stream that ended in an orderly way is recorded as such and never produces this line.
+
+**Stream health.** `StreamHealth up=<s>s ...` is logged at the first heartbeat and then every 10 s. The last heartbeat before a freeze carries the same fields.
+
+| Field | Meaning |
+| --- | --- |
+| `video=<n>/<age>ms`, `audio=<n>/<age>ms` | Packets handed to the player and the age of the newest one. A growing age means that part stopped. `-1` means none yet. |
+| `videoAppend*`, `audioAppend*` | The call into the platform media pipeline: number of calls, the longest call in the last second, and `BlockedMs`, which is above 0 while a thread is inside the call right now. |
+| `inputPoll*` | One round of the input thread. It asks the main thread for the gamepad state about 200 times per second, so a long `inputPollMaxMs` or a growing `inputPollBlockedMs` means the main thread is not answering. |
+| `mainCall*` | Worker threads waiting for the main thread through synchronous messages to the interface. |
+| `heap=<used>/<total>MB` | The wasm heap, which has a fixed size. Close to the total means the stream may be running out of memory. |
+
+How to read the last heartbeat:
+
+- everything stops together and the heartbeat stops too: the whole application was frozen or killed by the TV;
+- `videoAppendBlockedMs` keeps growing while heartbeats continue: the platform media pipeline stopped returning;
+- `inputPollBlockedMs` and `mainCallBlockedMs` keep growing while `video` is still fresh: the main thread is stuck;
+- `heap` close to its total shortly before: memory exhaustion.
+
+**Main thread stalls.** `Main thread stalled for <n> ms` is added after the thread recovers whenever a heartbeat arrives more than 2.5 s late.
+
+**HTTP queue.** All HTTP requests share one thread. `HTTP request /path waited <n> ms in the queue` is logged when a request waited 1 s or more, and `HTTP request /path ran for <n> ms` when one ran for 3 s or more. Only the path is logged, never the query string.
+
 ## Audio diagnostic telemetry
 
 Builds containing the audio diagnostic patches emit two aggregate records. Each
