@@ -2,6 +2,72 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.18.0
+
+### Added
+- Added automatic selection of the last opened host and app when navigating between views
+- Introduced a new 'Decrypt host audio' setting intended for Wolf and Punktfunk-style hosts
+- Added a 'Disabled' option to the 'Audio backend' setting to disable audio output from the TV
+
+### Changed
+- Improved video frame pacing efficiency by reducing CPU usage when frame pacing is enabled
+
+### Removed
+- Removed the always-zero network jitter frame drop statistic from the performance stats
+
+### Fixed
+- Fixed dialogs stretching to the full screen height instead of sizing to their content
+- Fixed incorrect bitrate calculations in the performance stats when enabled mid-stream
+- Fixed Docker image tagging in release workflows for forks with uppercase repository names
+- Fixed a startup crash when checking for cached app updates with an invalid or missing version
+
+## v1.17.2
+
+### Added
+- Added ForceGM variant detection to the System Info panel for easier identification
+
+### Changed
+- Improved build metadata injection in the Dockerfile for development and release builds
+- Prevented paired hosts from falling back to unauthenticated HTTP when refreshing server metadata
+
+### Fixed
+- Fixed a security vulnerability that allowed untrusted host metadata to be executed within the application
+
+## v1.17.1
+
+### Added
+- Reintroduced i18n workflow to synchronize locale files from the source of truth
+
+### Changed
+- Extended the Game Mode restrictions to newer platform versions (Tizen 9.0+)
+- Refactored the 'Update Moonlight' dialog to use static HTML for cleaner code structure
+
+### Fixed
+- Fixed EMSS pipeline cleanup when connections terminate unexpectedly
+- Fixed last frame number not resetting on new streams to prevent stats underflow
+- Fixed decoding time statistic displaying incorrect values due to integer underflow
+- Fixed the 'Update App' button notification not being restored after restarting the app
+- Fixed the 'Update App' button not being displayed after manually checking for updates
+- Fixed an issue where rapid or multiple clicks on a host could trigger concurrent executions
+
+## v1.17.0
+
+### Added
+- Added an intermediate hamburger menu highlight when navigating up from a host card
+- Added automatic Wake-on-LAN support to wake offline hosts with a per-host toggle
+- Added host availability polling to the wake-up process to detect when a host becomes reachable
+- Added a warning when Wake-on-LAN is used with hosts configured with randomized MAC addresses
+
+### Changed
+- Improved the manual Wake PC action with an interactive wake-up dialog and visual feedback
+- Handled enabling/disabling of 'Wake PC' and 'Refresh Apps' options based on the host's online status
+
+### Fixed
+- Fixed default Sunshine box art remaining cached after custom app box art was added
+- Fixed localhost addresses being used as connection candidates causing failed connections
+- Fixed zero MAC addresses being stored for unpaired hosts causing invalid Wake-on-LAN requests
+- Fixed Wake-on-LAN failing to send magic packets in some cases due to a socket initialization error
+
 ## v1.16.1
 
 ### Changed

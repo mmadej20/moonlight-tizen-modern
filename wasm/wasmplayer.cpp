@@ -527,6 +527,12 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
     memset(&m_GlobalVideoStats, 0, sizeof(m_GlobalVideoStats));
   }
 
+  // Reset last frame number to prevent massive integer underflow on subsequent streams
+  m_LastFrameNumber = 0;
+
+  // Reset the received byte count so the bitrate doesn't include data from a previous stream
+  total_bytes = 0;
+
   // Ensure that StartupVidDecSetup is called every time when VidDecSetup is invoked to reinitialize the media pipeline
   int initVidDec = StartupVidDecSetup(videoFormat, width, height, redrawRate, context, drFlags);
 

@@ -36,7 +36,7 @@ assert.match(messagesSource, /showApps\(api\)\.then/);
 assert.doesNotMatch(messagesSource, /},\s*1500\);/);
 assert.match(indexSource, /function handleShowAppsNavigationFailure\(error\)[\s\S]*OperationGuard\.isStaleOperationError/);
 assert.strictEqual(
-  (indexSource.match(/}, handleShowAppsNavigationFailure\);/g) || []).length,
+  (indexSource.match(/}, handleShowAppsNavigationFailure\)/g) || []).length,
   (indexSource.match(/showApps\(host\)\.then/g) || []).length
 );
 assert.match(messagesSource, /if\s*\(!OperationGuard\.isStaleOperationError\(error\)\)/);

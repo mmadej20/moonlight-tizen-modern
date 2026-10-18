@@ -7,8 +7,8 @@ const SyncFunctions = {
   'httpInit': (...args) => Module.httpInit(...args),
   /* host, httpPort, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
   framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioBackend,
-  audioConfig, audioSync, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
-  performanceStats, speculativeRfi */
+  audioConfig, audioSync, audioJitterMs, playHostAudio, decryptHostAudio, videoCodec, hdrMode, fullRange, gameMode,
+  disableWarnings, performanceStats, speculativeRfi */
   'startRequest': (...args) => Module.startStream(...args),
   // no parameters
   'stopRequest': (...args) => Module.stopStream(...args),
@@ -119,6 +119,15 @@ var createMessageBridge = function(syncFunctions, asyncFunctions, logger) {
   };
 };
 
+function escapeHTML(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function normalizeBackendMessageText(text) {
   return String(text || '')
     .replace(/\\n/g, '\n')
@@ -176,7 +185,6 @@ function replaceKnownStatsLabels(text) {
     .replace(/Incoming bitrate from network:/g, t('Incoming bitrate from network:'))
     .replace(/Host processing latency min\/max\/average:/g, t('Host processing latency min/max/average:'))
     .replace(/Frames dropped by your network connection:/g, t('Frames dropped by your network connection:'))
-    .replace(/Frames dropped due to network jitter:/g, t('Frames dropped due to network jitter:'))
     .replace(/Average network latency:/g, t('Average network latency:'))
     .replace(/\bvariance:/g, t('variance:'))
     .replace(/\bN\/A\b/g, t('N/A'))

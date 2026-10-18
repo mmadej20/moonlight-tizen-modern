@@ -124,7 +124,6 @@ void MoonlightInstance::StopConnection(int errorCode) {
       std::to_string(result) + ")");
     return;
   }
-
 }
 
 void* MoonlightInstance::StopThreadFunc(void* context) {
@@ -296,8 +295,9 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
     // render the longer frames that the RTSP negotiation may choose on low bitrate streams
     MoonlightInstance::s_ArCallbacks.capabilities |= CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
     PostToJs("Selecting the audio renderer capabilities to: CAPABILITY_DIRECT_SUBMIT | CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION");
-  } else { // EMSS
-    // The EMSS backend expects the fixed 5 ms frames that are negotiated without that capability
+  } else { // EMSS, or disabled audio output
+    // The EMSS backend expects the fixed 5 ms frames that are negotiated without that capability,
+    // and the frame duration doesn't matter when the audio output is disabled
     PostToJs("Selecting the audio renderer capabilities to: CAPABILITY_DIRECT_SUBMIT");
   }
 
@@ -339,8 +339,8 @@ static void HexStringToBytes(const char* str, char* output) {
 MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioBackend, std::string audioConfig, bool audioSync, int audioJitterMs, bool playHostAudio, std::string videoCodec,
-  bool hdrMode, bool fullRange, bool gameMode, bool disableWarnings, bool performanceStats, bool speculativeRfi) {
+  std::string audioBackend, std::string audioConfig, bool audioSync, int audioJitterMs, bool playHostAudio, bool decryptHostAudio,
+  std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode, bool disableWarnings, bool performanceStats, bool speculativeRfi) {
 
   if (!m_ConnectionLifecycle.TryStart()) {
     return MessageResult::Reject(emscripten::val(GS_WRONG_STATE));
@@ -395,6 +395,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   PostToJs("Setting the Audio synchronization to: " + std::to_string(audioSync));
   PostToJs("Setting the Audio jitter buffer to: " + std::to_string(audioJitterMs) + " ms");
   PostToJs("Setting the Play host audio to: " + std::to_string(playHostAudio));
+  PostToJs("Setting the Decrypt host audio to: " + std::to_string(decryptHostAudio));
   PostToJs("Setting the Video codec to: " + videoCodec);
   PostToJs("Setting the Video HDR mode to: " + std::to_string(hdrMode));
   PostToJs("Setting the Full color range to: " + std::to_string(fullRange));
@@ -423,6 +424,10 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
     // Apply the appropriate value for the Web Audio backend
     m_AudioBackend = AudioBackend::WebAudio;
     PostToJs("Selecting the audio backend to: AUDIO_BACKEND_WEB_AUDIO");
+  } else if (audioBackend == "Disabled") { // No audio output
+    // Apply the appropriate value when the audio output is disabled
+    m_AudioBackend = AudioBackend::Disabled;
+    PostToJs("Selecting the audio backend to: AUDIO_BACKEND_DISABLED");
   } else { // Unknown
     // Default case for unsupported audio backend selection
     ClLogMessage("Unsupported audio backend '%s' detected! Reverting to the default backend...\n", audioBackend.c_str());
@@ -496,8 +501,8 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   // Apply the desired color range ​based on the toggle switch state
   m_StreamConfig.colorRange |= fullRange ? COLOR_RANGE_FULL : COLOR_RANGE_LIMITED;
 
-  // Limit encryption to devices that do not support AES instructions
-  m_StreamConfig.encryptionFlags = ENCFLG_NONE;
+  // Apply encryption audio only when decrypt host audio is enabled, otherwise disable encryption
+  m_StreamConfig.encryptionFlags = decryptHostAudio ? ENCFLG_AUDIO : ENCFLG_NONE;
 
   // Load the rikey and rikeyid into the stream configuration
   HexStringToBytes(rikey.c_str(), m_StreamConfig.remoteInputAesKey);
@@ -539,6 +544,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_AudioSyncEnabled = audioSync;
   m_AudioJitterMs = audioJitterMs;
   m_PlayHostAudioEnabled = playHostAudio;
+  m_DecryptHostAudioEnabled = decryptHostAudio;
   m_HdrModeEnabled = hdrMode;
   m_FullRangeEnabled = fullRange;
   m_GameModeEnabled = gameMode;
@@ -793,12 +799,13 @@ int main(int argc, char** argv) {
 MessageResult startStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioBackend, std::string audioConfig, bool audioSync, int audioJitterMs, bool playHostAudio, std::string videoCodec,
-  bool hdrMode, bool fullRange, bool gameMode, bool disableWarnings, bool performanceStats, bool speculativeRfi) {
+  std::string audioBackend, std::string audioConfig, bool audioSync, int audioJitterMs, bool playHostAudio, bool decryptHostAudio,
+  std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode, bool disableWarnings, bool performanceStats, bool speculativeRfi) {
   PostToJs("Starting the streaming session...");
   return g_Instance->StartStream(host, httpPort, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
   framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioBackend, audioConfig,
-  audioSync, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats, speculativeRfi);
+  audioSync, audioJitterMs, playHostAudio, decryptHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats,
+  speculativeRfi);
 }
 
 MessageResult stopStream() {

@@ -290,9 +290,10 @@
               <ul class="audioBackendMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectAudioBackend">
                 <li class="mdl-menu__item" data-value="EMSS" data-i18n="EMSS">EMSS</li>
                 <li class="mdl-menu__item" data-value="WebAudio" data-i18n="Web Audio">Web Audio</li>
+                <li class="mdl-menu__item" data-value="Disabled" data-i18n="Disabled">Disabled</li>
               </ul>
             </div>
-            <div class="setting-option">
+            <div id="audioConfigOption" class="setting-option">
               <label><span data-i18n="Audio configuration">Audio configuration</span>
                 <span class="badge badge-experimental" data-i18n="Experimental">Experimental</span>
               </label>
@@ -344,6 +345,23 @@
                   <input type="checkbox" id="playHostAudioSwitch" class="mdl-switch__input">
                   <span class="mdl-switch__label" data-i18n="Allow playing audio from the computer and this device">
                     Allow playing audio from the computer and this device
+                  </span>
+                </label>
+              </div>
+            </div>
+            <div id="decryptHostAudioOption" class="setting-option">
+              <label>
+                <span data-i18n="Decrypt host audio">Decrypt host audio</span>
+                <span class="badge badge-experimental" data-i18n="Experimental">Experimental</span>
+              </label>
+              <span class="mdl-list__item-text-body" data-i18n="- This is only necessary for Wolf and Punktfunk-style hosts that encrypt GameStream audio without advertising it.">
+                - This is only necessary for Wolf and Punktfunk-style hosts that encrypt GameStream audio without advertising it.
+              </span>
+              <div id="decryptHostAudioMenu">
+                <label id="decryptHostAudioBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="decryptHostAudioSwitch">
+                  <input type="checkbox" id="decryptHostAudioSwitch" class="mdl-switch__input">
+                  <span class="mdl-switch__label" data-i18n="Allow decrypting AES-CBC audio from Wolf and Punktfunk-style hosts">
+                    Allow decrypting AES-CBC audio from Wolf and Punktfunk-style hosts
                   </span>
                 </label>
               </div>
@@ -814,6 +832,18 @@
       </div>
       <div class="mdl-dialog__actions">
         <button type="button" id="closeWarning" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect" data-i18n="Close">Close</button>
+        <button type="button" id="continueWarning" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect" data-i18n="Continue">Continue</button>
+      </div>
+    </dialog>
+  </div>
+  <div id="updateAppDialogOverlay" class="dialog-overlay">
+    <dialog id="updateAppDialog" class="mdl-dialog">
+      <h3 id="updateAppDialogTitle" class="mdl-dialog__title" data-i18n="Update Moonlight">Update Moonlight</h3>
+      <div class="mdl-dialog__content">
+        <p id="updateAppDialogText"></p>
+      </div>
+      <div class="mdl-dialog__actions">
+        <button type="button" id="closeUpdateApp" autofocus class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect" data-i18n="Close">Close</button>
       </div>
     </dialog>
   </div>

@@ -88,7 +88,8 @@ enum class LoadResult {
 // Audio backend used to render the decoded Opus stream
 enum class AudioBackend {
   Emss, // Elementary Media Stream Source: the original Samsung implementation
-  WebAudio // Web Audio: the scheduler implemented in platform/audio.js
+  WebAudio, // Web Audio: the scheduler implemented in platform/audio.js
+  Disabled // No audio output: the audio stream is discarded, for setups that play it through another device
 };
 
 constexpr const char* kCanvasName = "#wasm_module";
@@ -100,8 +101,8 @@ class MoonlightInstance {
   MessageResult StartStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
     std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
     bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-    std::string audioBackend, std::string audioConfig, bool audioSync, int audioJitterMs, bool playHostAudio, std::string videoCodec,
-    bool hdrMode, bool fullRange, bool gameMode, bool disableWarnings, bool performanceStats, bool speculativeRfi);
+    std::string audioBackend, std::string audioConfig, bool audioSync, int audioJitterMs, bool playHostAudio, bool decryptHostAudio,
+    std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode, bool disableWarnings, bool performanceStats, bool speculativeRfi);
   MessageResult StopStream();
 
   MessageResult CancelRequest(int callbackId);
@@ -273,6 +274,7 @@ class MoonlightInstance {
   bool m_AudioSyncEnabled;
   int m_AudioJitterMs;
   bool m_PlayHostAudioEnabled;
+  bool m_DecryptHostAudioEnabled;
   bool m_HdrModeEnabled;
   bool m_FullRangeEnabled;
   bool m_GameModeEnabled;
@@ -346,8 +348,8 @@ void openUrl(int callbackId, std::string url, emscripten::val ppk,
 MessageResult startStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioBackend, std::string audioConfig, bool audioSync, int audioJitterMs, bool playHostAudio, std::string videoCodec,
-  bool hdrMode, bool fullRange, bool gameMode, bool disableWarnings, bool performanceStats, bool speculativeRfi);
+  std::string audioBackend, std::string audioConfig, bool audioSync, int audioJitterMs, bool playHostAudio, bool decryptHostAudio,
+  std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode, bool disableWarnings, bool performanceStats, bool speculativeRfi);
 MessageResult stopStream();
 
 MessageResult cancelRequest(int callbackId);

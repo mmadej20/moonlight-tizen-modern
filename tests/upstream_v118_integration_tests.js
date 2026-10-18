@@ -127,8 +127,8 @@ function testDisabledAudioBackendIsSafeWithMediaGating() {
 
   const decode = extractCppFunction(audio, 'void MoonlightInstance::AudDecDecodeAndPlaySample(');
   assert(decode.indexOf('AudioBackend::Disabled') >= 0 &&
-    decode.indexOf('AudioBackend::Disabled') < decode.indexOf('opus_multistream_decode'),
-    'Disabled packets are discarded before decoding');
+    decode.indexOf('AudioBackend::Disabled') < decode.indexOf('AudioBackend::WebAudio'),
+    'Disabled packets are discarded before any backend dispatch or decoding');
 
   const cleanup = extractCppFunction(audio, 'void MoonlightInstance::AudDecCleanup(');
   assert.match(cleanup, /if \(g_Instance->m_OpusDecoder\) \{\s*opus_multistream_decoder_destroy/,
@@ -265,6 +265,38 @@ async function testServerInfoPolicyForPairedAndUnpairedHosts() {
   }
 }
 
+async function testBaseUrlRefreshFollowsTheSamePolicy() {
+  const prepare = (behavior, pinned) => {
+    const harness = createHostHarness(behavior);
+    harness.host.ppkstr = pinned;
+    harness.host._baseUrlHttp = 'http://192.0.2.1:47989';
+    harness.host._baseUrlHttps = 'https://192.0.2.1:47984';
+    return harness;
+  };
+  {
+    const { host, calls } = prepare(() => Promise.resolve('parsable'), null);
+    await host.refreshServerInfo();
+    assert.deepStrictEqual(calls.map((call) => call.url.split('/serverinfo')[0]), ['http://192.0.2.1:47989']);
+  }
+  {
+    const { host, calls } = prepare(() => Promise.resolve('unparsable'), 'pinned-certificate');
+    await assert.rejects(host.refreshServerInfo());
+    assert(calls.length >= 1 && calls.every((call) => call.url.startsWith('https://')),
+      'a paired host base-URL refresh never falls back to HTTP after a parse failure');
+  }
+  {
+    const { host, calls } = prepare(() => Promise.reject(-100), 'pinned-certificate');
+    await assert.rejects(host.refreshServerInfo());
+    assert(calls.length >= 1 && calls.every((call) => call.url.startsWith('https://')),
+      'a paired host base-URL refresh never falls back to HTTP after a certificate mismatch');
+  }
+  {
+    const { host, calls } = prepare(() => Promise.resolve('parsable'), 'pinned-certificate');
+    await host.refreshServerInfo();
+    assert(calls.every((call) => call.timeoutMs === 5000), 'the local timeout is kept');
+  }
+}
+
 function testHostDerivedTextIsEscapedBeforeHtml() {
   const messages = read('wasm/platform/messages.js');
   const context = {};
@@ -320,6 +352,7 @@ async function main() {
     testDisabledAudioBackendIsSafeWithMediaGating,
     testDecryptHostAudioDefaultsOnlyWhenUnset,
     testServerInfoPolicyForPairedAndUnpairedHosts,
+    testBaseUrlRefreshFollowsTheSamePolicy,
     testHostDerivedTextIsEscapedBeforeHtml,
     testPerformanceStatsKeepWindowFixes,
     testUnexpectedTerminationUsesTheSingleStopPath,

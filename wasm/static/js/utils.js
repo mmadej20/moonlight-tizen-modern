@@ -7,6 +7,26 @@ function formatAddressForUrl(address) {
   return address;
 }
 
+/**
+ * Checks if a MAC address is locally administered (likely randomized).
+ * Per IEEE 802, the second-least-significant bit (U/L bit) of the first octet
+ * indicates a locally administered address when set to 1.
+ * This means the second hex character of the MAC is one of: 2, 6, A, E.
+ */
+function isRandomMacAddress(macAddress) {
+  if (!macAddress || macAddress === '00:00:00:00:00:00') {
+    console.error('%c[utils.js, refreshServerInfo]', 'color: gray;', 'Error: Invalid MAC address: empty or all zeros');
+    return false;
+  }
+  var firstOctet = parseInt(macAddress.split(':')[0], 16);
+  if (isNaN(firstOctet)) {
+    console.error('%c[utils.js, refreshServerInfo]', 'color: gray;', 'Error: Invalid MAC address format: ' + macAddress);
+    return false;
+  }
+  // Check the U/L bit (bit 1) — if set, address is locally administered
+  return (firstOctet & 0x02) !== 0;
+}
+
 function guuid() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     var r = Math.random() * 16 | 0,
@@ -171,25 +191,16 @@ NvHTTP.prototype = {
         this._parseServerInfo(retHttp);
       }.bind(this));
     }
-    // Try HTTPS first
+    // Paired hosts must use HTTPS with the pinned certificate. Do not fall back to unauthenticated HTTP for server metadata.
     return this._openUrlWithTimeout(this._baseUrlHttps + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(ret) {
       if (!this._parseServerInfo(ret)) { // If that fails
-        console.error('%c[utils.js, refreshServerInfo]', 'color: gray;', 'Error: Failed to parse server info from HTTPS, falling back to HTTP...');
-        // Try HTTP as a failover. Useful to clients who aren't paired yet
-        return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(retHttp) {
-          if (!this._parseServerInfo(retHttp)) {
-            return Promise.reject("Failed to parse server info from HTTP");
-          }
-        }.bind(this));
+        console.warn('%c[utils.js, refreshServerInfo]', 'color: gray;', 'Warning: Failed to parse server info from HTTPS. Please verify the host is reachable and re-pair the host if necessary!');
+        return Promise.reject("Failed to parse server info from HTTPS");
       }
     }.bind(this), function(error) {
       if (error == -100) { // GS_CERT_MISMATCH
-        console.warn('%c[utils.js, refreshServerInfo]', 'color: gray;', 'Warning: Certificate mismatch. Retrying over HTTP...', this);
-        return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(retHttp) {
-          if (!this._parseServerInfo(retHttp)) {
-            return Promise.reject("Failed to parse server info from HTTP");
-          }
-        }.bind(this));
+        // Do not fall back to HTTP after a certificate mismatch. The endpoint must be re-paired before unauthenticated server metadata can be accepted.
+        console.error('%c[utils.js, refreshServerInfo]', 'color: gray;', 'Error: Certificate mismatch. Please re-pair the host!', this);
       }
       return Promise.reject(error);
     }.bind(this));
@@ -198,33 +209,29 @@ NvHTTP.prototype = {
   // Refreshes the server info using a given address. This is useful for testing whether we can successfully ping a host at a given address
   refreshServerInfoAtAddress: function(givenAddress) {
     var urlAddr = formatAddressForUrl(givenAddress);
-    if (this.ppkstr == null) {
+    // Unpaired hosts have no established certificate trust, so HTTP is allowed.
+    if (this.ppkstr == null) { // No pinned cert
       // Use HTTP if we have no pinned cert
       return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(retHttp) {
         var parsed = this._parseServerInfo(retHttp);
-        if (!parsed) return Promise.reject("Failed to parse server info from HTTP");
+        if (!parsed) { // If that fails
+          return Promise.reject("Failed to parse server info from HTTP");
+        }
         return parsed;
       }.bind(this));
     }
-    // Try HTTPS first
+    // Paired hosts must use HTTPS with the pinned certificate. Do not fall back to unauthenticated HTTP for server metadata.
     return this._openUrlWithTimeout('https://' + urlAddr + ':' + this.httpsPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(ret) {
-      if (!this._parseServerInfo(ret)) { // If that fails
-        console.error('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Error: Failed to parse server info from HTTPS, falling back to HTTP...');
-        // Try HTTP as a failover. Useful to clients who aren't paired yet
-        return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(retHttp) {
-          var parsed = this._parseServerInfo(retHttp);
-          if (!parsed) return Promise.reject("Failed to parse server info from HTTP");
-          return parsed;
-        }.bind(this));
+      var parsed = this._parseServerInfo(ret);
+      if (!parsed) { // If that fails
+        console.warn('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Warning: Failed to parse server info from HTTPS. Please verify the host is reachable and re-pair the host if necessary!');
+        return Promise.reject("Failed to parse server info from HTTPS");
       }
+      return parsed;
     }.bind(this), function(error) {
       if (error == -100) { // GS_CERT_MISMATCH
-        console.warn('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Warning: Certificate mismatch. Retrying over HTTP...', this);
-        return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr, 5000).then(function(retHttp) {
-          var parsed = this._parseServerInfo(retHttp);
-          if (!parsed) return Promise.reject("Failed to parse server info from HTTP");
-          return parsed;
-        }.bind(this));
+        // Do not fall back to HTTP after a certificate mismatch. The endpoint must be re-paired before unauthenticated server metadata can be accepted.
+        console.error('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Error: Certificate mismatch. Please re-pair the host!', this);
       }
       return Promise.reject(error);
     }.bind(this));
@@ -511,8 +518,8 @@ NvHTTP.prototype = {
 
       for (var i = 0, len = appElements.length; i < len; i++) {
         appList.push({
-          id: parseInt(appElements[i].getElementsByTagName('ID')[0].innerHTML.trim(), 10),
-          title: appElements[i].getElementsByTagName('AppTitle')[0].innerHTML.trim(),
+          id: parseInt(appElements[i].getElementsByTagName('ID')[0].textContent.trim(), 10),
+          title: appElements[i].getElementsByTagName('AppTitle')[0].textContent.trim(),
         });
       }
 
