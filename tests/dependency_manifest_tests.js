@@ -29,6 +29,7 @@ const expectedJavaScriptSuites = [
   'tests/ui_reliability_behavior_tests.js',
   'tests/ui_reliability_wiring_tests.js',
   'tests/upstream_ui_integration_tests.js',
+  'tests/upstream_v118_integration_tests.js',
 ];
 
 const discoveredJavaScriptSuites = fs.readdirSync('tests')
