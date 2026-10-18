@@ -38,10 +38,14 @@ assert(/#include "rumble_dedupe\.hpp"/.test(header));
 
 // Native side.
 const rumble = extractBraced(gamepad, 'void MoonlightInstance::ClControllerRumble(');
-assert(/m_StreamHealth\.RumbleReceived\(\)/.test(rumble), 'every message from the host is counted');
+// ClControllerRumble is a static member function of the instance class: it has no this, so the counters are reached
+// through the global instance (a plain m_StreamHealth does not compile there, which only the Docker build shows).
+assert(/static void ClControllerRumble\(/.test(header), 'this is why the instance is reached through g_Instance');
+assert(!/[^>]m_StreamHealth/.test(rumble), 'no member is used without the instance');
+assert(/g_Instance->Health\(\)\.RumbleReceived\(\)/.test(rumble), 'every message from the host is counted');
 assert(rumble.indexOf('RumbleReceived') < rumble.indexOf('rumbleFeedbackSwitch'), 'also while the setting is off');
 assert(/s_RumbleDedupe\.ShouldPost\(controllerNumber, lowFreqMotor, highFreqMotor\)/.test(rumble), 'repeats are dropped');
-assert(/m_StreamHealth\.RumblePosted\(\)/.test(rumble), 'the messages that are passed on are counted');
+assert(/g_Instance->Health\(\)\.RumblePosted\(\)/.test(rumble), 'the messages that are passed on are counted');
 assert(/MAIN_THREAD_ASYNC_EM_ASM\(/.test(rumble), 'the control stream thread does not wait for the interface');
 assert(!/PostToJs\(/.test(rumble) && !/c_str\(\)/.test(rumble),
   'an asynchronous call must not carry a pointer to a string that is destroyed when this function returns');

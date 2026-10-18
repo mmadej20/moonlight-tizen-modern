@@ -569,7 +569,7 @@ bool MoonlightInstance::PollGamepads() {
 
 // Function to send controller rumble feedback for gamepad
 void MoonlightInstance::ClControllerRumble(unsigned short controllerNumber, unsigned short lowFreqMotor, unsigned short highFreqMotor) {
-  m_StreamHealth.RumbleReceived();
+  g_Instance->Health().RumbleReceived();
 
   // Check if the rumble feedback switch is checked
   if (!rumbleFeedbackSwitch) {
@@ -579,7 +579,7 @@ void MoonlightInstance::ClControllerRumble(unsigned short controllerNumber, unsi
   // The host repeats values, so only a change is passed on. The call does not wait for the interface (this is the
   // thread of the control stream) and carries three plain numbers: the interface turns them into magnitudes.
   if (s_RumbleDedupe.ShouldPost(controllerNumber, lowFreqMotor, highFreqMotor)) {
-    m_StreamHealth.RumblePosted();
+    g_Instance->Health().RumblePosted();
     MAIN_THREAD_ASYNC_EM_ASM({
       if (typeof handleRumble === 'function') {
         handleRumble($0, $1, $2);
