@@ -133,3 +133,36 @@ Jak odczytać wynik po następnym zawieszeniu: sekcja „Diagnosing a freeze" w 
 - Kiedy: zaraz po wciśnięciu aplikacji, w pierwszych minutach streamu, czy po wielu minutach?
 - Czy dzieje się po świeżej instalacji lub po dodaniu aplikacji na hoście? Ile aplikacji ma host?
 - Wi-Fi czy Ethernet, jaki model TV, który WGT jest zainstalowany (profil 5.5 czy 9.0)?
+
+## 9. Regresja: start streamu wisi na „Starting …", okładki ładują się bardzo długo
+
+Po wdrożeniu punktu 2 (build `freeze-diag`) aplikacja przestała uruchamiać streamy: Vibepollo dostawał `/launch`
+i startował grę, a Moonlight zostawał na „Starting …". Okładki ładowały się znacznie wolniej niż wcześniej.
+
+**Przyczyna (potwierdzona odtworzeniem):** `BlockingSection::End` aktualizowało maksimum pętlą
+`compare_exchange_weak` na `std::atomic<int64_t>`. Samsungowy Emscripten (fastcomp 1.39.4.7) sprowadza 64-bitowe
+atomiki do wywołań biblioteki, a wywołanie `___atomic_compare_exchange_8` ma tam błędną sygnaturę (ostrzeżenie
+`asm2wasm adding operands in call … ___atomic_compare_exchange_8`, ukryte przez `-w` w buildzie). Pętla nigdy się
+nie kończyła, więc wątek, który wszedł do sekcji, kręcił się w niej na zawsze. Dotyczyło to każdego wątku, który zmierzył
+wywołanie dłuższe niż dotychczasowe maksimum: wątek połączenia przy pierwszym komunikacie „Starting connection to …"
+(14 ms, bo wątek główny kończył jeszcze `StartStream`) oraz wątek HTTP przy odpowiedzi na żądanie, gdy wątek główny był
+zajęty. Zablokowany wątek HTTP tłumaczy też wolne okładki.
+
+**Ślad w logu:** `mainCalls=1`, `mainCallMaxMs=14` (to samo w każdym zrzucie, bo wątek w pętli stale ustawiał maksimum
+na nowo po jego wyzerowaniu przez zrzut) i rosnące `mainCallBlockedMs`, a po ostatnim komunikacie startu brak
+jakiejkolwiek linii natywnej (`RTSP port: …` nie pojawiło się), bo `LiStartConnection` nigdy nie został wywołany.
+
+**Odtworzenie:** krótki program z tym samym toolchainem i flagami (`-pthread -Os -flto`), wątek roboczy wchodzący w
+`ScopedSection` wokół `MAIN_THREAD_EM_ASM` trwającego 14 ms, uruchomiony w Chromium/Edge z nagłówkami COOP/COEP
+(wątki wasm wymagają `SharedArrayBuffer`; node 12 z tego toolchainu nie obsługuje pthreadów tego Emscriptena). Stary
+nagłówek: `mainCalls=1 mainCallMaxMs=14 mainCallBlockedMs` rośnie. Nowy nagłówek: 200 z 200 wywołań z dwóch wątków,
+czasy 0–28 ms, kończy się bez blokady.
+
+**Naprawa:** `stream_health.hpp` używa wyłącznie 32-bitowych atomików; czasy to dolne 32 bity zegara ms, odejmowane z
+zawijaniem (poprawne dla przedziałów krótszych niż 24 dni). `tests/wasm_atomics_guard_tests.js` pilnuje, żeby w
+`wasm/` nie pojawił się 64-bitowy `std::atomic` (wyjątek: `diagnostic_log.hpp`, tylko `fetch_add`/`exchange`) ani
+`compare_exchange` na takim atomiku.
+
+**Wniosek metodyczny:** błąd w kodzie diagnostycznym wyglądał jak zawieszenie mechanizmu proxy Emscriptena
+(wątek roboczy w synchronicznym wywołaniu do wątku głównego). Rozstrzygnęło go dopiero odtworzenie w przeglądarce, a nie
+analiza kodu źródłowego tego mechanizmu.

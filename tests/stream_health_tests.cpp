@@ -85,5 +85,27 @@ int main() {
          " inputPolls=0 inputPollMaxMs=0 inputPollBlockedMs=0"
          " mainCalls=0 mainCallMaxMs=0 mainCallBlockedMs=0 heap=1MB/2MB");
 
+  // Times are kept as the low 32 bits of the clock (the Samsung toolchain has no working 64-bit compare-exchange),
+  // so ages must stay right across the wrap of the 32-bit counter.
+  health.Reset(4294967000LL);
+  health.VideoSubmitted(4294967290LL);
+  assert(Contains(health.Snapshot(4294967290LL + 100, 0, 0), "video=1/100ms"));
+  assert(Contains(health.Snapshot(4294967296LL + 10, 0, 0), "video=1/16ms"));
+  health.MainCall().Begin(4294967290LL);
+  assert(Contains(health.Snapshot(4294967296LL + 10, 0, 0), "mainCallBlockedMs=16"));
+  health.MainCall().End(4294967290LL, 4294967296LL + 20);
+  assert(Contains(health.Snapshot(4294967296LL + 30, 0, 0), "mainCalls=1 mainCallMaxMs=26 mainCallBlockedMs=0"));
+
+  // A new stream may start while a thread is still inside a section; leaving it afterwards must not corrupt the counters.
+  health.Reset(10000);
+  health.MainCall().Begin(10000);
+  health.Reset(10010);
+  health.MainCall().End(10000, 10020);
+  assert(Contains(health.Snapshot(10100, 0, 0), "mainCalls=1 mainCallMaxMs=20 mainCallBlockedMs=0"));
+  health.MainCall().Begin(10200);
+  assert(Contains(health.Snapshot(10300, 0, 0), "mainCallBlockedMs=100"));
+  health.MainCall().End(10200, 10300);
+  assert(Contains(health.Snapshot(10400, 0, 0), "mainCallBlockedMs=0"));
+
   return 0;
 }
