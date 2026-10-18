@@ -21,6 +21,14 @@ typedef struct _HTTP_REQUEST_CONTEXT {
   long total_timeout_ms;
   long low_speed_time_seconds;
   long low_speed_bytes_per_second;
+
+  // Filled in by http_request when it has run: the cumulative times that curl measured, in milliseconds
+  int timing_valid;
+  long timing_namelookup_ms;
+  long timing_connect_ms;
+  long timing_appconnect_ms;
+  long timing_starttransfer_ms;
+  long timing_total_ms;
 } HTTP_REQUEST_CONTEXT, *PHTTP_REQUEST_CONTEXT;
 
 void http_request_context_init(PHTTP_REQUEST_CONTEXT context,

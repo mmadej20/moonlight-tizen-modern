@@ -20,6 +20,12 @@ void http_request_context_init(PHTTP_REQUEST_CONTEXT context,
   context->total_timeout_ms = total_timeout_ms;
   context->low_speed_time_seconds = low_speed_time_seconds;
   context->low_speed_bytes_per_second = low_speed_bytes_per_second;
+  context->timing_valid = 0;
+  context->timing_namelookup_ms = 0;
+  context->timing_connect_ms = 0;
+  context->timing_appconnect_ms = 0;
+  context->timing_starttransfer_ms = 0;
+  context->timing_total_ms = 0;
   __atomic_store_n(&context->cancelled, 0, __ATOMIC_RELEASE);
 }
 

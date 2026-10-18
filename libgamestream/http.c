@@ -175,6 +175,22 @@ int http_request(const char* url, const char* ppkstr,
 
   CURLcode res = curl_easy_perform(curl);
 
+  // Where the time went, in milliseconds: curl measures the stages, also for a request that failed
+  {
+    double namelookup = 0, connect = 0, appconnect = 0, starttransfer = 0, total = 0;
+    curl_easy_getinfo(curl, CURLINFO_NAMELOOKUP_TIME, &namelookup);
+    curl_easy_getinfo(curl, CURLINFO_CONNECT_TIME, &connect);
+    curl_easy_getinfo(curl, CURLINFO_APPCONNECT_TIME, &appconnect);
+    curl_easy_getinfo(curl, CURLINFO_STARTTRANSFER_TIME, &starttransfer);
+    curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total);
+    context->timing_namelookup_ms = (long)(namelookup * 1000.0 + 0.5);
+    context->timing_connect_ms = (long)(connect * 1000.0 + 0.5);
+    context->timing_appconnect_ms = (long)(appconnect * 1000.0 + 0.5);
+    context->timing_starttransfer_ms = (long)(starttransfer * 1000.0 + 0.5);
+    context->timing_total_ms = (long)(total * 1000.0 + 0.5);
+    context->timing_valid = 1;
+  }
+
   printf("CURL request completed: %s\n", curl_easy_strerror(res));
   
   if (data->error == GS_RESPONSE_TOO_LARGE) {

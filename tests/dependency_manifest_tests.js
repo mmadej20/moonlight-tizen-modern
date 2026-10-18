@@ -23,6 +23,7 @@ const expectedJavaScriptSuites = [
   'tests/gamepad_polling_tests.js',
   'tests/gamepad_sampling_wiring_tests.js',
   'tests/http_bridge_tests.js',
+  'tests/http_timing_wiring_tests.js',
   'tests/media_ownership_wiring_tests.js',
   'tests/operation_guard_tests.js',
   'tests/pairing_cancellation_behavior_tests.js',

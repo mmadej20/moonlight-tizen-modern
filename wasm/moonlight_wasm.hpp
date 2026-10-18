@@ -19,6 +19,7 @@
 #include "controller_send_filter.hpp"
 #include "gamepad_sampling.hpp"
 #include "http_queue_metrics.hpp"
+#include "http_timing.hpp"
 #include "lib.hpp"
 #include "media_operation_epoch.hpp"
 #include "operation_latch.hpp"

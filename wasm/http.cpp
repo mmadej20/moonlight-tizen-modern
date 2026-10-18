@@ -158,6 +158,14 @@ void MoonlightInstance::OpenUrl_private(
 
   err = http_request(url.c_str(), ppk.empty() ? NULL : ppk.c_str(),
                      requestContext.get(), data);
+  // A slow request says where its time went (name lookup, connect, TLS, host, transfer), only with the path
+  if (requestContext->timing_valid && ShouldLogHttpTiming(requestContext->timing_total_ms)) {
+    ClLogMessage("HTTP request %s timing: %s (result %d)\n", HttpUrlPathForLog(url).c_str(),
+                 DescribeHttpTiming(requestContext->timing_namelookup_ms, requestContext->timing_connect_ms,
+                                    requestContext->timing_appconnect_ms, requestContext->timing_starttransfer_ms,
+                                    requestContext->timing_total_ms).c_str(),
+                 err);
+  }
   if (err) {
     http_free_data(data);
     PostPromiseMessage(callbackId, "reject", std::to_string(err));
