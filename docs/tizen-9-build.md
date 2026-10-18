@@ -1,5 +1,10 @@
 # Tizen 9 build and bounded toolchain decisions
 
+> **Status:** this document records the retired Tizen 9.0 / jQuery 4.0.0 build profile. The current profile is
+> `required_version="5.5"` with jQuery 2.2.0 from the npm lockfile (see `docs/2026-07-28-legacy-runtime-ab-artifact.md`
+> and `docs/upstream-sync.md`). The toolchain findings below (Tizen Studio 6.1, Samsung Emscripten 1.39.4.7, Python 2,
+> OpenSSL 1.1.1d) still apply.
+
 The production image builds a signed Tizen 9.0 WGT. Samsung Tizen Studio 6.1 and Samsung Emscripten 1.39.4.7 remain the compatibility boundary for the WASM Player and Samsung socket integration.
 
 | Component | Selected version | Verification result |

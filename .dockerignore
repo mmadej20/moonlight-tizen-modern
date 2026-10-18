@@ -4,3 +4,13 @@ Dockerfile
 **/.DS_Store
 build/
 .vscode/
+.worktrees
+.superpowers
+.claude
+moonlight-tv-logs
+tools
+docs
+tests
+artifacts
+node_modules
+*.wgt

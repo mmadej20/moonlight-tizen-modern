@@ -58,3 +58,12 @@ node_modules/
 *.wgt
 moonlight-tv-logs/
 tools/moonlight-tv-logs/
+
+# Generated from the npm lockfile by the Docker build; keep a local copy only to run without Docker
+/wasm/static/js/jquery-2.2.0.min.js
+
+# No git worktrees in this repository (see CLAUDE.md)
+.worktrees/
+
+# Local build output
+artifacts/

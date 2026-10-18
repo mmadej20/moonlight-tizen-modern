@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "deny": [
+      "EnterWorktree",
+      "Bash(git worktree add:*)",
+      "PowerShell(git worktree add:*)"
+    ]
+  }
+}
