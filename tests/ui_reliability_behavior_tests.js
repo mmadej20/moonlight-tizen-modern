@@ -300,7 +300,7 @@ function createAppsContext() {
     showAppsMode: function() { state.modes += 1; },
     snackbarLogLong: function() {},
     sortTitles: function(apps) { return apps.slice(); },
-    stylizeBoxArt: function() {},
+    stylizeBoxArts: function() {},
     startGame: function() {},
     isClickPrevented: false,
     setTimeout,
@@ -531,7 +531,7 @@ function asyncRenderingHost(name, apps, boxArtById, refresh) {
 
 async function testAsyncAppRenderingHonorsGeneration() {
   const harness = createAsyncRenderingContext();
-  const functions = loadFunctions(['stylizeBoxArt', 'showApps'], harness.context);
+  const functions = loadFunctions(['stylizeBoxArts', 'showApps'], harness.context);
   const firstBoxArtSuccess = deferred();
   const firstBoxArtFailure = deferred();
   const firstRefresh = deferred();
@@ -579,11 +579,11 @@ async function testAsyncAppRenderingHonorsGeneration() {
     assert.strictEqual(harness.state.images[1].src, undefined);
     assert.strictEqual(harness.state.images[1].classes['fade-in'], undefined);
 
-    functions.stylizeBoxArt(firstHost, 'X', 1);
+    functions.stylizeBoxArts(firstHost, ['X'], 1);
     await flush();
     assert.strictEqual(firstHost.refreshCalls, 1);
 
-    harness.state.timers[2].callback();
+    harness.state.timers[1].callback();
     await flush();
     assert.strictEqual(secondHost.refreshCalls, 1);
     secondRefresh.resolve(true);
@@ -600,6 +600,68 @@ async function testAsyncAppRenderingHonorsGeneration() {
     process.removeListener('unhandledRejection', onUnhandled);
   }
   assert.deepStrictEqual(unhandled, []);
+}
+
+// An app list of 13 apps used to refresh the server info 13 times (once per app) to find the running game: 13
+// requests for the same answer, each with its own TLS connection, queued on the one HTTP thread. One refresh per
+// list is enough, and every box is styled from its result.
+async function testListRefreshesServerInfoOnceForAllApps() {
+  const harness = createAsyncRenderingContext();
+  const functions = loadFunctions(['stylizeBoxArts', 'showApps'], harness.context);
+  const apps = [];
+  const boxArt = {};
+  for (let i = 0; i < 13; i += 1) {
+    apps.push({ id: 'A' + i, title: 'app ' + i });
+    boxArt['A' + i] = deferred();
+  }
+  const refresh = deferred();
+  const host = asyncRenderingHost('big', apps, boxArt, refresh);
+  host.currentGame = 'A3';
+  const cards = {};
+  apps.forEach((app) => { cards[app.id] = createTrackedCard(app.title); });
+  harness.context.document.querySelector = (selector) => cards[selector.replace('#game-container-', '')] || null;
+
+  const load = await outcomeWithin(functions.showApps(host), 100);
+  assert.strictEqual(load.status, 'resolved', load.error && load.error.stack);
+  const stylingTimers = harness.state.timers.filter((timer) => timer.delay === 100);
+  assert.strictEqual(stylingTimers.length, 1, 'one styling pass is scheduled for the whole list');
+  stylingTimers.forEach((timer) => timer.callback());
+  await flush();
+  assert.strictEqual(host.refreshCalls, 1, 'the server info is refreshed once for 13 apps');
+
+  refresh.resolve(true);
+  await flush();
+  assert.strictEqual(cards.A3.classAdds, 1, 'the running game is marked');
+  assert.strictEqual(cards.A3.title, 'app 3 (Running)');
+  apps.filter((app) => app.id !== 'A3').forEach((app) => {
+    assert.strictEqual(cards[app.id].classAdds, 0, app.id + ' is not marked');
+    assert.strictEqual(cards[app.id].classRemoves, 1, app.id + ' is cleared');
+    assert.strictEqual(cards[app.id].title, app.title);
+  });
+  assert.strictEqual(host.refreshCalls, 1);
+}
+
+// A failed refresh is reported once for the list and styles nothing; an app whose box is gone does not stop the rest.
+async function testListStylingSurvivesFailuresAndMissingBoxes() {
+  const harness = createAsyncRenderingContext();
+  const functions = loadFunctions(['stylizeBoxArts', 'showApps'], harness.context);
+  const errors = [];
+  harness.context.console = quietConsole(errors);
+  const cards = { B: createTrackedCard('b') };
+  harness.context.document.querySelector = (selector) => cards[selector.replace('#game-container-', '')] || null;
+
+  const failing = { currentGame: 'A', refreshServerInfo: () => Promise.reject(new Error('offline')) };
+  await functions.stylizeBoxArts(failing, ['A', 'B'], harness.context.appsGenerationGate.begin());
+  assert.strictEqual(cards.B.classAdds + cards.B.classRemoves, 0, 'nothing is styled when the refresh failed');
+  assert.strictEqual(errors.length, 1, 'the failure is reported once for the list');
+
+  const idle = { refreshCalls: 0, currentGame: 'A', refreshServerInfo() { this.refreshCalls += 1; return Promise.resolve(); } };
+  await functions.stylizeBoxArts(idle, [], harness.context.appsGenerationGate.begin());
+  assert.strictEqual(idle.refreshCalls, 0, 'a list without new boxes asks for nothing');
+
+  const working = { currentGame: 'B', refreshServerInfo: () => Promise.resolve() };
+  await functions.stylizeBoxArts(working, ['A', 'B'], harness.context.appsGenerationGate.begin());
+  assert.strictEqual(cards.B.classAdds, 1, 'a missing box (A) does not stop the others');
 }
 
 function createTrackedCard(title) {
@@ -831,6 +893,8 @@ const cases = {
   'apps-malformed': testMalformedAppsRejectAndRecover,
   'apps-render-throw': testRenderHelperExceptionRejectsAndRecovers,
   'apps-async-generation': testAsyncAppRenderingHonorsGeneration,
+  'apps-style-once': testListRefreshesServerInfoOnceForAllApps,
+  'apps-style-failures': testListStylingSurvivesFailuresAndMissingBoxes,
   indexeddb: testIndexedDbTotality,
   'saved-identity-reload': testSavedCertificateAndHostStateSurviveReload,
   'add-host-cleanup': testAddHostTerminalCleanup,

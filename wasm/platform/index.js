@@ -2459,32 +2459,34 @@ function exitAppDialog() {
 // this requires a hot-off-the-host `api`, and the appId we're going to stylize
 // the function was made like this so that we can remove duplicated code, but
 // not do N*N stylization of the box art, or make the code not flow very well
-function stylizeBoxArt(freshApi, appIdToStylize, appsGeneration) {
-  if (!appsGenerationGate.isCurrent(appsGeneration)) {
+function stylizeBoxArts(freshApi, appIdsToStylize, appsGeneration) {
+  if (!appsGenerationGate.isCurrent(appsGeneration) || appIdsToStylize.length === 0) {
     return Promise.resolve();
   }
-  // Refresh server info and apply the CSS style to the current running game
+  // Refresh server info once for the whole list and apply the CSS style to the current running game. The refresh used to
+  // run for every app, so a list of 13 apps queued 13 identical requests (each with its own connection) on the one HTTP thread.
   return Promise.resolve().then(function() {
     if (!appsGenerationGate.isCurrent(appsGeneration)) return;
     return freshApi.refreshServerInfo();
   }).then(function(ret) {
     if (!appsGenerationGate.isCurrent(appsGeneration)) return;
-    var appBox = document.querySelector('#game-container-' + appIdToStylize);
-    if (!appBox) {
-      console.warn('%c[index.js, stylizeBoxArt]', 'color: green;', 'Warning: No box art found for appId: ' + appIdToStylize);
-      return;
-    }
-    if (!appsGenerationGate.isCurrent(appsGeneration)) return;
-    // If the game is currently running, then apply CSS stylization
-    if (freshApi.currentGame === appIdToStylize) {
-      appBox.classList.add('current-game-active');
-      appBox.title += t(' (Running)');
-    } else {
-      appBox.classList.remove('current-game-active');
-    }
+    appIdsToStylize.forEach(function(appIdToStylize) {
+      var appBox = document.querySelector('#game-container-' + appIdToStylize);
+      if (!appBox) {
+        console.warn('%c[index.js, stylizeBoxArts]', 'color: green;', 'Warning: No box art found for appId: ' + appIdToStylize);
+        return;
+      }
+      // If the game is currently running, then apply CSS stylization
+      if (freshApi.currentGame === appIdToStylize) {
+        appBox.classList.add('current-game-active');
+        appBox.title += t(' (Running)');
+      } else {
+        appBox.classList.remove('current-game-active');
+      }
+    });
   }).catch(function(failedRefreshInfo) {
     if (appsGenerationGate.isCurrent(appsGeneration)) {
-      console.error('%c[index.js, stylizeBoxArt]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo + '!');
+      console.error('%c[index.js, stylizeBoxArts]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo + '!');
     }
   });
 }
@@ -2670,6 +2672,8 @@ function showApps(host) {
         // Reset preview promises for this showApps invocation
         window.previewPromises = [];
 
+        var appIdsToStylize = [];
+
         sortedAppList.forEach(function(app) {
           // Double clicking the button will cause multiple box arts to appear.
           // To mitigate this, we ensure that we don't add a duplicate box art.
@@ -2736,12 +2740,8 @@ function showApps(host) {
 
             // Append the game container to the game grid
             $('#game-grid').append(gameContainer);
-            // Apply style to the game container to indicate whether the game is active or not
-            setTimeout(() => {
-              if (appsGenerationGate.isCurrent(appsGeneration)) {
-                stylizeBoxArt(host, app.id, appsGeneration);
-              }
-            }, 100);
+            // The style that tells whether the game is active is applied to the whole list afterwards
+            appIdsToStylize.push(app.id);
           }
           // Load box art
           var boxArtPlaceholderImg = new Image();
@@ -2818,6 +2818,13 @@ function showApps(host) {
           $(gameContainer).append(boxArtPlaceholderImg);
           boxArtPromises.push(boxArtPromise);
         });
+
+        // Apply style to the game containers to indicate whether the game is active or not, with one request for the list
+        setTimeout(() => {
+          if (appsGenerationGate.isCurrent(appsGeneration)) {
+            stylizeBoxArts(host, appIdsToStylize, appsGeneration);
+          }
+        }, 100);
 
         var settledPromises = boxArtPromises.map(function(p) {
           return p.catch(function(e) {

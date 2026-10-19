@@ -61,6 +61,16 @@ Do porównania z paczką 1 (`-Os`): `decodeAvgUs` i `callbackAvgUs` w `AudioPipe
 `controllerSent` w czasie (wcześniej ok. 110/s), `rumbleReceived` do `rumblePosted` i wiek ostatniego pakietu wideo i audio
 w `StreamHealth`.
 
+## Po teście paczki 2 (2026-10-19)
+
+- **Lista aplikacji odświeżała `/serverinfo` raz na aplikację** (`stylizeBoxArt`), czyli 13 identycznych żądań, każde z nowym
+  połączeniem TLS, w kolejce na jednym wątku HTTP: po powrocie ze streamu pierwsze trwało 3,4 s, ostatnie czekało 7,9 s. Teraz jest
+  jedno odświeżenie na listę (`stylizeBoxArts`) i na jego podstawie oznaczana jest działająca gra.
+- **TLS nie jest wąskim gardłem:** handshake 0,26–0,37 s, `dns` zwykle 0,16–0,19 s (do 2,6 s, gdy wątek główny jest zajęty).
+  W `/launch` i `/resume` host odpowiada 3,5–4,4 s, to jest czas po stronie hosta.
+- **Stan pada:** bezczynny pad ok. 23 stany/s (83% pominiętych), w grze ok. 91/s (drążki ciągle się ruszają).
+- **`-O2`:** `decodeAvgUs` 1142 µs wobec 1381 µs na `-Os` (ok. −17%), wstępnie, 5 okien.
+
 ## Co porównać po teście
 
 1. `inputPollMaxMs`, `inputPollBlockedMs`, `mainCallMaxMs` i `mainJitterMaxMs` w liniach `StreamHealth` (jak responsywny jest wątek główny).
