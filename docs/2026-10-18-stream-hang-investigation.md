@@ -390,3 +390,64 @@ przechodzą przez makra `PACKET_BUFFER_*` z `VideoCanary.h`, które w zwykłym b
 kolejka w chwili uszkodzenia; „freed a buffer that is not registered” oznacza podwójne zwolnienie (`where` mówi którym
 miejscem); brak jakiegokolwiek raportu przy zawieszeniu oznacza, że nagłówek psuje się po ostatnim przeglądzie i zawieszenie
 następuje w ciągu ułamka sekundy, więc trzeba częstszych przeglądów albo innego pomiaru.
+
+## 14. Stan na koniec 2026-10-20 i jak wznowić
+
+**Ustalone dotąd (skrót sekcji 10-13).**
+- Sygnatura zawieszenia jest ta sama za każdym razem (trzy razy): słowo blokady alokatora `0x8000000A`, `_m_waiters = 7`,
+  nikt nie jest w środku, wątki czekają w `malloc`. Przyczyną jest uszkodzona sterta, nie blokada: po jej ręcznym
+  zwolnieniu aplikacja żyje kilkadziesiąt sekund i wątek roboczy rzuca `memory access out of bounds`.
+- Uszkodzony jest nagłówek chunka **żywego** bufora pakietu wideo (`0x5C3` → `0x5B9`, ogon z kanarkiem cały). Odpadły:
+  stos, prymitywy blokady i alokatora (test obciążeniowy), zapisy z JS, przepełnienie przy `recvFrom` (sonda UDP 20/20 i
+  kanarek). Profil Tizen 9 + jQuery 4 nie jest przyczyną (sekcja 12). Kod FEC, kolejki i depakietyzatora jest bez zmian
+  względem bazy i po przeglądzie nie wskazuje błędu (sekcja 13).
+- Zawieszenie da się wywołać na zawołanie przez straty pakietów (QoS 8 Mbit/s przy strumieniu ponad 14 Mbit/s).
+
+**Gotowe i czeka na test na TV.** `artifacts/Moonlight-1.18.0-opt3-diag3.wgt` (commit `089245e`, obraz Dockera
+`moonlight-tizen-diag3`, zbudowany z `--build-arg ALLOC_STRESS=ON`): strażnik wszystkich buforów pakietów wideo (sekcja
+13). Zainstalowany na TV przez Apps2Samsung. Na koniec dnia aplikacja nadal działa na TV w trybie debug (port 36923),
+bez podpiętego watchera: zamknąć ją przed następnym `debug`.
+
+**Dlaczego dzisiaj nie doszło do testu: start streama pada z `-9`.** Od 21:12 UTC aplikacja po instalacji `diag3`
+nie potrafi uruchomić ani wznowić gry: `/launch` i `/resume` kończą się limitem czasu po ok. 4 s (`CURL request completed:
+Timeout was reached`, błąd `-9`), `/serverinfo` też bywa wolne (TLS 2650 ms, kolejka do 3,4 s). Fakty:
+- Host to **Apollo** (`C:\Program Files\Apollo\config\logs\sunshine-*.log`), zrestartowany o 23:15 lokalnie przez
+  `/api/restart` (po tym starcie ma ostrzeżenie „could not acquire the temporary virtual-display lease"). W jego logu nie ma
+  ani jednej linii o `/launch` ani `/resume` z prób TV, są tylko odpytywania `serverinfo` (HTTP) co 5 s. Żądanie HTTPS z
+  TV nie dochodzi więc do obsługi po stronie hosta.
+- Z PC: HTTP `serverinfo` odpowiada w 91 ms, HTTPS od razu odrzuca bez certyfikatu klienta, ping do TV 2 ms bez strat.
+- Podpięty debugger (watcher) spowalnia moduł (tryb debug wasm), więc najpierw podejrzewałem jego. Po odpięciu watchera
+  użytkownik zgłosił, że jest „dalej to samo", więc **to nie sam debugger** (albo aplikacja nie wróciła do pełnej
+  prędkości po odpięciu).
+- Wolne żądania HTTP z TV były już w sesji 20:21 UTC, przed zawieszeniem (`dns 2641 ms`, `host 2864 ms`), a o 21:13:31 UTC
+  `/cancel` przez HTTPS zadziałał (`tls 288 ms`). To nie jest więc nowość z `diag3`, ale `diag3` jest jedyną zmianą
+  w aplikacji od tamtej sesji, której nie wykluczyłem.
+
+**Plan na jutro, w tej kolejności (od najtańszego):**
+1. Zamknąć aplikację na TV, zrestartować TV, uruchomić aplikację zwykłym sposobem (bez `debug`) i spróbować streamu.
+2. Jeśli dalej `-9`: A/B z poprzednim `Moonlight-1.18.0-opt3-diag.wgt` (działał o 20:26 UTC). Jeśli on startuje, a `diag3` nie, błąd
+   siedzi w nowym kodzie (mało prawdopodobne, bo HTTP/TLS go nie dotyka); jeśli oba padają, winne jest otoczenie (host
+   Apollo po restarcie, wirtualny wyświetlacz, certyfikat klienta, TV).
+3. Sprawdzić po stronie hosta: parowanie klienta `TV` w panelu Apollo, ostrzeżenie o dzierżawie wirtualnego wyświetlacza,
+   logi przy próbie startu (czy `/launch` w ogóle się pojawia po restarcie TV).
+4. Dopiero gdy stream startuje: **najpierw uruchomić stream, potem podłączyć watchera** (debug na starcie wydłuża
+   żądania), uruchomić `tools/Start-QosThrottle.ps1 -TvAddress 192.168.100.171 -Mbps 12 -Minutes 20` w oknie
+   administratora **przed** zamrożeniem obrazu (UAC użytkownik klika w streamie Desktop), i czekać na zawieszenie.
+   Przed startem uruchomić `tools/Stop-QosThrottle.ps1` (jako administrator), żeby wiedzieć, że nie została stara polityka.
+
+**Komendy (z `tools/tv-debug/README.md`).** Instalacja: skrypt UI Automation do Apps2Samsung (zostawiony poza repozytorium,
+w katalogu roboczym sesji; użytkownik instaluje też ręcznie). Debug: `docker run --rm mt-sdk-probe bash -lc 'S=/home/
+moonlight/tizen-studio/tools/sdb; $S connect 192.168.100.171; $S -s 192.168.100.171:26101 shell 0 debug MoonLightS.
+MoonlightWasm'` (wypisuje port inspektora). Watcher: `node tools/tv-debug/forensics.js <host:port/devtools/page/ID> <log>
+[plik poleceń]`. Odbiornik logów aplikacji: `tools/Receive-MoonlightLogs.ps1 -OutputDirectory tools/moonlight-tv-logs`
+(port 48150).
+
+**Jak czytać wynik testu z `diag3`** (rozwinięcie w sekcji 13): raport „a registered buffer changed" z krótkim wiekiem i
+zdarzeniami kolejki tuż przed nim wskazuje, co robiła kolejka; „freed a buffer that is not registered" to podwójne
+`free`; brak raportu przy zawieszeniu oznacza uszkodzenie szybsze niż co 32 pakiety (zagęścić przeglądy). Co 30 s w logu
+jest linia stanu `VideoCanary: N buffers registered ...`, której brak oznacza, że strażnik nie działa.
+
+**Otwarte wątki.** (a) Guard blokady (`LOCK_GUARD=on`) nadal niesprawdzony na TV (`tools/tv-debug/futex_guard_probe.js`),
+a po ręcznym zwolnieniu blokady host i tak zrywa sesję po ok. 2 min. (b) Tryb cykliczny dławienia (np. 20 s ciasno, 20 s
+swobodnie) do symulacji zrywów strat. (c) Jeśli strażnik nic nie złapie, następny krok to częstsze przeglądy albo
+strażnik także dla innych małych alokacji w ścieżce wideo (kolejka decode unit, `std::vector` dekodera).
