@@ -241,8 +241,19 @@ wątek niż ten, który go zaalokował.
 3. ~~Zapisy z JS do pamięci modułu~~ **przejrzane, czyste.** W kodzie projektu (`wasm/`, `wasm/platform/`) jedynym
    zapisem z JS do pamięci modułu jest `__fillGamepadEventData` w `gamepad_sampling.hpp`: najwyżej 16 slotów, krok
    `sizeof(EmscriptenGamepadEvent)`, tablica 16 elementów w `gamepad.cpp`. Pozostałe miejsca (`audio.js`, `PostPromiseMessage`
-   w `main.cpp`) tylko czytają. Nie sprawdzono kodu samego Emscriptena (np. czy `__fillGamepadEventData` ogranicza
-   liczbę osi i przycisków do rozmiaru struktury; zwykły pad ma ich poniżej 32).
+   w `main.cpp`) tylko czytają. Kod Emscriptena (`library_html5.js`, `library_pthread.js` tego toolchainu) przejrzano:
+   - `_fillGamepadEventData` **nie ogranicza** liczby osi i przycisków do rozmiaru struktury (pętle po
+     `e.axes.length` i `e.buttons.length` zapisują `axis[i]`, `analogButton[i]` i `digitalButton[i]` bez sprawdzenia; tylko
+     napisy `id` i `mapping` są ograniczone do 64 bajtów). Pad zgłaszający ponad 64 osi lub przycisków pisałby poza
+     strukturę, a nasza tablica `events[16]` leży w pamięci statycznej, obok struktur alokatora. To ten sam kod co w
+     upstreamie (ścieżka `emscripten_get_gamepad_status`), a zwykłe pady mają kilka osi i kilkanaście przycisków, więc
+     nie ma dowodu, że to nasza przyczyna. Tani test: sprawdzić w logach `numAxes` i `numButtons` używanego pada.
+   - `emscripten_futex_wait`/`wake`: emulacja czekania wątku głównego rejestruje adres przed sprawdzeniem wartości,
+     przywraca poprzedni adres przy timeoucie i `EWOULDBLOCK`, a zagnieżdżone czekanie kończy się co najwyżej
+     fałszywym obudzeniem. Nie znalazłem w niej scenariusza trwałej utraty obudzenia na blokadzie alokatora.
+   - Zauważone przy zawieszeniu 3: `_m_waiters = 7` przy sześciu widocznych czekających, czyli jeden zgubiony
+     licznik. Któryś wątek opuścił czekanie na blokadzie bez zmniejszenia licznika (np. wyjątek w środku czekania). To
+     poszlaka o wcześniejszym nietypowym wyjściu wątku, ale bez śladu w logach.
 4. Niezależnie od przyczyny: mniej alokacji na gorących ścieżkach (bufory pakietów wideo, pakiety ENet) wydłuża czas
    między awariami, a doraźny watchdog w wątku natywnym, który wykryje brak postępu i zwolni zablokowaną blokadę, jest
    wykonalny (ręczne zwolnienie przywróciło aplikację), choć nie wiadomo, czy sesja by to przeżyła.
