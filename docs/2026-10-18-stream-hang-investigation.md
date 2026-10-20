@@ -238,7 +238,11 @@ wątek niż ten, który go zaalokował.
    funkcji, ale żadna ramka spoza 30 największych (w tym żaden callback strumienia) nie przekracza 2,3 KB.
 2. Wątek główny w grze o blokadę razem z emulacją futeksa i kolejką proxy: test obciążeniowy z wywołaniami proxy i
    `malloc`/`free` wołanymi z JS na wątku głównym, w trakcie obciążenia wątków roboczych.
-3. Zapisy z JS do pamięci modułu (`HEAP*` poza kodem Emscriptena).
+3. ~~Zapisy z JS do pamięci modułu~~ **przejrzane, czyste.** W kodzie projektu (`wasm/`, `wasm/platform/`) jedynym
+   zapisem z JS do pamięci modułu jest `__fillGamepadEventData` w `gamepad_sampling.hpp`: najwyżej 16 slotów, krok
+   `sizeof(EmscriptenGamepadEvent)`, tablica 16 elementów w `gamepad.cpp`. Pozostałe miejsca (`audio.js`, `PostPromiseMessage`
+   w `main.cpp`) tylko czytają. Nie sprawdzono kodu samego Emscriptena (np. czy `__fillGamepadEventData` ogranicza
+   liczbę osi i przycisków do rozmiaru struktury; zwykły pad ma ich poniżej 32).
 4. Niezależnie od przyczyny: mniej alokacji na gorących ścieżkach (bufory pakietów wideo, pakiety ENet) wydłuża czas
    między awariami, a doraźny watchdog w wątku natywnym, który wykryje brak postępu i zwolni zablokowaną blokadę, jest
    wykonalny (ręczne zwolnienie przywróciło aplikację), choć nie wiadomo, czy sesja by to przeżyła.
