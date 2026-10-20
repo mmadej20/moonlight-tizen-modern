@@ -282,3 +282,44 @@ maskowania; `on` zapisuje prawdziwy adres). Zbudowano trzy warianty bieżących 
 streama, jest reproduktorem, na którym watcher z `tools/tv-debug/` pokaże, czy to ta sama zablokowana blokada
 alokatora, i na którym da się sprawdzić guard.
 
+## 12. Zawieszenie na buildzie 9.0 + jQuery 4 i uszkodzony bufor pakietu wideo (2026-10-20)
+
+Wynik testu z sekcji 11 (`opt3-r90-jq4`, guard wyłączony, watcher z `tools/tv-debug/`):
+
+- Pierwszy stream skończył się po 16 s rozłączeniem ENet od hosta (TV responsywny, bez zawieszenia). Drugi działał
+  33,5 min (od 18:33:24 do 19:06:51 UTC) i się **zawiesił**. Sam profil 9.0 + jQuery 4 nie daje więc powtarzalnego
+  freeza po starcie streama: ten sam typ zawieszenia występuje na profilu legacy (sekcja 10), a tu po kilkudziesięciu
+  minutach. Brak błędów JS w logu. Samo `7eff49d` nie jest przyczyną.
+- Sygnatura identyczna jak zawieszenie 3 z sekcji 10, bez trapu wasm: sześć wątków czeka w `malloc` (główny w
+  `std::string::reserve`, kontrolny ENet w `enet_peer_queue_acknowledgement`, wejście kontrolera, wysyłka wejścia ENet,
+  statystyki strat, odbiór wideo), pozostałe na zwykłych kolejkach, odbiór audio pracuje. Słowo blokady alokatora
+  `0x8000000A` pod adresem 2666176, **`_m_waiters = 7` przy sześciu widocznych czekających**, tak samo jak za pierwszym
+  razem.
+- Zwolnienie blokady (`Atomics.store(0)` i `_emscripten_futex_wake`) obudziło sześć wątków i aplikację, ale host zdążył
+  w międzyczasie zerwać sesję (po ok. 2,5 min ciszy, `streamTerminated: -1`).
+
+**Tym razem sterta jest uszkodzona, i widać czym.** Skan łańcucha chunków zatrzymał się na chunku 1280 B pod adresem
+21632104 (0x14A1468): jego nagłówek mówi „wolny", ale stopka się nie zgadza, a nagłówek następnego chunka to losowe
+bajty (`head=2960565264`). W treści tego chunka, dokładnie tam, gdzie wolny chunk ma wskaźniki `fd`/`bk`, leży
+**nagłówek pakietu RTP wideo** (`90 00 8c 38 8c 24 c2 0a 00 00 00 00 …`), a po nim ok. 1400 bajtów skompresowanych danych,
+które wychodzą poza chunk i nadpisują nagłówek następnego. Pakiet wideo zapisany w chunku mniejszym niż bufor pakietu
+(`StreamConfig.packetSize` 1392, bufor `1392 + 16 + sizeof(RTPV_QUEUE_ENTRY)` = 1448 B, czyli chunk 1456 B).
+
+To przesuwa podejrzenie z alokatora na ścieżkę odbioru wideo: albo bufor pakietu został zwolniony i nadal był używany
+(`VideoReceiveThreadProc` → `RtpvAddPacket` → kolejka FEC → depakietyzator), albo odbiór UDP zapisuje więcej niż
+dostał. Odbiór idzie przez `wasm_recvfrom`, czyli natywne wiązanie hosta Samsunga (`tizentvwasm.SocketsHostBindings.
+recvFrom`, `library_tizen_socket_host.js`), którego kodu nie ma w źródłach toolchainu. Przejrzano kod
+`VideoStream.c` i `RtpVideoQueue.c` (`RtpvAddPacket`, `reconstructFrame`, własność bufora) i nie znaleziono w nim
+oczywistego błędu własności: bufor przechodzi do kolejki tylko przy `RTPF_RET_QUEUED`, odrzucone pakiety są ponownie
+używane. Nie wykluczono ścieżki FEC (bufor odzyskanego pakietu ma ten sam rozmiar) ani zbiegu z `notifyFrameLost`.
+
+**Dalsze kroki, od najtańszego:**
+
+1. Build diagnostyczny z kanarkiem za buforem pakietu wideo (`bufferSize + 16` z wzorcem na końcu), sprawdzanym tuż po
+   `recvUdpSocket` i przy każdym `free` bufora pakietu. Rozstrzygnie, czy zapis wychodzi poza bufor od razu po odbiorze
+   (wiązanie Samsunga), czy dopiero później (use-after-free w kolejce lub depakietyzatorze), i zaloguje wtedy rozmiar,
+   numer sekwencyjny i ramkę.
+2. Walker sterty rozszerzony o sprawdzanie wolnych chunków (wskaźniki `fd`/`bk` muszą wskazywać na chunk lub kosz),
+   żeby takie uszkodzenie wykrywać w ciągu 15 s od zapisu, a nie dopiero przy zawieszeniu.
+3. Guard z sekcji 11 jako zabezpieczenie niezależne od przyczyny, po sprawdzeniu na TV (`futex_guard_probe.js`).
+
