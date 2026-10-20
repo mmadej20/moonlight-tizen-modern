@@ -337,3 +337,38 @@ niż dostał" nie znajduje potwierdzenia w tym teście. Zostaje podejrzenie o bu
 FEC, depakietyzator, `notifyFrameLost`), które ma rozstrzygnąć kanarek w `VideoStream.c` (też w `opt3-diag`, wymaga
 streamu). Ograniczenie: sonda odbiera pojedyncze datagramy, nie 15 tys. pakietów na sekundę.
 
+
+## 13. Zawieszenie na buildzie z kanarkiem pod dławieniem QoS (2026-10-20)
+
+Warunki: `opt3-diag` (sonda UDP, kanarek 16 B za buforem pakietu wideo, guard wyłączony), PC dławi ruch do TV polityką
+QoS (`tools/Start-QosThrottle.ps1`, 8 Mbit/s przy strumieniu ponad 14 Mbit/s, więc ciągłe straty i prośby o IDR/RFI).
+Zawieszenie wystąpiło o 20:41:08 UTC, w trakcie streamu.
+
+- **Kanarek milczy.** W logu aplikacji nie ma ani jednego `VideoCanary`: bajty za buforem pakietu były nietknięte
+  zarówno tuż po `recvUdpSocket`, jak i przed ponownym użyciem bufora. Odbiór (natywne `recvFrom`) nie wychodzi poza
+  bufor, co zgadza się z wynikiem sondy z sekcji 12.
+- **Sygnatura blokady ta sama co poprzednio:** słowo blokady alokatora `0x8000000A` pod adresem 2682440, `_m_waiters = 7`,
+  nikt nie jest w środku, wątki czekają w `malloc`.
+- **Uszkodzony jest nagłówek chunka, a nie jego koniec.** Skan łańcucha zatrzymał się na żywym buforze pakietu wideo:
+  nagłówek chunka ma `0x5B9` (rozmiar 1464, `PINUSE`, **bez** `CINUSE`), a powinien mieć `0x5C3` (1472 = 1464 B żądania z
+  kanarkiem + 4 B nagłówka, zaokrąglone do 8, `PINUSE|CINUSE`). Ogon z kanarkiem w tym samym buforze jest cały. Nagłówek
+  wygląda więc jak nagłówek wolnego chunka o rozmiarze równym rozmiarowi żądania, zapisany na miejsce nagłówka żywego
+  chunka.
+- W obu zarejestrowanych przypadkach (sekcja 12 i ta) w chunku bezpośrednio przed uszkodzonym nagłówkiem leży bufor
+  tekstowy kończący się na granicy. To słaby trop: może to być zapis wstecz (underrun) albo zapis „ogona" bufora
+  tekstowego o jeden rekord za daleko, ale z jednego przypadku więcej niż dopasowanie adresów nie wynika.
+- Po zwolnieniu blokady (`Atomics.store(0)` + `_emscripten_futex_wake`, obudzone sześć wątków) aplikacja ruszyła, a po
+  chwili (20:45:50) wątek roboczy rzucił `RuntimeError: memory access out of bounds`, i o 20:45:56 główny
+  wątek znów przestał odpowiadać. Zwolnienie blokady nie leczy więc uszkodzonej sterty: guard z sekcji 11 daje co najwyżej
+  kilka sekund życia, nie rozwiązanie.
+
+**Co z tego wynika.** Odpada: przepełnienie przy odbiorze UDP (sonda, kanarek) oraz prymitywy blokady i alokatora (test
+obciążeniowy). Zostaje zapis, który trafia w 4 bajty nagłówka żywego chunka w oknie między jego alokacją a zwolnieniem:
+zapis wsteczny z poprzedniego chunka, stary wskaźnik na chunk o rozmiarze 1464 (ktoś nadal zapisuje metadane chunka,
+który został już zwolniony i ponownie podzielony) albo pojedynczy zbłąkany zapis małej wartości.
+
+**Następny krok: „strażnik nagłówka".** W `VideoStream.c`, razem z kanarkiem, zapamiętać przy alokacji słowo
+`((uint32_t*)buffer)[-1]` i porównywać je przy każdym sprawdzeniu kanarka; przy różnicy zalogować moment (po odbiorze albo
+przed ponownym użyciem), 16 bajtów przed nagłówkiem i identyfikator pakietu. Pozwoli to ustalić, czy nagłówek psuje się
+w czasie, gdy wątek trzyma bufor (wtedy sprawcą jest inny wątek), czy wcześniej, jeszcze przed przekazaniem bufora do
+odbioru (wtedy sprawcą jest alokator lub poprzedni właściciel chunka).

@@ -8,9 +8,13 @@
   reference frame invalidation of the client (docs/2026-10-18-stream-hang-investigation.md). Nothing is sent to the TV by
   this script, the stream itself is what gets squeezed.
 
-  The policy stays in place until it is removed, also after a restart. By default this script therefore waits for
-  -Minutes and removes the policy itself when the time is up or when it is stopped with Ctrl+C. If the window is closed
-  in some other way, or with -Minutes 0, remove the policy with Stop-QosThrottle.ps1.
+  The policy is created in the active store, where it takes effect at once and is not kept across a restart. If that
+  store refuses it, the policy goes to the local store, which Windows applies after a policy refresh, and the script runs
+  gpupdate to get it applied. In both cases the script checks that the policy is in effect and says so loudly when it is
+  not.
+
+  By default the script waits for -Minutes and removes the policy itself when the time is up or when it is stopped with
+  Ctrl+C. If the window is closed in some other way, or with -Minutes 0, remove the policy with Stop-QosThrottle.ps1.
 
   Needs an elevated PowerShell (Run as administrator).
 
@@ -74,27 +78,50 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
   exit 1
 }
 
+# Removes the policy from the active store and from the local store; a store that does not have it or refuses is skipped
+function Remove-QosPolicy {
+  try { Remove-NetQosPolicy -Name $PolicyName -PolicyStore ActiveStore -Confirm:$false -ErrorAction Stop } catch { }
+  try { Remove-NetQosPolicy -Name $PolicyName -Confirm:$false -ErrorAction Stop } catch { }
+}
+
+function Test-QosPolicyInEffect {
+  return [bool](Get-NetQosPolicy -Name $PolicyName -PolicyStore ActiveStore -ErrorAction SilentlyContinue)
+}
+
 # A policy of the same name from an earlier run is replaced, so that the rate is always the one asked for now
-if (Get-NetQosPolicy -Name $PolicyName -ErrorAction SilentlyContinue) {
+if ((Test-QosPolicyInEffect) -or (Get-NetQosPolicy -Name $PolicyName -ErrorAction SilentlyContinue)) {
   Write-Host "Replacing the existing policy '$PolicyName'."
-  Remove-NetQosPolicy -Name $PolicyName -Confirm:$false
+  Remove-QosPolicy
 }
 
-New-NetQosPolicy -Name $PolicyName `
-  -IPDstPrefixMatchCondition $prefix `
-  -IPProtocolMatchCondition $Protocol `
-  -NetworkProfile All `
-  -ThrottleRateActionBitsPerSecond $bitsPerSecond | Out-Null
+$policyArguments = @{
+  Name = $PolicyName
+  IPDstPrefixMatchCondition = $prefix
+  IPProtocolMatchCondition = $Protocol
+  NetworkProfile = 'All'
+  ThrottleRateActionBitsPerSecond = $bitsPerSecond
+}
 
-# What the system really applies: the effective policies of the active store
-$effective = Get-NetQosPolicy -Name $PolicyName -PolicyStore ActiveStore -ErrorAction SilentlyContinue
-if ($effective) {
-  $effective | Format-List Name, PolicyStore, IPDstPrefixMatchCondition, IPProtocolMatchCondition, NetworkProfile, ThrottleRateAction
+$store = 'the active store'
+try {
+  New-NetQosPolicy @policyArguments -PolicyStore ActiveStore | Out-Null
+} catch {
+  Write-Host "The active store refused the policy ($($_.Exception.Message)); using the local store and a policy refresh."
+  $store = 'the local store'
+  New-NetQosPolicy @policyArguments | Out-Null
+  & gpupdate.exe /target:computer /force | Out-Null
+}
+
+# Give a policy refresh a moment, then say plainly whether the limit is really in effect
+for ($i = 0; $i -lt 6 -and -not (Test-QosPolicyInEffect); $i++) { Start-Sleep -Seconds 2 }
+
+if (Test-QosPolicyInEffect) {
+  Get-NetQosPolicy -Name $PolicyName -PolicyStore ActiveStore | Format-List Name, PolicyStore, IPDstPrefixMatchCondition, IPProtocolMatchCondition, NetworkProfile, ThrottleRateAction
+  Write-Host "The policy is in effect (created in $store): the traffic to $TvAddress is limited to $Mbps Mbps now."
 } else {
-  Write-Host 'WARNING: the policy was created but is not (yet) in the active store; check it with Get-NetQosPolicy -PolicyStore ActiveStore.'
+  Write-Host "WARNING: the policy was created in $store but is NOT in effect: Get-NetQosPolicy -PolicyStore ActiveStore does not list it."
+  Write-Host 'The limit does not work yet. Run gpupdate /force, or give the system a few minutes, and check again.'
 }
-
-Write-Host "The traffic to $TvAddress is limited to $Mbps Mbps now."
 
 if ($Minutes -eq 0) {
   Write-Host 'Remove the limit with:'
@@ -111,8 +138,8 @@ try {
   }
 }
 finally {
-  Remove-NetQosPolicy -Name $PolicyName -Confirm:$false -ErrorAction SilentlyContinue
-  if (Get-NetQosPolicy -Name $PolicyName -ErrorAction SilentlyContinue) {
+  Remove-QosPolicy
+  if ((Test-QosPolicyInEffect) -or (Get-NetQosPolicy -Name $PolicyName -ErrorAction SilentlyContinue)) {
     Write-Host "WARNING: the policy '$PolicyName' could not be removed; run Stop-QosThrottle.ps1."
   } else {
     Write-Host "The limit was removed; the traffic to $TvAddress is no longer limited."
