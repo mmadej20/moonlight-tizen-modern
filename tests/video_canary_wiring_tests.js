@@ -65,11 +65,11 @@ assert(/#define HEAD_MASK \(~\(uint32_t\)1\)/.test(canarySource));
 assert(/freed a buffer that is not registered \(freed twice\?\)/.test(canarySource));
 assert(/\(char\*\)entry == \(char\*\)allocPtr \+ configuredEntryOffset/.test(canarySource));
 
-// The macro is defined only by the diagnostic option of CMake, together with the probes; the source is picked up
-// by the glob of moonlight-common-c and is empty without it
+// The macro is defined only by the diagnostic option of CMake, together with the probes; the source is always in the
+// library (the list of sources is written out, there is no glob) and is empty without the macro
 assert(/if\(MOONLIGHT_ALLOC_STRESS\)[\s\S]*target_compile_definitions\(moonlight-common-c PRIVATE MOONLIGHT_VIDEO_CANARY=1\)[\s\S]*endif\(\)/.test(cmake));
 assert(/wasm\/udp_recv_probe\.cpp/.test(cmake));
 assert(!/MOONLIGHT_VIDEO_CANARY/.test(cmake.replace(/if\(MOONLIGHT_ALLOC_STRESS\)[\s\S]*?endif\(\)/, '')), 'nothing else defines it');
-assert(/aux_source_directory\(src SRC_LIST\)/.test(read('moonlight-common-c/CMakeLists.txt')));
+assert(/add_library\(moonlight-common-c STATIC[\s\S]*moonlight-common-c\/src\/VideoCanary\.c[\s\S]*?\)/.test(cmake), 'the source is in the library');
 
 console.log('video canary wiring tests passed');

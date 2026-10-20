@@ -58,6 +58,7 @@ add_library(moonlight-common-c STATIC
     moonlight-common-c/src/RtspParser.c
     moonlight-common-c/src/SdpGenerator.c
     moonlight-common-c/src/SimpleStun.c
+    moonlight-common-c/src/VideoCanary.c
     moonlight-common-c/src/VideoDepacketizer.c
     moonlight-common-c/src/VideoStream.c
 )
@@ -275,7 +276,7 @@ target_compile_features(moonlight-wasm PUBLIC cxx_std_17)
 # The level goes into the module, so that every stream log says which build it came from
 target_compile_definitions(moonlight-wasm PRIVATE MOONLIGHT_OPT_LEVEL_TEXT="${MOONLIGHT_OPT_LEVEL}")
 # Diagnostic builds only: compiles the allocator stress test of wasm/alloc_stress.hpp and the UDP receive probe of
-# wasm/udp_recv_probe.hpp into the module, and puts a guard pattern behind the video packet buffer (VideoStream.c)
+# wasm/udp_recv_probe.hpp into the module, and guards the video packet buffers (moonlight-common-c/src/VideoCanary.c)
 option(MOONLIGHT_ALLOC_STRESS "Compile the diagnostic probes into the module" OFF)
 if(MOONLIGHT_ALLOC_STRESS)
     target_sources(moonlight-wasm PRIVATE wasm/alloc_stress.cpp wasm/udp_recv_probe.cpp)
