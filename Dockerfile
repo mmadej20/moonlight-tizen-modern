@@ -82,9 +82,12 @@ COPY --chown=moonlight wasm/dispatcher ./moonlight-tizen/wasm/dispatcher/
 
 # Optimization level of the WASM module: -O2 by default, --build-arg OPT_LEVEL=-Os builds for size like before
 ARG OPT_LEVEL=-O2
+# Diagnostic builds only: --build-arg ALLOC_STRESS=ON compiles the allocator stress test into the module
+ARG ALLOC_STRESS=OFF
 RUN cmake \
 	-DCMAKE_TOOLCHAIN_FILE=/home/moonlight/emscripten-release-bundle/emsdk/fastcomp/emscripten/cmake/Modules/Platform/Emscripten.cmake \
 	-DMOONLIGHT_OPT_LEVEL=${OPT_LEVEL} \
+	-DMOONLIGHT_ALLOC_STRESS=${ALLOC_STRESS} \
 	-DCMAKE_C_COMPILER_LAUNCHER=ccache \
 	-DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
 	-G Ninja \

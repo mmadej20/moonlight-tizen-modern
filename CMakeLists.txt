@@ -274,6 +274,12 @@ set_target_properties(moonlight-wasm
 target_compile_features(moonlight-wasm PUBLIC cxx_std_17)
 # The level goes into the module, so that every stream log says which build it came from
 target_compile_definitions(moonlight-wasm PRIVATE MOONLIGHT_OPT_LEVEL_TEXT="${MOONLIGHT_OPT_LEVEL}")
+# Diagnostic builds only: compiles the allocator stress test of wasm/alloc_stress.hpp into the module
+option(MOONLIGHT_ALLOC_STRESS "Compile the allocator stress test into the module" OFF)
+if(MOONLIGHT_ALLOC_STRESS)
+    target_sources(moonlight-wasm PRIVATE wasm/alloc_stress.cpp)
+    target_compile_definitions(moonlight-wasm PRIVATE MOONLIGHT_ALLOC_STRESS=1)
+endif()
 set_target_properties(moonlight-wasm
     PROPERTIES
         LINK_FLAGS
