@@ -166,3 +166,75 @@ zawijaniem (poprawne dla przedziałów krótszych niż 24 dni). `tests/wasm_atom
 **Wniosek metodyczny:** błąd w kodzie diagnostycznym wyglądał jak zawieszenie mechanizmu proxy Emscriptena
 (wątek roboczy w synchronicznym wywołaniu do wątku głównego). Rozstrzygnęło go dopiero odtworzenie w przeglądarce, a nie
 analiza kodu źródłowego tego mechanizmu.
+
+## 10. Zawieszenia po stronie sterty: forensyka na TV i test obciążeniowy (2026-10-19/20)
+
+Zawieszenia długiego streamu nie zniknęły po naprawie z sekcji 9. Build `opt2b-O2` (ten sam wasm co `opt2-O2`) złapał
+na TV trzy różne sygnatury. Narzędzia, którymi je złapano, są w `tools/tv-debug/` (opis w README tego katalogu):
+watcher przez Chrome DevTools Protocol, walker łańcucha chunków dlmalloc wstrzykiwany do strony oraz kanał komend do
+badania zamrożonego procesu.
+
+**Złapane sygnatury.**
+
+1. *19.10 14:07 UTC, 63 s po starcie streamu.* Wątek kontrolny ENet wywrócił się na `memory access out of bounds` w
+   `free` (`enet_packet_destroy` ← `enet_protocol_remove_sent_reliable_command` ← `enet_host_service`). Wątek zginął z
+   zajętą blokadą alokatora, reszta czekała w `_emscripten_futex_wait`.
+2. *19.10 19:40 UTC, po 27 min.* Wątek odbioru wideo (`VideoReceiveThreadProc` → `RtpvAddPacket` → `queueRtpPacket` →
+   `malloc`) wywrócił się w `malloc` 30 ms po „Sending RFI request for unrecoverable frame" i „VideoRecovery IDR frame
+   assembled". Równocześnie wątek kontrolny ENet stał w `free` z tej samej ścieżki co w punkcie 1.
+3. *19.10 20:20 UTC, po 23 min.* **Zawieszenie bez trapu.** Szczegóły niżej.
+
+**Zawieszenie 3.**
+
+- Blokada alokatora (zwykły `pthread_mutex`, ścieżka `malloc` → `__pthread_mutex_lock` → `__timedwait_cp` →
+  `_emscripten_futex_wait`) miała `_m_lock = 0x8000000A` i `_m_waiters = 7`. W libc tego toolchainu `EBUSY` to
+  `__WASI_ERRNO_BUSY` = 10, więc to zwyczajny stan „zajęty, są czekający"; szybka ścieżka nie zapisuje właściciela.
+- Na tym samym adresie futeksa, z oczekiwaną wartością równą bieżącej, czekało sześć wątków: główny (w
+  `getStreamHealth`), odbiór wideo, wysyłka wejścia ENet, wątek kontrolny (`free`), wątek wejścia kontrolera i wątek
+  statystyk strat. Pozostałe wątki stały na zwykłych kolejkach i zdarzeniach, wątek odbioru audio pracował. Żaden nie
+  był w alokatorze, czyli **nikt nie trzymał blokady**.
+- Wszystkie 20 workerów jest rozliczone: 13 w użyciu, 7 bezczynnych. Bezczynny worker nie odpowiada na ewaluację,
+  dopóki nie wykona JS, bo czeka na niego zakolejkowane `Debugger.pause`; timeout nie oznacza więc śmierci. Nie było
+  zdarzeń `detached` ani wyjątków w konsolach workerów.
+- Wyzerowanie słowa blokady i `_emscripten_futex_wake(adres, INT_MAX)` z wstrzymanego workera obudziło sześć wątków.
+  Wątek główny ruszył od razu, workery oddały zaległe logi, aplikacja zgłosiła `streamTerminated: -1` (host zerwał
+  sesję po minutach ciszy) i wróciła do listy gier. Całe zawieszenie to ta jedna zablokowana blokada.
+- Łańcuch chunków: 4012 chunków z poprawnymi rozmiarami i jedna anomalia. Wolny chunk 456 B (w drzewie, ze stopką 456,
+  z resztkami tekstu heartbeatu `getStreamHealth` w treści) ma następnika z ustawionym bitem `PINUSE`, którego `free`
+  nie zostawia. Kontrole co 15 s były czyste do ok. 20:20:37, więc anomalia powstała w ostatnich sekundach przed
+  zawieszeniem.
+
+**Test obciążeniowy.** `wasm/alloc_stress.hpp` (logika, testowana na hoście w `tests/alloc_stress_tests.cpp`, razem z
+dowodem, że wykrywa wstrzyknięty wyścig licznika i uszkodzony blok) i `wasm/alloc_stress.cpp` (eksport do JS). Wchodzi
+do modułu tylko z `docker build --build-arg ALLOC_STRESS=ON`. Robi na wielu wątkach: `std::mutex` wokół niepodzielnego
+odczytu i zapisu, licznik 32-bitowy atomowy, spin-lock na `exchange`, oraz `malloc`/`realloc`/`free` bloków w
+rozmiarach z mieszanki streamu, wypełnionych wzorcem i sprawdzanych przed zwolnieniem; co czwarty blok zwalnia inny
+wątek niż ten, który go zaalokował.
+
+| Przebieg | Wynik |
+|---|---|
+| 12 wątków bez pauz | Po 28 s czysto, po 43 s aplikacja zniknęła. Cały TV zaczął się zacinać i trzeba go było zrestartować. Za ciężki, nic z niego nie wynika. Stąd pauzy w wątkach i automatyczne przerwanie, gdy główny wątek odpowiada wolniej niż 2,5 s. |
+| 3 wątki, 120 s | 3,46 mln iteracji, 0 błędów, liczniki zgodne, łańcuch sterty spójny. |
+| 4 wątki, 20 min | 79 mln iteracji (79 mln `malloc`, 79 mln `free`, 2,5 mln `realloc`), 19,7 mln zwolnień przez inny wątek, 0 błędów wzorców, liczniki mutexa, atomika i spin-locka zgodne co do jednej jednostki, najdłuższy bezruch wątku kilka ms, łańcuch sterty spójny. |
+
+**Wnioski.**
+
+- Mutex, 32-bitowe atomiki i `malloc`/`free` działają poprawnie pod dużym obciążeniem samych wątków roboczych (ok.
+  160 mln operacji alokatora, w tym samym rzędzie co ekspozycja streamu do awarii). Sam toolchain lub platforma psująca
+  blokadę jest przez to mało prawdopodobna.
+- Test **nie obejmował** wątku głównego, na którym `futex_wait` to pętla obsługująca kolejkę wywołań proxy, a nie
+  `Atomics.wait`, ani kodu aplikacji piszącego do pamięci.
+- Sygnatura 3 (anomalia powstała tuż przy zawieszeniu, blokada bez właściciela) pasuje do wątku zatrzymanego w środku
+  operacji alokatora. Którego i dlaczego, nie ustalono.
+
+**Otwarte hipotezy i dalsze kroki.**
+
+1. Przepełnienie stosu wątku: stosy wątków to bloki po 2 MB z `malloc`, a przepełnienie uderzyłoby w nagłówek
+   sąsiedniego chunka. Kierunek wzrostu stosu w tym toolchainie nie jest zweryfikowany. Do zmierzenia: wysokie znaczniki
+   zapełnienia stosów wszystkich wątków po kilku minutach prawdziwego streamu.
+2. Wątek główny w grze o blokadę razem z emulacją futeksa i kolejką proxy: test obciążeniowy z wywołaniami proxy i
+   `malloc`/`free` wołanymi z JS na wątku głównym, w trakcie obciążenia wątków roboczych.
+3. Zapisy z JS do pamięci modułu (`HEAP*` poza kodem Emscriptena).
+4. Niezależnie od przyczyny: mniej alokacji na gorących ścieżkach (bufory pakietów wideo, pakiety ENet) wydłuża czas
+   między awariami, a doraźny watchdog w wątku natywnym, który wykryje brak postępu i zwolni zablokowaną blokadę, jest
+   wykonalny (ręczne zwolnienie przywróciło aplikację), choć nie wiadomo, czy sesja by to przeżyła.
