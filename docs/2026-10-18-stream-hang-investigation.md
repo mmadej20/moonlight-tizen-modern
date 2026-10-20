@@ -229,9 +229,13 @@ wątek niż ten, który go zaalokował.
 
 **Otwarte hipotezy i dalsze kroki.**
 
-1. Przepełnienie stosu wątku: stosy wątków to bloki po 2 MB z `malloc`, a przepełnienie uderzyłoby w nagłówek
-   sąsiedniego chunka. Kierunek wzrostu stosu w tym toolchainie nie jest zweryfikowany. Do zmierzenia: wysokie znaczniki
-   zapełnienia stosów wszystkich wątków po kilku minutach prawdziwego streamu.
+1. ~~Przepełnienie stosu wątku~~ **wykluczone analizą statyczną** (`tools/tv-debug/stack_frames.js`, bez TV i bez
+   streamu). Stosy wątków to bloki po 2 MB z `malloc`, a stos rośnie w górę (wskaźnik stosu startuje poniżej
+   `STACK_MAX`), więc przepełnienie uderzyłoby w nagłówek następnego chunka. Ale największa ramka w module (`-O2`) to
+   `reed_solomon_reconstruct` 70 KB, najcięższy łańcuch bezpośrednich wywołań (wątki odbioru wideo i audio) to ok.
+   75 KB, wśród wywołań bezpośrednich nie ma rekursji, a 35 funkcji z alokacją dynamiczną na stosie to dekodowanie Opus,
+   `invert_mat` z FEC i kilka drobnych. Zapas względem 2 MB to ponad 25 razy. Nie śledzono wywołań przez wskaźniki do
+   funkcji, ale żadna ramka spoza 30 największych (w tym żaden callback strumienia) nie przekracza 2,3 KB.
 2. Wątek główny w grze o blokadę razem z emulacją futeksa i kolejką proxy: test obciążeniowy z wywołaniami proxy i
    `malloc`/`free` wołanymi z JS na wątku głównym, w trakcie obciążenia wątków roboczych.
 3. Zapisy z JS do pamięci modułu (`HEAP*` poza kodem Emscriptena).

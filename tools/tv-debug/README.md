@@ -55,3 +55,21 @@ main thread answers slowly, and walks the heap at the end.
 
 Keep the load low. A first version with 12 threads and no pauses made the whole TV lag until it was restarted; the
 threads of the stream mostly wait. The variants use 3 or 4 threads that sleep after every few iterations.
+
+## Static stack analysis
+
+`stack_frames.js` works on a disassembly of the module and needs neither the TV nor a stream. It lists the frame size
+of every function, the functions that allocate on the stack at run time (`alloca`, variable length arrays), and the
+heaviest chain of direct calls from each thread entry. The stack of a thread of this module grows upward and is a
+2 MB block from `malloc`, so an overflow would land in the header of the next heap chunk.
+
+```
+docker build --target builder -t mt-builder .
+docker run --rm -v <dir with the wasm>:/work mt-builder /home/moonlight/emscripten-release-bundle/emsdk/fastcomp/bin/wasm-dis /work/moonlight-wasm.wasm -o /work/module.wat
+node stack_frames.js module.wat <wasm with names, or ->
+```
+
+Result for the `-O2` module: the biggest frame is `reed_solomon_reconstruct` with 70 KB, the heaviest direct chain
+(video and audio receive threads) is about 75 KB, there is no recursion among direct calls, and the 35 functions with a
+dynamic allocation are Opus decoding, `invert_mat` of the FEC and a few small ones. That is a 2 MB limit with a margin
+of more than 25 times; calls through function pointers are not followed.
