@@ -73,3 +73,18 @@ Result for the `-O2` module: the biggest frame is `reed_solomon_reconstruct` wit
 (video and audio receive threads) is about 75 KB, there is no recursion among direct calls, and the 35 functions with a
 dynamic allocation are Opus decoding, `invert_mat` of the FEC and a few small ones. That is a 2 MB limit with a margin
 of more than 25 times; calls through function pointers are not followed.
+
+## UDP receive probe and the video packet canary
+
+A diagnostic build (`docker build --build-arg ALLOC_STRESS=ON`) also contains two checks of the video receive path, for
+the damaged packet buffer described in section 12 of the investigation:
+
+- `wasm/udp_recv_probe.hpp`: receives one datagram the way the video thread does (`recvfrom(s, buffer, size, 0, NULL,
+  NULL)`) into a buffer with a guard pattern before and after it, and reports how many guard bytes changed.
+  `udp_probe_run.js <host:port/devtools/page/ID> <tv address> [port]` starts it on a worker thread and sends datagrams
+  of different lengths from this computer (shorter, equal, longer than the buffer, with and without a source address),
+  so that it shows whether the native host binding of the TV (`tizentvwasm.SocketsHostBindings.recvFrom`, whose source is
+  not available) writes only what it was asked for.
+- `moonlight-common-c/src/VideoStream.c` (only with `MOONLIGHT_VIDEO_CANARY`, which the same option defines): 16 guard
+  bytes behind every video packet buffer, checked right after each receive and before a kept buffer is received into
+  again. A change is logged as `VideoCanary: ...` with where it was noticed, the received length and the buffer size.
