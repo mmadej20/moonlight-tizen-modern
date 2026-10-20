@@ -88,3 +88,20 @@ the damaged packet buffer described in section 12 of the investigation:
 - `moonlight-common-c/src/VideoStream.c` (only with `MOONLIGHT_VIDEO_CANARY`, which the same option defines): 16 guard
   bytes behind every video packet buffer, checked right after each receive and before a kept buffer is received into
   again. A change is logged as `VideoCanary: ...` with where it was noticed, the received length and the buffer size.
+
+## Squeezing a stream with a Windows QoS policy
+
+`tools/Start-QosThrottle.ps1` limits the bandwidth of the traffic that the streaming host sends to the TV, so that the
+stream loses packets in bursts: the FEC recovery and the reference frame invalidation that the freezes were seen in.
+Nothing is sent to the TV, the stream itself is what gets squeezed. Run it from an elevated PowerShell, with a rate below
+the bitrate of the stream:
+
+```
+.\tools\Start-QosThrottle.ps1 -TvAddress <tv address> -Mbps 20 -Minutes 15
+.\tools\Stop-QosThrottle.ps1
+```
+
+The first one removes its policy itself after `-Minutes` (default 30), on Ctrl+C and on an error; `-Minutes 0` applies the
+limit and returns. The second one removes the policy of the same name from both stores and can be run at any time. Both
+have `-DryRun`, which changes nothing and needs no administrator rights. The policy is not removed by a restart, so a
+policy that was left behind by a window that was closed has to be removed with the second script.
