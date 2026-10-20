@@ -323,3 +323,17 @@ używane. Nie wykluczono ścieżki FEC (bufor odzyskanego pakietu ma ten sam roz
    żeby takie uszkodzenie wykrywać w ciągu 15 s od zapisu, a nie dopiero przy zawieszeniu.
 3. Guard z sekcji 11 jako zabezpieczenie niezależne od przyczyny, po sprawdzeniu na TV (`futex_guard_probe.js`).
 
+**Kod `recvFrom` i sonda UDP (20.10).** `tizentvwasm.SocketsHostBindings.recvFrom` to `[native code]` także w inspektorze
+działającej aplikacji, więc jego źródła nie da się przeczytać. Aplikacja woła `recvfrom(s, buffer, size, 0, NULL, NULL)`,
+a opakowanie `wasm_recvfrom` robi `*addrlen` na wskaźniku `NULL`; po zapisie przez `NULL` nie ma śladu (pierwszy kilobajt
+pamięci modułu to same zera). Zbudowano więc sondę (`wasm/udp_recv_probe.hpp`, build diagnostyczny
+`opt3-diag`): odbiera jeden datagram tak jak wątek wideo, do bufora z wzorcem 256 B po obu stronach, a
+`tools/tv-debug/udp_probe_run.js` wysyła z PC datagramy różnej długości.
+
+**Wynik: odbiór UDP respektuje `len`.** W 20 z 20 przypadków (bufory 512 i 1408 B, datagramy 100…1472 B, krótsze, równe i
+dłuższe od bufora, z adresem źródłowym i bez, na wątku roboczym) `recvFrom` zwrócił `min(len, rozmiar datagramu)`, nie
+zmienił ani jednego bajtu poza buforem (ani przed nim) i oddał poprawne dane. Hipoteza „natywny odbiór pisze więcej,
+niż dostał" nie znajduje potwierdzenia w tym teście. Zostaje podejrzenie o bufor zwolniony i nadal używany (kolejka
+FEC, depakietyzator, `notifyFrameLost`), które ma rozstrzygnąć kanarek w `VideoStream.c` (też w `opt3-diag`, wymaga
+streamu). Ograniczenie: sonda odbiera pojedyncze datagramy, nie 15 tys. pakietów na sekundę.
+
