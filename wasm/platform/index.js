@@ -3002,6 +3002,11 @@ function finishStartTimeline() {
   }
 }
 
+// How many times the guard released a stuck lock of the allocator, for the health line (empty when it is not installed)
+function describeFutexGuard() {
+  return window.futexGuard ? window.futexGuard.describe() : '';
+}
+
 // Creates the stream watchdog and reports when the previous run ended while streaming
 function initStreamWatchdog() {
   streamWatchdog = StreamWatchdog.create({
@@ -3014,7 +3019,7 @@ function initStreamWatchdog() {
       setItem: function(key, value) { window.localStorage.setItem(key, value); }
     },
     getHealth: function() { return Module.getStreamHealth(); },
-    getExtra: function() { return rumbleThrottle.describe(); },
+    getExtra: function() { return rumbleThrottle.describe() + describeFutexGuard(); },
     getMemory: function() {
       var memory = window.performance && window.performance.memory;
       if (!memory) {

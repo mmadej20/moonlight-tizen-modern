@@ -256,4 +256,29 @@ wątek niż ten, który go zaalokował.
      poszlaka o wcześniejszym nietypowym wyjściu wątku, ale bez śladu w logach.
 4. Niezależnie od przyczyny: mniej alokacji na gorących ścieżkach (bufory pakietów wideo, pakiety ENet) wydłuża czas
    między awariami, a doraźny watchdog w wątku natywnym, który wykryje brak postępu i zwolni zablokowaną blokadę, jest
-   wykonalny (ręczne zwolnienie przywróciło aplikację), choć nie wiadomo, czy sesja by to przeżyła.
+   wykonalny (ręczne zwolnienie przywróciło aplikację), choć nie wiadomo, czy sesja by to przeżyła. Wdrożony jako
+   `wasm/platform/futex_guard.js` z łatką pętli futeksa wątku głównego (sekcja 11); na prawdziwym zawieszeniu jeszcze
+   nie sprawdzony.
+
+## 11. Trop z historii: profil Tizen 9 + jQuery 4 (2026-10-20)
+
+Użytkownik przypomniał sobie, że po przejściu na „Tizen 9 only" i nowe jQuery freezy pojawiały się po rozpoczęciu
+streama za każdym razem, więc wrócił do poprzedniego profilu. Historia to potwierdza i zawęża:
+
+- `7eff49d` (`build: target Tizen 9 with modern frontend`, 25.07) zmienił w runtime tylko `required_version` z 5.5 na
+  9.0 w `res/config.xml` i jQuery z 2.2.0 na 4.0.0. `CMakeLists.txt`, toolchain (Tizen Studio 6.1, Samsung Emscripten
+  1.39.4.7) i wygenerowany moduł wasm pozostały bez zmian (`docs/2026-07-28-current-session-freeze-analysis.md`).
+  Powrót to `ac1a228` (28.07, `build: restore legacy Tizen runtime profile`).
+- Zawieszenia z 28.07 (po 380 s i po 826 s, log urwany w środku zapisu) pochodzą z profilu 9.0 + jQuery 4. Ten sam
+  kod na profilu legacy przestreamował 37 minut bez crasha (`docs/2026-07-29-legacy-runtime-session-transport-
+  analysis.md`), ale to jedna sesja, a freezy na profilu legacy też się zdarzają (sekcja 10).
+- `b2aa50e` zauważa, że na części TV z Tizen 9 obie ścieżki EMSS się otwierają, ale callback `Play` nigdy się nie
+  kończy: runtime zachowuje się tam inaczej.
+
+Profile da się rozdzielić, bo wasm jest ten sam. Dockerfile ma do tego argumenty `REQUIRED_VERSION` (np. 9.0),
+`JQUERY_VERSION` (np. 4.0.0) i `LOCK_GUARD` (domyślnie `off`: adres blokady 0, guard z sekcji 10 nieaktywny, więc zawieszenie jest widać bez
+maskowania; `on` zapisuje prawdziwy adres). Zbudowano trzy warianty bieżących źródeł: `opt3-r90` (tylko 9.0), `opt3-jq4` (tylko jQuery 4) i
+`opt3-r90-jq4` (oba). **Wyniki testu na TV: jeszcze brak.** Jeśli któryś zawiesza się powtarzalnie po starcie
+streama, jest reproduktorem, na którym watcher z `tools/tv-debug/` pokaże, czy to ta sama zablokowana blokada
+alokatora, i na którym da się sprawdzić guard.
+

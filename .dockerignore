@@ -8,7 +8,9 @@ build/
 .superpowers
 .claude
 moonlight-tv-logs
-tools
+tools/*
+!tools/find-malloc-lock.js
+!tools/patch-futex-wait.js
 docs
 tests
 artifacts

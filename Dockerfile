@@ -2,6 +2,10 @@ FROM node:24.18.0-alpine AS frontend-dependencies
 WORKDIR /frontend
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
+# A/B builds only (docs/2026-10-18-stream-hang-investigation.md, section 11): --build-arg JQUERY_VERSION=4.0.0 packs
+# another jQuery under the name that index.html references
+ARG JQUERY_VERSION=
+RUN if [ -n "$JQUERY_VERSION" ]; then npm install --no-save --ignore-scripts "jquery@$JQUERY_VERSION"; fi
 
 FROM ubuntu:22.04 AS sdk
 
@@ -140,7 +144,33 @@ RUN \
     fi
 
 RUN cmake --install build --prefix build
+
+# Release a stuck lock of the allocator (docs/2026-10-18-stream-hang-investigation.md, section 10): write the address of
+# its lock word into the application, and make the wait loop of the main thread in moonlight-wasm.js ask the guard of
+# wasm/platform/futex_guard.js. Both steps fail the build when the module or the loop does not look as expected, so that
+# a toolchain update cannot drop the protection unnoticed. They run on the Node that ships with the Emscripten SDK.
+# The tools are copied here, after the build, so that changing them does not invalidate the compiled module.
+COPY --chown=moonlight tools/find-malloc-lock.js tools/patch-futex-wait.js ./moonlight-tizen/tools/
+# The guard is off by default until it has been checked on a TV: the address of the lock stays 0, which makes the guard
+# do nothing (and lets a freeze be observed as it is). --build-arg LOCK_GUARD=on writes the real address.
+ARG LOCK_GUARD=off
+RUN NODE=/home/moonlight/emscripten-release-bundle/emsdk/node/12.9.1_64bit/bin/node && \
+	/home/moonlight/emscripten-release-bundle/emsdk/fastcomp/bin/wasm-dis build/widget/moonlight-wasm.wasm -o build/module.wat && \
+	if [ "$LOCK_GUARD" = "on" ]; then $NODE moonlight-tizen/tools/find-malloc-lock.js build/module.wat build/widget/platform/malloc_lock.js; \
+	else echo "Lock guard off: the address of the allocator lock stays 0"; fi && \
+	$NODE moonlight-tizen/tools/patch-futex-wait.js build/widget/moonlight-wasm.js
 RUN cp moonlight-tizen/res/icon.png build/widget/
+
+# A/B builds only: --build-arg REQUIRED_VERSION=9.0 declares another minimum Tizen version in config.xml (the module is
+# the same). The default keeps the version of the repository.
+ARG REQUIRED_VERSION=
+RUN if [ -n "$REQUIRED_VERSION" ]; then \
+		sed -i "s/required_version=\"[0-9.]*\"/required_version=\"$REQUIRED_VERSION\"/" build/widget/config.xml && \
+		grep -q "required_version=\"$REQUIRED_VERSION\"" build/widget/config.xml && \
+		echo "required_version set to $REQUIRED_VERSION"; \
+	else \
+		echo "required_version left as in res/config.xml"; \
+	fi
 
 # Inject Game Mode metadata into the Tizen config.xml file, which is required for building the ForceGM variant later
 ARG FORCE_GAME_MODE=false

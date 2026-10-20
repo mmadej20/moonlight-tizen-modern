@@ -76,7 +76,7 @@ assert(/rumbleThrottle\.stopAll\(\)/.test(showAppsMode));
 assert(/logDiagnostic\(rumbleThrottle\.describe\(\)\)/.test(showAppsMode));
 
 // The counters also go into the periodic health line.
-assert(/getExtra: function\(\) \{ return rumbleThrottle\.describe\(\); \}/.test(index), 'the health line carries the rumble counters');
+assert(/getExtra: function\(\) \{ return rumbleThrottle\.describe\(\) \+ describeFutexGuard\(\); \}/.test(index), 'the health line carries the rumble counters');
 assert(/options\.getExtra/.test(watchdogSource));
 
 console.log('rumble wiring tests passed');

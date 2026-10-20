@@ -25,6 +25,14 @@ var common = (function() {
       },
     }; // Module
 
+    // Releases the lock of the allocator when the main thread has waited for it for seconds with nobody inside it, the
+    // way the long streams froze (docs/2026-10-18-stream-hang-investigation.md, section 10). The wait loop of the
+    // main thread in moonlight-wasm.js is patched by the Docker build to ask this guard.
+    window.futexGuard = FutexGuard.install(Module, {
+      lockWordAddress: MALLOC_LOCK_WORD_ADDRESS,
+      log: (line) => { console.error('%c[common.js, futexGuard]', 'color: red;', line); }
+    });
+
     const script = document.createElement('script');
     document.body.appendChild(script);
     script.src = "moonlight-wasm.js";
