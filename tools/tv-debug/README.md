@@ -85,9 +85,13 @@ the damaged packet buffer described in section 12 of the investigation:
   of different lengths from this computer (shorter, equal, longer than the buffer, with and without a source address),
   so that it shows whether the native host binding of the TV (`tizentvwasm.SocketsHostBindings.recvFrom`, whose source is
   not available) writes only what it was asked for.
-- `moonlight-common-c/src/VideoStream.c` (only with `MOONLIGHT_VIDEO_CANARY`, which the same option defines): 16 guard
-  bytes behind every video packet buffer, checked right after each receive and before a kept buffer is received into
-  again. A change is logged as `VideoCanary: ...` with where it was noticed, the received length and the buffer size.
+- `moonlight-common-c/src/VideoCanary.c` (only with `MOONLIGHT_VIDEO_CANARY`, which the same option defines): every
+  video packet buffer (received and FEC-recovered) gets 16 guard bytes behind it with a copy of its heap chunk head and a
+  pattern, and is entered in a registry. All registered buffers are checked every 32 received packets, a buffer is
+  checked again when it is freed, and a buffer that is freed twice is reported and not freed again. A report is logged
+  as `VideoCanary: ...` with the address, the age, the old and the new chunk head, the head of the next chunk, the bytes
+  in front of the head and the last things the video queue did (`purge`, `recover`, `submit`). The macros `PACKET_BUFFER_*`
+  of `VideoCanary.h` are plain `malloc`/`free` in a normal build. Host tests: `tests/video_canary_tests.c`.
 
 ## Squeezing a stream with a Windows QoS policy
 

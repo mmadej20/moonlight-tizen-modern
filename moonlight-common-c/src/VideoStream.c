@@ -1,5 +1,6 @@
 #include "Limelight-internal.h"
 #include "VideoReceiveDiagnostics.h"
+#include "VideoCanary.h"
 
 #define FIRST_FRAME_MAX 1500
 #define FIRST_FRAME_TIMEOUT_SEC 10
@@ -82,47 +83,6 @@ static void VideoPingThreadProc(void* context) {
     }
 }
 
-#ifdef MOONLIGHT_VIDEO_CANARY
-// Diagnostic build only (docs/2026-10-18-stream-hang-investigation.md, section 12): a frozen stream held a whole video
-// packet in a heap chunk smaller than the packet buffer. A pattern behind the packet buffer tells whether the receive
-// writes more than it was asked for (right after recv) or whether the buffer is written by somebody else while this
-// thread keeps it (checked before the next recv).
-#define VIDEO_CANARY_SIZE 16
-#define VIDEO_CANARY_BYTE 0xA5
-
-static unsigned int videoCanaryReports;
-
-static void videoCanaryFill(char* buffer, int bufferSize) {
-    memset(buffer + bufferSize, VIDEO_CANARY_BYTE, VIDEO_CANARY_SIZE);
-}
-
-static void videoCanaryCheck(const char* when, char* buffer, int bufferSize, int received, int receiveSize) {
-    int changed = 0;
-    int first = -1;
-    int i;
-
-    for (i = 0; i < VIDEO_CANARY_SIZE; i++) {
-        if ((unsigned char)buffer[bufferSize + i] != VIDEO_CANARY_BYTE) {
-            changed++;
-            if (first < 0) {
-                first = i;
-            }
-        }
-    }
-    if (changed == 0) {
-        return;
-    }
-
-    // The first reports and then one in a thousand, so that a stream that keeps overrunning does not flood the log
-    if (videoCanaryReports < 20 || videoCanaryReports % 1000 == 0) {
-        Limelog("VideoCanary: %d of %d guard bytes behind the packet buffer changed %s (first at %d, received %d, receiveSize %d, bufferSize %d, report %u)\n",
-                changed, VIDEO_CANARY_SIZE, when, first, received, receiveSize, bufferSize, videoCanaryReports);
-    }
-    videoCanaryReports++;
-    videoCanaryFill(buffer, bufferSize);
-}
-#endif
-
 // Receive thread proc
 static void VideoReceiveThreadProc(void* context) {
     int err;
@@ -135,6 +95,7 @@ static void VideoReceiveThreadProc(void* context) {
     bool encrypted;
     VIDEO_RECEIVE_DIAGNOSTICS diagnostics;
     VIDEO_RECEIVE_SNAPSHOT diagnosticSnapshot;
+    unsigned int sweepTick = 0;
 
     VideoReceiveDiagnosticsReset(&diagnostics, PltGetMillis());
 
@@ -144,6 +105,7 @@ static void VideoReceiveThreadProc(void* context) {
     receiveSize = decryptedSize + ((EncryptionFeaturesEnabled & SS_ENC_VIDEO) ? sizeof(ENC_VIDEO_HEADER) : 0);
     bufferSize = decryptedSize + sizeof(RTPV_QUEUE_ENTRY);
     buffer = NULL;
+    PACKET_BUFFER_CONFIGURE(bufferSize, decryptedSize);
 
     if (setNonFatalRecvTimeoutMs(rtpSocket, UDP_RECV_POLL_TIMEOUT_MS) < 0) {
         // SO_RCVTIMEO failed, so use select() to wait
@@ -172,37 +134,26 @@ static void VideoReceiveThreadProc(void* context) {
         PRTP_PACKET packet;
 
         if (buffer == NULL) {
-#ifdef MOONLIGHT_VIDEO_CANARY
-            buffer = (char*)malloc(bufferSize + VIDEO_CANARY_SIZE);
-#else
-            buffer = (char*)malloc(bufferSize);
-#endif
+            buffer = (char*)PACKET_BUFFER_MALLOC(bufferSize);
             if (buffer == NULL) {
                 Limelog("Video Receive: malloc() failed\n");
                 ListenerCallbacks.connectionTerminated(-1);
                 break;
             }
-#ifdef MOONLIGHT_VIDEO_CANARY
-            videoCanaryFill(buffer, bufferSize);
-#endif
         }
-#ifdef MOONLIGHT_VIDEO_CANARY
         else {
-            // A buffer that this thread kept: nobody else may have written behind it since the last receive
-            videoCanaryCheck("while the thread held the buffer", buffer, bufferSize, 0, receiveSize);
+            // A buffer that this thread kept: nobody else may have written to it since the last receive
+            PACKET_BUFFER_CHECK(buffer, "while the thread held the buffer", 0, receiveSize);
         }
-#endif
 
         err = recvUdpSocket(rtpSocket,
                             encrypted ? encryptedBuffer : buffer,
                             receiveSize,
                             useSelect);
-#ifdef MOONLIGHT_VIDEO_CANARY
-        if (err > receiveSize) {
-            Limelog("VideoCanary: recv returned %d, more than the %d bytes that were asked for\n", err, receiveSize);
+        PACKET_BUFFER_CHECK(buffer, "by the receive", err, receiveSize);
+        if ((++sweepTick & 31) == 0) {
+            PACKET_BUFFER_SWEEP("the receive loop");
         }
-        videoCanaryCheck("by the receive", buffer, bufferSize, err, receiveSize);
-#endif
         if (err < 0) {
             Limelog("Video Receive: recvUdpSocket() failed: %d\n", (int)LastSocketError());
             ListenerCallbacks.connectionTerminated(LastSocketFail());
@@ -332,7 +283,7 @@ static void VideoReceiveThreadProc(void* context) {
     }
 
     if (buffer != NULL) {
-        free(buffer);
+        PACKET_BUFFER_FREE(buffer);
     }
 
     if (encryptedBuffer != NULL) {

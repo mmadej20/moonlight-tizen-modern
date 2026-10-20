@@ -367,8 +367,26 @@ obciążeniowy). Zostaje zapis, który trafia w 4 bajty nagłówka żywego chunk
 zapis wsteczny z poprzedniego chunka, stary wskaźnik na chunk o rozmiarze 1464 (ktoś nadal zapisuje metadane chunka,
 który został już zwolniony i ponownie podzielony) albo pojedynczy zbłąkany zapis małej wartości.
 
-**Następny krok: „strażnik nagłówka".** W `VideoStream.c`, razem z kanarkiem, zapamiętać przy alokacji słowo
-`((uint32_t*)buffer)[-1]` i porównywać je przy każdym sprawdzeniu kanarka; przy różnicy zalogować moment (po odbiorze albo
-przed ponownym użyciem), 16 bajtów przed nagłówkiem i identyfikator pakietu. Pozwoli to ustalić, czy nagłówek psuje się
-w czasie, gdy wątek trzyma bufor (wtedy sprawcą jest inny wątek), czy wcześniej, jeszcze przed przekazaniem bufora do
-odbioru (wtedy sprawcą jest alokator lub poprzedni właściciel chunka).
+**Zawartość uszkodzonego chunka (zrzut z zawieszenia).** Bufor zaczyna się nagłówkiem RTP (`90 00 0e e2 …`, numer 3810) i
+nagłówkiem pakietu NV z flagami `0x05` (początek ramki i dane obrazu), czyli to pierwszy pakiet ramki. Bezpośrednio przed
+nim, w czterech ostatnich bajtach poprzedniego chunka (miejsce, które po nagłówku chunka zajmuje stopka poprzednika), leży
+koniec tekstu `...Unrecoverable frame 41997: 23+0=23 received < 31 needed` ze znakiem nowej linii, komunikatu z
+`RtpVideoQueue.c:636`, czyli z tej samej ścieżki, która zwalnia bufory pakietów przy utracie ramki. Następny chunk, za kanarkiem, jest poprawnym wolnym chunkiem
+4928 B z wskaźnikami drzewa wskazującymi na siebie. Stare słowo nagłówka różni się od nowego o dokładnie 10 (`0x5C3` →
+`0x5B9`). Kod FEC, kolejki i depakietyzatora w `moonlight-common-c` jest bez zmian względem bazy (`git log` pokazuje tylko
+dodane diagnostyki), a jego przegląd (`reconstructFrame`, `purgeListEntries`, `queueRtpPacket`, `queueFragment`,
+`reed_solomon_reconstruct`) nie wskazał błędu własności ani indeksowania.
+
+**Strażnik buforów pakietów (build diagnostyczny).** Zamiast jednego kanarka za buforem wątku odbioru, każdy bufor pakietu
+(odbiorczy i odzyskany przez FEC) dostaje 16 bajtów za sobą z kopią słowa nagłówka chunka (bez bitu `PINUSE`, który zmienia
+sąsiad), wpis w rejestrze żywych buforów i wzorzec `0xA5`. `videoCanarySweep()` sprawdza wszystkie żywe bufory co 32 pakiety
+odbioru (`moonlight-common-c/src/VideoCanary.c`), `free` sprawdza bufor przed zwolnieniem, a bufor zwolniony drugi raz jest
+zgłaszany i **nie** trafia ponownie do `free` (wynik sprawdza hipotezę podwójnego zwolnienia). Raport `VideoCanary: ...` podaje
+adres, wiek bufora, stary i nowy nagłówek, nagłówek następnego chunka, 24 bajty przed nagłówkiem, początek bufora oraz
+ostatnie zdarzenia kolejki (`purge`, `recover`, `submit`). Co 30 s jest linia stanu (`buffers registered`). Wszystkie bufory
+przechodzą przez makra `PACKET_BUFFER_*` z `VideoCanary.h`, które w zwykłym buildzie są `malloc`/`free`.
+
+**Jak czytać wynik:** raport „a registered buffer changed” z krótkim wiekiem i zdarzeniem tuż przed nim wskazuje, co robiła
+kolejka w chwili uszkodzenia; „freed a buffer that is not registered” oznacza podwójne zwolnienie (`where` mówi którym
+miejscem); brak jakiegokolwiek raportu przy zawieszeniu oznacza, że nagłówek psuje się po ostatnim przeglądzie i zawieszenie
+następuje w ciągu ułamka sekundy, więc trzeba częstszych przeglądów albo innego pomiaru.

@@ -1,4 +1,5 @@
 #include "Limelight-internal.h"
+#include "VideoCanary.h"
 
 // Uncomment to test 3 byte Annex B start sequences with GFE
 //#define FORCE_3_BYTE_START_SEQUENCES
@@ -85,7 +86,7 @@ static void cleanupFrameState(void) {
     while (nalChainHead != NULL) {
         lastEntry = (PLENTRY_INTERNAL)nalChainHead;
         nalChainHead = lastEntry->entry.next;
-        free(lastEntry->allocPtr);
+        PACKET_ENTRY_FREE(lastEntry, lastEntry->allocPtr);
     }
 
     nalChainTail = NULL;
@@ -297,7 +298,7 @@ void LiCompleteVideoFrame(VIDEO_FRAME_HANDLE handle, int drStatus) {
     while (qdu->decodeUnit.bufferList != NULL) {
         lastEntry = (PLENTRY_INTERNAL)qdu->decodeUnit.bufferList;
         qdu->decodeUnit.bufferList = lastEntry->entry.next;
-        free(lastEntry->allocPtr);
+        PACKET_ENTRY_FREE(lastEntry, lastEntry->allocPtr);
     }
 
     // We will have stack-allocated entries iff we have a direct-submit decoder
@@ -1186,7 +1187,7 @@ void queueRtpPacket(PRTPV_QUEUE_ENTRY queueEntryPtr) {
 
     if (existingEntry != NULL) {
         // processRtpPayload didn't want this packet, so just free it
-        free(existingEntry->allocPtr);
+        PACKET_ENTRY_FREE(existingEntry, existingEntry->allocPtr);
     }
 }
 

@@ -1,5 +1,6 @@
 #include "Limelight-internal.h"
 #include "RtpVideoQueuePolicy.h"
+#include "VideoCanary.h"
 #include "rs.h"
 
 #if defined(LC_DEBUG) && !defined(LC_FUZZING)
@@ -26,10 +27,12 @@ void RtpvInitializeQueue(PRTP_VIDEO_QUEUE queue) {
 }
 
 static void purgeListEntries(PRTPV_QUEUE_LIST list) {
+    PACKET_PATH_EVENT("purge", list->count, 0);
+
     while (list->head != NULL) {
         PRTPV_QUEUE_ENTRY entry = list->head;
         list->head = entry->next;
-        free(entry->packet);
+        PACKET_BUFFER_FREE(entry->packet);
     }
 
     list->tail = NULL;
@@ -186,7 +189,7 @@ static bool queuePacket(PRTP_VIDEO_QUEUE queue, PRTPV_QUEUE_ENTRY newEntry, PRTP
     Limelog("FEC recovery returned corrupt packet %d" \
             " (frame %d)", rtpPacket->sequenceNumber, \
             queue->currentFrameNumber);               \
-    free(packets[i]);                                 \
+    PACKET_BUFFER_FREE(packets[i]);                   \
     continue
 
 // Returns 0 if the frame is completely constructed
@@ -328,7 +331,7 @@ static int reconstructFrame(PRTP_VIDEO_QUEUE queue) {
     unsigned int i;
     for (i = 0; i < totalPackets; i++) {
         if (marks[i]) {
-            packets[i] = malloc(packetBufferSize);
+            packets[i] = PACKET_BUFFER_MALLOC(packetBufferSize);
             if (packets[i] == NULL) {
                 ret = -4;
                 goto cleanup_packets;
@@ -336,6 +339,7 @@ static int reconstructFrame(PRTP_VIDEO_QUEUE queue) {
         }
     }
     
+    PACKET_PATH_EVENT("recover", queue->currentFrameNumber, queue->bufferDataPackets - queue->receivedDataPackets);
     ret = reed_solomon_reconstruct(rs, packets, marks, totalPackets, receiveSize);
     
     // We should always provide enough parity to recover the missing data successfully.
@@ -422,7 +426,7 @@ cleanup_packets:
 
                     // This drop was fake, so we don't want to actually submit it to the depacketizer.
                     // It will get confused because it's already seen this packet before.
-                    free(packets[i]);
+                    PACKET_BUFFER_FREE(packets[i]);
                     continue;
                 }
 #endif
@@ -453,7 +457,7 @@ cleanup_packets:
                 LC_ASSERT(isBefore16(rtpPacket->sequenceNumber, queue->bufferFirstParitySequenceNumber));
                 queuePacket(queue, queueEntry, rtpPacket, StreamConfig.packetSize + dataOffset, false, true);
             } else if (packets[i] != NULL) {
-                free(packets[i]);
+                PACKET_BUFFER_FREE(packets[i]);
             }
         }
     }
@@ -493,7 +497,7 @@ static void stageCompleteFecBlock(PRTP_VIDEO_QUEUE queue) {
                 removeEntryFromList(&queue->pendingFecBlockList, parityEntry);
 
                 // Free the entry and packet
-                free(parityEntry->packet);
+                PACKET_BUFFER_FREE(parityEntry->packet);
 
                 continue;
             }
@@ -532,6 +536,8 @@ static void stageCompleteFecBlock(PRTP_VIDEO_QUEUE queue) {
 }
 
 static void submitCompletedFrame(PRTP_VIDEO_QUEUE queue) {
+    PACKET_PATH_EVENT("submit", queue->currentFrameNumber, queue->completedFecBlockList.count);
+
     while (queue->completedFecBlockList.count > 0) {
         PRTPV_QUEUE_ENTRY entry = queue->completedFecBlockList.head;
 
