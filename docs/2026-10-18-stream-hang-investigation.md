@@ -435,8 +435,8 @@ Timeout was reached`, błąd `-9`), `/serverinfo` też bywa wolne (TLS 2650 ms, 
    administratora **przed** zamrożeniem obrazu (UAC użytkownik klika w streamie Desktop), i czekać na zawieszenie.
    Przed startem uruchomić `tools/Stop-QosThrottle.ps1` (jako administrator), żeby wiedzieć, że nie została stara polityka.
 
-**Komendy (z `tools/tv-debug/README.md`).** Instalacja: skrypt UI Automation do Apps2Samsung (zostawiony poza repozytorium,
-w katalogu roboczym sesji; użytkownik instaluje też ręcznie). Debug: `docker run --rm mt-sdk-probe bash -lc 'S=/home/
+**Komendy (z `tools/tv-debug/README.md`).** Instalacja: `tools/tv-debug/install_wgt_apps2samsung.ps1 -Wgt <plik>` (UI Automation do Apps2Samsung z katalogu Downloads;
+użytkownik instaluje też ręcznie). Debug: `docker run --rm mt-sdk-probe bash -lc 'S=/home/
 moonlight/tizen-studio/tools/sdb; $S connect 192.168.100.171; $S -s 192.168.100.171:26101 shell 0 debug MoonLightS.
 MoonlightWasm'` (wypisuje port inspektora). Watcher: `node tools/tv-debug/forensics.js <host:port/devtools/page/ID> <log>
 [plik poleceń]`. Odbiornik logów aplikacji: `tools/Receive-MoonlightLogs.ps1 -OutputDirectory tools/moonlight-tv-logs`

@@ -17,6 +17,12 @@ It prints `... with debug 1 port: <port>`. The inspector is then at `http://<tv>
 `webSocketDebuggerUrl` of the page (without `ws://`) is the `<host:port/devtools/page/ID>` argument below. The port
 changes with every launch. If the application is already running, the launch can hang: close the application first.
 
+## Installing a WGT
+
+`install_wgt_apps2samsung.ps1 -Wgt <file>` installs a WGT on the TV through the Apps2Samsung window (expects it in
+`Downloads\Apps2Samsung-v2.8.3-beta-win-x64`): UI Automation for its own controls, Win32 messages for the system file
+dialog, because UI Automation hangs on that dialog. Do not use the mouse while it runs.
+
 ## forensics.js
 
 `node forensics.js <host:port/devtools/page/ID> <log file> [command file]`
