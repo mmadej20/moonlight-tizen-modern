@@ -73,9 +73,14 @@ assert(/if \(DIAG_FENCES\) \{\s+diag_barrier\(\);\s+\}\s+\{\s+int me|if \(DIAG_F
 // The failure says what the top chunk and the state held at the moment, after the barriers and after the second pass
 assert(/diag_describe\(1\);[\s\S]*?diag_describe\(2\);[\s\S]*?diag_recheck\(\);\s+diag_describe\(3\);/.test(PRELUDE));
 assert(/static void diag_describe\(int when\) \{[\s\S]*?volatile struct malloc_state\*/.test(APPENDIX));
+// The chain of chunks is walked every 2nd entry: a damaged head is found by the entry after the damage, and the walk is part of the second pass
+assert(/#define DIAG_WALK_EVERY 2/.test(PRELUDE));
+assert(/if \(number % DIAG_WALK_EVERY == 0\) \{\s+diag_walk_check\(\);/.test(PRELUDE));
+assert(/static void diag_walk\(void\) \{[\s\S]*?\(cinuse\(c\) != 0\) != \(pinuse\(next\) != 0\)[\s\S]*?next->prev_foot != size/.test(APPENDIX));
+assert(/static void diag_recheck\(void\) \{\s+diag_walk\(\);\s+do_check_malloc_state\(gm\);/.test(APPENDIX));
 // The state is copied when the lock is released and compared when it is taken, except for the lock itself
 assert(/static int diag_release\(pthread_mutex_t\* lk\) \{\s+int me = \(int\)\(intptr_t\)pthread_self\(\);\s+diag_snapshot\(\);/.test(PRELUDE));
-assert(/diag_verify\(line\);\s+if \(number % DIAG_CHECK_EVERY == 0\)/.test(PRELUDE));
+assert(/diag_verify\(line\);[\s\S]*?if \(number % DIAG_CHECK_EVERY == 0\)/.test(PRELUDE));
 assert(/memcpy\(diag_snap, \(void\*\)gm, sizeof\(struct malloc_state\)\)/.test(APPENDIX));
 assert(/offsetof\(struct malloc_state, mutex\)/.test(APPENDIX) && /changed while nobody was inside it/.test(APPENDIX));
 // A malloc and a free say what they were asked for: the ring keeps the kind and the argument of the entry
