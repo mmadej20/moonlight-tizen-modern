@@ -74,6 +74,10 @@ static void arenaFree(void* pointer) {
     freeCalls++;
 }
 
+// A small registry, so that its overflow is tried, and a map of the arena instead of the heap of the module
+#define ENET_SLOTS 1024
+#define VIDEO_CANARY_COVERAGE_BASE ((uintptr_t)arena)
+#define VIDEO_CANARY_COVERAGE_BYTES (sizeof(arena))
 #define VIDEO_CANARY_LOG(...) testLog(__VA_ARGS__)
 #define VIDEO_CANARY_NOW_MS() fakeNow
 #define VIDEO_CANARY_MALLOC(size) arenaMalloc(size)
@@ -310,6 +314,12 @@ int main(void) {
         }
         assert(enetLive == ENET_SLOTS);
         assert(enetUntracked == untrackedBefore + 100 + liveBefore);
+        // A block that did not fit in the registry is a plain one: ENet frees the pointer that malloc returned, so it
+        // has no zones in front of it (with zones the free went to the middle of the block and stopped the application)
+        for (i = ENET_SLOTS - (int)liveBefore; i < ENET_SLOTS + 100; i++) {
+            assert(*headOf(tracked[i]) != 0xA5A5A5A5u);
+            assert(((unsigned char*)tracked[i])[-1] != 0xA5 || ((unsigned char*)tracked[i])[-2] != 0xA5);
+        }
         for (i = 0; i < ENET_SLOTS + 100; i++) {
             videoCanaryEnetFree(tracked[i]);
         }
@@ -324,6 +334,17 @@ int main(void) {
         enetFlushHeld();
         assert(inUseCount() <= inUseBefore + 3);
         clearLog();
+
+        // The map of the memory in use: set for a block, clear once it is really freed
+        {
+            void* mapped = videoCanaryEnetMalloc(24);
+            assert(coverageAny((char*)mapped - ENET_ZONE, 24 + 2 * ENET_ZONE));
+            videoCanaryEnetFree(mapped);
+            assert(coverageAny((char*)mapped - ENET_ZONE, 24 + 2 * ENET_ZONE)); // still covered while it is held
+            enetFlushHeld();
+            assert(!coverageAny((char*)mapped - ENET_ZONE, 24 + 2 * ENET_ZONE)); // free again after the free
+            assert(!coverageAny((void*)0, 24)); // an address outside of the map is not covered
+        }
 
         // The allocator returns memory that overlaps a block in use
         first = videoCanaryEnetMalloc(24);

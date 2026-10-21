@@ -356,7 +356,19 @@ void videoCanaryFreeEntry(void* entry, void* allocPtr, const char* where) {
 // written (a neighbour or the block itself overran); a freed block was written after it was freed; the chunk head of a
 // live block changed.
 
-#define ENET_SLOTS 2048
+// The peak of a stream with heavy loss was 2013 blocks at once, and a registry of 2048 overflowed
+#ifndef ENET_SLOTS
+#define ENET_SLOTS 16384
+#endif
+// Every 8 bytes of the heap have a bit that says whether a block of ENet covers them, so that an allocation that
+// overlaps a block in use is found without going through all blocks
+#ifndef VIDEO_CANARY_COVERAGE_BASE
+#define VIDEO_CANARY_COVERAGE_BASE 0
+#endif
+#ifndef VIDEO_CANARY_COVERAGE_BYTES
+#define VIDEO_CANARY_COVERAGE_BYTES (128u * 1024u * 1024u)
+#endif
+#define COVERAGE_WORDS (VIDEO_CANARY_COVERAGE_BYTES / 8 / 32)
 #define ENET_RING 512
 #define ENET_QUARANTINE 128
 #define ENET_THREADS 64
@@ -393,6 +405,7 @@ typedef struct _THREAD_NAME {
 } THREAD_NAME;
 
 static int enetLockWord;
+static uint32_t enetCovered[COVERAGE_WORDS];
 static ENET_BLOCK enetBlocks[ENET_SLOTS];
 static ENET_FREED enetFreed[ENET_RING];
 static ENET_FREED enetHeld[ENET_QUARANTINE];
@@ -413,6 +426,53 @@ static unsigned int enetOverlaps;
 static unsigned int enetForeignFrees;
 static unsigned int enetUntracked;
 static unsigned int enetReports;
+
+// The granules (8 bytes) of a range, or 0 when the range is not in the memory that is mapped
+static int coverageRange(const void* start, size_t bytes, size_t* first, size_t* last) {
+    const uintptr_t base = (uintptr_t)VIDEO_CANARY_COVERAGE_BASE;
+    const uintptr_t address = (uintptr_t)start;
+    // Subtracting the base first would wrap around for an address in front of it, so the offset is checked as a whole
+    const uintptr_t offset = address - base;
+    if (bytes == 0 || offset > (uintptr_t)VIDEO_CANARY_COVERAGE_BYTES ||
+        offset + bytes > (uintptr_t)VIDEO_CANARY_COVERAGE_BYTES) {
+        return 0;
+    }
+    *first = offset >> 3;
+    *last = (offset + bytes - 1) >> 3;
+    return 1;
+}
+
+static int coverageAny(const void* start, size_t bytes) {
+    size_t first;
+    size_t last;
+    size_t granule;
+    if (!coverageRange(start, bytes, &first, &last)) {
+        return 0;
+    }
+    for (granule = first; granule <= last; granule++) {
+        if ((enetCovered[granule >> 5] >> (granule & 31)) & 1u) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void coverageSet(const void* start, size_t bytes, int on) {
+    size_t first;
+    size_t last;
+    size_t granule;
+    if (!coverageRange(start, bytes, &first, &last)) {
+        return;
+    }
+    for (granule = first; granule <= last; granule++) {
+        if (on) {
+            enetCovered[granule >> 5] |= 1u << (granule & 31);
+        }
+        else {
+            enetCovered[granule >> 5] &= ~(1u << (granule & 31));
+        }
+    }
+}
 
 static void lockEnet(void) {
     while (__atomic_exchange_n(&enetLockWord, 1, __ATOMIC_ACQUIRE)) {
@@ -652,6 +712,7 @@ void* videoCanaryEnetMalloc(size_t size) {
     ENET_FREED otherHeld;
     int overlapped = 0;
     int overlappedHeld = 0;
+    int anyOverlap;
     int at;
     int firstFree;
     unsigned int index;
@@ -666,21 +727,25 @@ void* videoCanaryEnetMalloc(size_t size) {
     memset(&otherHeld, 0, sizeof(otherHeld));
 
     lockEnet();
-    // The allocator must not return memory that is still in use or held
-    for (index = 0; index < ENET_SLOTS && !overlapped; index++) {
-        const ENET_BLOCK* block = &enetBlocks[index];
-        if (block->pointer != NULL && block->pointer != ENET_TOMB &&
-            rangesOverlap(base, size + 2 * ENET_ZONE, (char*)block->pointer - ENET_ZONE, block->size + 2 * ENET_ZONE)) {
-            other = *block;
-            overlapped = 1;
+    // The allocator must not return memory that is still in use or held. The map says so, and the blocks are only
+    // looked through to name the one that is in the way
+    anyOverlap = coverageAny(base, size + 2 * ENET_ZONE);
+    if (anyOverlap) {
+        for (index = 0; index < ENET_SLOTS && !overlapped; index++) {
+            const ENET_BLOCK* block = &enetBlocks[index];
+            if (block->pointer != NULL && block->pointer != ENET_TOMB &&
+                rangesOverlap(base, size + 2 * ENET_ZONE, (char*)block->pointer - ENET_ZONE, block->size + 2 * ENET_ZONE)) {
+                other = *block;
+                overlapped = 1;
+            }
         }
-    }
-    for (index = 0; index < ENET_QUARANTINE && !overlapped && !overlappedHeld; index++) {
-        const ENET_FREED* held = &enetHeld[index];
-        if (held->pointer != NULL &&
-            rangesOverlap(base, size + 2 * ENET_ZONE, (char*)held->pointer - ENET_ZONE, held->size + 2 * ENET_ZONE)) {
-            otherHeld = *held;
-            overlappedHeld = 1;
+        for (index = 0; index < ENET_QUARANTINE && !overlapped && !overlappedHeld; index++) {
+            const ENET_FREED* held = &enetHeld[index];
+            if (held->pointer != NULL &&
+                rangesOverlap(base, size + 2 * ENET_ZONE, (char*)held->pointer - ENET_ZONE, held->size + 2 * ENET_ZONE)) {
+                otherHeld = *held;
+                overlappedHeld = 1;
+            }
         }
     }
 
@@ -706,9 +771,11 @@ void* videoCanaryEnetMalloc(size_t size) {
         enetBlocks[at].head = readHead(base) & HEAD_MASK;
         enetBlocks[at].thread = VIDEO_CANARY_THREAD_ID();
         enetBlocks[at].atMs = VIDEO_CANARY_NOW_MS();
+        coverageSet(base, size + 2 * ENET_ZONE, 1);
     }
     else {
-        // Not tracked, so that its free must not be taken for the second free of an earlier block at this address
+        // The registry is full. The block is given up and ENet gets a plain one, without zones, so that what ENet frees
+        // later is the pointer that malloc returned. It must not be taken for the second free of an earlier block either.
         unsigned int k;
         for (k = 0; k < ENET_RING; k++) {
             if (enetFreed[k].pointer == pointer) {
@@ -721,6 +788,21 @@ void* videoCanaryEnetMalloc(size_t size) {
         enetOverlaps++;
     }
     unlockEnet();
+
+    if (at < 0) {
+        VIDEO_CANARY_FREE(base);
+        pointer = (char*)VIDEO_CANARY_MALLOC(size);
+        if (pointer != NULL) {
+            lockEnet();
+            for (index = 0; index < ENET_RING; index++) {
+                if (enetFreed[index].pointer == pointer) {
+                    enetFreed[index].pointer = NULL;
+                }
+            }
+            unlockEnet();
+        }
+        return pointer;
+    }
 
     if (overlapped || overlappedHeld) {
         char detail[220];
@@ -833,6 +915,9 @@ void videoCanaryEnetFree(void* pointer) {
 
         if (evictedOne) {
             enetCheckHeld(&evicted);
+            lockEnet();
+            coverageSet((char*)evicted.pointer - ENET_ZONE, evicted.size + 2 * ENET_ZONE, 0);
+            unlockEnet();
             VIDEO_CANARY_FREE((char*)evicted.pointer - ENET_ZONE);
         }
     }
@@ -853,6 +938,7 @@ __attribute__((unused)) static void enetFlushHeld(void) {
     for (index = 0; index < ENET_QUARANTINE; index++) {
         if (enetHeld[index].pointer != NULL) {
             enetCheckHeld(&enetHeld[index]);
+            coverageSet((char*)enetHeld[index].pointer - ENET_ZONE, enetHeld[index].size + 2 * ENET_ZONE, 0);
             VIDEO_CANARY_FREE((char*)enetHeld[index].pointer - ENET_ZONE);
             enetHeld[index].pointer = NULL;
         }
