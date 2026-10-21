@@ -279,9 +279,6 @@ function handleMessage(msg) {
     $('#wasm_module').css('display', 'none');
     // Show a termination snackbar message if the termination was unexpected
     var errorCode = parseInt(msg.replace('streamTerminated: ', ''));
-    if (typeof stopStreamWatchdog === 'function') {
-      stopStreamWatchdog('stream terminated ' + errorCode);
-    }
     switch (errorCode) {
       case 0: // ML_ERROR_GRACEFUL_TERMINATION
         break;

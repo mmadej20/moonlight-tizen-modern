@@ -30,7 +30,6 @@ const gamepad = read('wasm/gamepad.cpp');
 const header = read('wasm/moonlight_wasm.hpp');
 const index = read('wasm/platform/index.js');
 const messages = read('wasm/platform/messages.js');
-const watchdogSource = read('wasm/platform/stream_watchdog.js');
 
 assert(html.indexOf('platform/rumble.js') > 0 && html.indexOf('platform/rumble.js') < html.indexOf('platform/index.js'),
   'rumble.js loads before index.js');
@@ -38,14 +37,9 @@ assert(/#include "rumble_dedupe\.hpp"/.test(header));
 
 // Native side.
 const rumble = extractBraced(gamepad, 'void MoonlightInstance::ClControllerRumble(');
-// ClControllerRumble is a static member function of the instance class: it has no this, so the counters are reached
-// through the global instance (a plain m_StreamHealth does not compile there, which only the Docker build shows).
-assert(/static void ClControllerRumble\(/.test(header), 'this is why the instance is reached through g_Instance');
-assert(!/[^>]m_StreamHealth/.test(rumble), 'no member is used without the instance');
-assert(/g_Instance->Health\(\)\.RumbleReceived\(\)/.test(rumble), 'every message from the host is counted');
-assert(rumble.indexOf('RumbleReceived') < rumble.indexOf('rumbleFeedbackSwitch'), 'also while the setting is off');
+// ClControllerRumble is a static member function of the instance class: it has no this
+assert(/static void ClControllerRumble\(/.test(header));
 assert(/s_RumbleDedupe\.ShouldPost\(controllerNumber, lowFreqMotor, highFreqMotor\)/.test(rumble), 'repeats are dropped');
-assert(/g_Instance->Health\(\)\.RumblePosted\(\)/.test(rumble), 'the messages that are passed on are counted');
 assert(/MAIN_THREAD_ASYNC_EM_ASM\(/.test(rumble), 'the control stream thread does not wait for the interface');
 assert(!/PostToJs\(/.test(rumble) && !/c_str\(\)/.test(rumble),
   'an asynchronous call must not carry a pointer to a string that is destroyed when this function returns');
@@ -74,9 +68,5 @@ assert(!/playEffect/.test(branch) && !/console\./.test(branch), 'no effect start
 const showAppsMode = extractBraced(index, 'function showAppsMode(');
 assert(/rumbleThrottle\.stopAll\(\)/.test(showAppsMode));
 assert(/logDiagnostic\(rumbleThrottle\.describe\(\)\)/.test(showAppsMode));
-
-// The counters also go into the periodic health line.
-assert(/getExtra: function\(\) \{ return rumbleThrottle\.describe\(\) \+ describeFutexGuard\(\); \}/.test(index), 'the health line carries the rumble counters');
-assert(/options\.getExtra/.test(watchdogSource));
 
 console.log('rumble wiring tests passed');

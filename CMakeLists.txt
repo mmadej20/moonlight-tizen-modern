@@ -58,7 +58,6 @@ add_library(moonlight-common-c STATIC
     moonlight-common-c/src/RtspParser.c
     moonlight-common-c/src/SdpGenerator.c
     moonlight-common-c/src/SimpleStun.c
-    moonlight-common-c/src/VideoCanary.c
     moonlight-common-c/src/VideoDepacketizer.c
     moonlight-common-c/src/VideoStream.c
 )
@@ -275,14 +274,6 @@ set_target_properties(moonlight-wasm
 target_compile_features(moonlight-wasm PUBLIC cxx_std_17)
 # The level goes into the module, so that every stream log says which build it came from
 target_compile_definitions(moonlight-wasm PRIVATE MOONLIGHT_OPT_LEVEL_TEXT="${MOONLIGHT_OPT_LEVEL}")
-# Diagnostic builds only: compiles the allocator stress test of wasm/alloc_stress.hpp and the UDP receive probe of
-# wasm/udp_recv_probe.hpp into the module, and guards the video packet buffers (moonlight-common-c/src/VideoCanary.c)
-option(MOONLIGHT_ALLOC_STRESS "Compile the diagnostic probes into the module" OFF)
-if(MOONLIGHT_ALLOC_STRESS)
-    target_sources(moonlight-wasm PRIVATE wasm/alloc_stress.cpp wasm/udp_recv_probe.cpp)
-    target_compile_definitions(moonlight-wasm PRIVATE MOONLIGHT_ALLOC_STRESS=1)
-    target_compile_definitions(moonlight-common-c PRIVATE MOONLIGHT_VIDEO_CANARY=1)
-endif()
 set_target_properties(moonlight-wasm
     PROPERTIES
         LINK_FLAGS
@@ -300,22 +291,6 @@ set_target_properties(moonlight-wasm
              -s USE_CRYPTO=1 \
              -s USE_SSL=1 \
              -s USE_CURL=1")
-# Diagnostic builds only: replaces the allocator by the copy of dlmalloc that the Docker build makes (wasm/diag_dlmalloc.c,
-# tools/patch-diag-dlmalloc.js), with its checks switched on. The release dlmalloc compiles them away.
-option(MOONLIGHT_DIAG_MALLOC "Use a diagnostic copy of dlmalloc with its checks switched on" OFF)
-if(MOONLIGHT_DIAG_MALLOC)
-    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/wasm/diag_dlmalloc.c")
-        message(FATAL_ERROR "wasm/diag_dlmalloc.c is made by tools/patch-diag-dlmalloc.js in the Docker build")
-    endif()
-    target_sources(moonlight-wasm PRIVATE wasm/diag_dlmalloc.c)
-    set_source_files_properties(wasm/diag_dlmalloc.c PROPERTIES COMPILE_FLAGS "-s USE_PTHREADS=1")
-endif()
-# Diagnostic builds only: keeps the function names in the module, so that the paused stacks of a freeze can be read.
-# The code and the function numbers stay the same.
-option(MOONLIGHT_PROFILING_FUNCS "Keep the function names in the module" OFF)
-if(MOONLIGHT_PROFILING_FUNCS)
-    set_property(TARGET moonlight-wasm APPEND_STRING PROPERTY LINK_FLAGS " --profiling-funcs")
-endif()
 target_link_libraries(moonlight-wasm PUBLIC
     libgamestream
     h264bitstream

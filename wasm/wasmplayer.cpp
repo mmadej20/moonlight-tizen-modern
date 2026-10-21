@@ -724,10 +724,7 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
           static_cast<int>(g_Instance->m_VideoSessionId.load())
         );
       }
-      const auto appendResult = [&] {
-        ScopedSection appendSection(g_Instance->m_StreamHealth.VideoAppend());
-        return g_Instance->m_VideoTrack.AppendPacket(pkt);
-      }();
+      const auto appendResult = g_Instance->m_VideoTrack.AppendPacket(pkt);
       submitEnd = std::chrono::steady_clock::now();
       if (decodeUnit->frameType == FRAME_TYPE_IDR) {
         ClLogMessage(
@@ -769,8 +766,6 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   if (pacingCommitOutcome == PacingCommitOutcome::Cancelled) {
     return DR_OK;
   }
-  g_Instance->m_StreamHealth.VideoSubmitted(StreamHealth::NowMs());
-
   const uint64_t nowMs = LiGetMillis();
   const uint64_t windowDurationMs = nowMs - m_ActiveWndVideoStats.measurementStartTimestamp;
   if (windowDurationMs > 1000) {

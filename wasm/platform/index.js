@@ -100,7 +100,6 @@ function attachListeners() {
   initIpAddressFields();
   filterUnsupportedResolutions();
   DiagnosticLogs.init();
-  initStreamWatchdog();
 
   $('#addHostContainer').on('click', addHostDialog);
   $('#settingsBtn').on('click', showSettings);
@@ -2547,7 +2546,6 @@ function showAppsMode() {
       logDiagnostic('UI gamepad watching resumed after the stream');
     }
   }
-  stopStreamWatchdog('returned to the apps view');
   // We want to eventually poll on the app screen, but we can't now because
   // it slows down box art loading and we don't update the UI live anyway.
   stopPollingHosts();
@@ -2943,7 +2941,6 @@ function quitAppDialog() {
   }
 }
 
-var streamWatchdog = null; // Records a heartbeat while streaming, so that a frozen application leaves evidence behind
 var isUiGamepadPaused = false; // True while the interface gamepad loop is paused for a stream
 
 // Adds a line to the diagnostic log from JavaScript, for what the native side cannot see
@@ -3002,44 +2999,6 @@ function finishStartTimeline() {
   }
 }
 
-// How many times the guard released a stuck lock of the allocator, for the health line (empty when it is not installed)
-function describeFutexGuard() {
-  return window.futexGuard ? window.futexGuard.describe() : '';
-}
-
-// Creates the stream watchdog and reports when the previous run ended while streaming
-function initStreamWatchdog() {
-  streamWatchdog = StreamWatchdog.create({
-    now: function() { return Date.now(); },
-    perfNow: function() { return performance.now(); },
-    setInterval: function(callback, delay) { return window.setInterval(callback, delay); },
-    clearInterval: function(timer) { window.clearInterval(timer); },
-    storage: {
-      getItem: function(key) { return window.localStorage.getItem(key); },
-      setItem: function(key, value) { window.localStorage.setItem(key, value); }
-    },
-    getHealth: function() { return Module.getStreamHealth(); },
-    getExtra: function() { return rumbleThrottle.describe() + describeFutexGuard(); },
-    getMemory: function() {
-      var memory = window.performance && window.performance.memory;
-      if (!memory) {
-        return 'jsHeap=unavailable';
-      }
-      return 'jsHeap=' + Math.round(memory.usedJSHeapSize / 1048576) + 'MB/' +
-        Math.round(memory.totalJSHeapSize / 1048576) + 'MB';
-    },
-    log: function(line) { DiagnosticLogs.appendLine(line); }
-  });
-  streamWatchdog.reportUncleanExit();
-}
-
-// Records that the stream ended in an orderly way
-function stopStreamWatchdog(reason) {
-  if (streamWatchdog) {
-    streamWatchdog.stop(reason);
-  }
-}
-
 // Handle layout elements when displaying the Stream view
 function showStreamMode() {
   console.log('%c[index.js, showStreamMode]', 'color: green;', 'Entering "Show Stream" mode.');
@@ -3057,9 +3016,6 @@ function showStreamMode() {
   }
 
   isInGame = true;
-  if (streamWatchdog) {
-    streamWatchdog.start();
-  }
 
   // The native input thread reads the controllers during the stream, so the loop that polls them for menu
   // navigation only costs the main thread work. It resumes together with the app list.

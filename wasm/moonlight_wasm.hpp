@@ -27,7 +27,6 @@
 #include "request_registry.hpp"
 #include "rumble_dedupe.hpp"
 #include "stop_sequence.hpp"
-#include "stream_health.hpp"
 
 #include "samsung/wasm/elementary_media_stream_source.h"
 #include "samsung/wasm/elementary_media_stream_source_listener.h"
@@ -183,10 +182,6 @@ class MoonlightInstance {
   static void FormatVideoStats(VIDEO_STATS& stats, char* output, int length);
   void TogglePerformanceStats();
 
-  // One line with the stream counters, see stream_health.hpp
-  std::string GetStreamHealth();
-  StreamHealth& Health() { return m_StreamHealth; }
-
   static int AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int arFlags);
   static void AudDecCleanup(void);
   static void AudDecDecodeAndPlaySample(char* sampleData, int sampleLength);
@@ -334,7 +329,6 @@ class MoonlightInstance {
   Dispatcher m_Dispatcher;
   HttpRequestRegistry m_HttpRequests;
   HttpQueueMetrics m_HttpQueueMetrics;
-  StreamHealth m_StreamHealth;
 
   std::mutex m_Mutex;
   EmssReadyState m_EmssReadyState;

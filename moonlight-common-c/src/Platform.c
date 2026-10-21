@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
 #include "Limelight-internal.h"
-#include "VideoCanary.h"
 
 // The maximum amount of time before observing an interrupt
 // in PltSleepMsInterruptible().
@@ -86,8 +85,6 @@ void* ThreadProc(void* context) {
 #elif defined(LC_DARWIN)
     pthread_setname_np(ctx->name);
 #endif
-
-    PACKET_THREAD_NAME(ctx->name);
 
     ctx->entry(ctx->context);
 
@@ -527,15 +524,7 @@ int initializePlatform(void) {
         return err;
     }
 
-#ifdef MOONLIGHT_VIDEO_CANARY
-    {
-        // The blocks of ENet are tracked in a diagnostic build (VideoCanary.c)
-        ENetCallbacks callbacks = { videoCanaryEnetMalloc, videoCanaryEnetFree, abort };
-        err = enet_initialize_with_callbacks(ENET_VERSION, &callbacks);
-    }
-#else
     err = enet_initialize();
-#endif
     if (err != 0) {
         return err;
     }

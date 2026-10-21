@@ -197,10 +197,7 @@ static DecodeAppendResult DecodeAndAppendPacket(
 
   // Attempt to append the packet to the audio track for rendering
   const auto appendStart = std::chrono::steady_clock::now();
-  const auto appendResult = [&] {
-    ScopedSection appendSection(g_Instance->Health().AudioAppend());
-    return track->AppendPacket(pkt);
-  }();
+  const auto appendResult = track->AppendPacket(pkt);
   const auto appendEnd = std::chrono::steady_clock::now();
   const auto appendUs = ElapsedUs(appendStart, appendEnd);
   const auto appendResultCode =
@@ -497,7 +494,6 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
 
   if (decodeOutcome.outcome == AudioPacketOutcome::Appended) {
     s_AudioSyncController.CommitAppend(ntp.count(), s_frameDuration.count());
-    g_Instance->m_StreamHealth.AudioSubmitted(StreamHealth::NowMs());
   }
 
   const auto callbackEnd = std::chrono::steady_clock::now();

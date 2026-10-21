@@ -1,6 +1,5 @@
 #include "Limelight-internal.h"
 #include "VideoReceiveDiagnostics.h"
-#include "VideoCanary.h"
 
 #define FIRST_FRAME_MAX 1500
 #define FIRST_FRAME_TIMEOUT_SEC 10
@@ -95,7 +94,6 @@ static void VideoReceiveThreadProc(void* context) {
     bool encrypted;
     VIDEO_RECEIVE_DIAGNOSTICS diagnostics;
     VIDEO_RECEIVE_SNAPSHOT diagnosticSnapshot;
-    unsigned int sweepTick = 0;
 
     VideoReceiveDiagnosticsReset(&diagnostics, PltGetMillis());
 
@@ -105,7 +103,6 @@ static void VideoReceiveThreadProc(void* context) {
     receiveSize = decryptedSize + ((EncryptionFeaturesEnabled & SS_ENC_VIDEO) ? sizeof(ENC_VIDEO_HEADER) : 0);
     bufferSize = decryptedSize + sizeof(RTPV_QUEUE_ENTRY);
     buffer = NULL;
-    PACKET_BUFFER_CONFIGURE(bufferSize, decryptedSize);
 
     if (setNonFatalRecvTimeoutMs(rtpSocket, UDP_RECV_POLL_TIMEOUT_MS) < 0) {
         // SO_RCVTIMEO failed, so use select() to wait
@@ -134,26 +131,18 @@ static void VideoReceiveThreadProc(void* context) {
         PRTP_PACKET packet;
 
         if (buffer == NULL) {
-            buffer = (char*)PACKET_BUFFER_MALLOC(bufferSize);
+            buffer = (char*)malloc(bufferSize);
             if (buffer == NULL) {
                 Limelog("Video Receive: malloc() failed\n");
                 ListenerCallbacks.connectionTerminated(-1);
                 break;
             }
         }
-        else {
-            // A buffer that this thread kept: nobody else may have written to it since the last receive
-            PACKET_BUFFER_CHECK(buffer, "while the thread held the buffer", 0, receiveSize);
-        }
 
         err = recvUdpSocket(rtpSocket,
                             encrypted ? encryptedBuffer : buffer,
                             receiveSize,
                             useSelect);
-        PACKET_BUFFER_CHECK(buffer, "by the receive", err, receiveSize);
-        if ((++sweepTick & 31) == 0) {
-            PACKET_BUFFER_SWEEP("the receive loop");
-        }
         if (err < 0) {
             Limelog("Video Receive: recvUdpSocket() failed: %d\n", (int)LastSocketError());
             ListenerCallbacks.connectionTerminated(LastSocketFail());
@@ -283,7 +272,7 @@ static void VideoReceiveThreadProc(void* context) {
     }
 
     if (buffer != NULL) {
-        PACKET_BUFFER_FREE(buffer);
+        free(buffer);
     }
 
     if (encryptedBuffer != NULL) {

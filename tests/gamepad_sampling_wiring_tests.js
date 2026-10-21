@@ -110,18 +110,12 @@ assert(/the browser failed to read the controllers/.test(poll), 'a browser failu
 assert(!/EmscriptenGamepadEvent events\[kMaxControllers\]\{\}/.test(poll),
   'the slot array is not cleared on every poll, only present slots are read');
 
-// Telemetry: how many controllers are in use and how many state packets were sent to the host.
-assert(/m_StreamHealth\.SetActiveControllers\(/.test(poll), 'the active controller count is published');
-assert((poll.match(/m_StreamHealth\.ControllerSent\(\)/g) || []).length >= 1, 'sent controller states are counted');
-
-// The input thread polls on a schedule and only times the part that waits for the main thread.
+// The input thread polls on a schedule.
 const input = extractBraced(main, 'void* MoonlightInstance::InputThreadFunc(');
 assert(/GamepadPollSchedule/.test(input), 'the poll schedule is used');
 assert(/if \(schedule\.ShouldPoll\(\)\)/.test(input));
 assert(/schedule\.Polled\(/.test(input));
 const pollBlock = extractBraced(input, 'if (schedule.ShouldPoll())');
-assert(/ScopedSection pollSection\(me->m_StreamHealth\.InputPoll\(\)\)/.test(pollBlock),
-  'inputPoll* now measures the round trip to the main thread of one poll');
 assert(/me->PollGamepads\(\)/.test(pollBlock));
 assert(!/ReportMouseMovement/.test(pollBlock), 'mouse movement is still reported every round');
 assert(/me->ReportMouseMovement\(\);/.test(input));

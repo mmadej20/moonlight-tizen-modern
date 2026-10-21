@@ -36,14 +36,12 @@ const poll = extractBraced(gamepad, 'bool MoonlightInstance::PollGamepads()');
 // The state that is compared is built from the very values that are sent.
 const send = poll.slice(poll.indexOf('const ControllerState state'));
 assert(/const ControllerState state\s*=?\s*\{?/.test(poll) || /ControllerState state\{/.test(poll), 'the state is built once per controller');
-assert(/s_ControllerSendFilter\.ShouldSend\(gamepadID, state, StreamHealth::NowMs\(\)\)/.test(poll),
-  'the filter decides with the same clock as the statistics');
+assert(/s_ControllerSendFilter\.ShouldSend\(gamepadID, state, MonotonicNowMs\(\)\)/.test(poll),
+  'the filter decides with a monotonic clock');
 const sendCall = /LiSendMultiControllerEvent\(\s*gamepadID,\s*state\.activeMask,\s*state\.buttonFlags,\s*state\.leftTrigger,\s*state\.rightTrigger,\s*state\.leftStickX,\s*state\.leftStickY,\s*state\.rightStickX,\s*state\.rightStickY\s*\)/;
 assert(sendCall.test(poll), 'the call sends exactly the fields that were compared');
 assert(!/LiSendMultiControllerEvent\(\s*gamepadID,\s*activeGamepadMask,\s*buttonFlags/.test(poll),
   'the old unconditional call is gone');
-assert(send.indexOf('ControllerSent()') > send.indexOf('LiSendMultiControllerEvent'), 'a sent state is counted');
-assert(/m_StreamHealth\.ControllerSkipped\(\)/.test(poll), 'a state that was not sent is counted');
 
 // Mouse emulation keeps its own events, and the removed-controller event is still unconditional.
 assert(/LiSendMouseMoveEvent\(/.test(poll));

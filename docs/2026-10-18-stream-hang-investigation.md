@@ -3,7 +3,14 @@
 Objaw zgłoszony przez użytkownika: aplikacja czasem się zawiesza i trzeba ją zrestartować, żeby wrócić do streamu.
 Zwykle zdarza się raz na początku, potem działa bez problemu, czasem zawiesza się drugi raz.
 
-Status: **przyczyna nie została udowodniona.** Poniżej tylko to, co wynika z logów i z kodu, z oceną pewności.
+Status: **przyczyna znaleziona i naprawiona, patrz sekcja 20** (odczyt `std::string` przez Embind zapisywał bajt za
+buforem i psuł nagłówek sąsiedniego chunka sterty). Sekcje 1-19 to historia poszukiwań, w tym hipotezy, które się nie
+potwierdziły. Narzędzia z tych poszukiwań (kopia dlmalloc z kontrolami, kanarek pakietów wideo, strażnik blokady
+alokatora, rejestrator wyjątków, liczniki `getStreamHealth` z watchdogiem, skrypty `tools/tv-debug` i throttling QoS)
+nie ma już na `main`; są na gałęzi `diagnostics/freeze-hunt` razem z testami. W `main` zostaje tylko poprawka
+(`tools/patch-embind-string.js` w kroku Dockera).
+
+Poniżej, w sekcjach 1-19, to co wynikało z logów i z kodu w danym momencie, z oceną pewności.
 
 ## 1. Co pokazują dostępne logi (`tools/moonlight-tv-logs`)
 

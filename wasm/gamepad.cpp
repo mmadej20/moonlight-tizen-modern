@@ -77,6 +77,13 @@ static bool s_LoggedSamplingFailure = false;
 // What the host already knows about each controller. Only the input thread uses it while a stream runs.
 static ControllerSendFilter s_ControllerSendFilter;
 
+// Monotonic milliseconds for the send filter
+static int64_t MonotonicNowMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+           std::chrono::steady_clock::now().time_since_epoch())
+    .count();
+}
+
 // The last rumble values passed on to the interface. Only the thread of the control stream uses it while a stream runs.
 static RumbleDedupe s_RumbleDedupe;
 
@@ -308,7 +315,6 @@ bool MoonlightInstance::PollGamepads() {
         s_LoggedSamplingFailure = true;
         ClLogMessage("Gamepad sampling: the browser failed to read the controllers, trying again\n");
       }
-      m_StreamHealth.SetActiveControllers(0);
       return false;
     }
   }
@@ -322,7 +328,6 @@ bool MoonlightInstance::PollGamepads() {
       : "one call to the main thread per slot (the bulk call is not available)");
   }
   if (!sample.ok) {
-    m_StreamHealth.SetActiveControllers(0);
     return false;
   }
 
@@ -380,8 +385,6 @@ bool MoonlightInstance::PollGamepads() {
       arrived.push_back(i);
     }
   }
-
-  m_StreamHealth.SetActiveControllers(__builtin_popcount(static_cast<unsigned short>(activeGamepadMask)));
 
   // Send zeroed events for removed / replaced controllers so the host cleans up
   for (int i : removed) {
@@ -553,13 +556,10 @@ bool MoonlightInstance::PollGamepads() {
         static_cast<short>(rightStickX),
         static_cast<short>(rightStickY),
         activeGamepadMask};
-      if (s_ControllerSendFilter.ShouldSend(gamepadID, state, StreamHealth::NowMs())) {
+      if (s_ControllerSendFilter.ShouldSend(gamepadID, state, MonotonicNowMs())) {
         LiSendMultiControllerEvent(
           gamepadID, state.activeMask, state.buttonFlags, state.leftTrigger,
           state.rightTrigger, state.leftStickX, state.leftStickY, state.rightStickX, state.rightStickY);
-        m_StreamHealth.ControllerSent();
-      } else {
-        m_StreamHealth.ControllerSkipped();
       }
     }
   }
@@ -569,8 +569,6 @@ bool MoonlightInstance::PollGamepads() {
 
 // Function to send controller rumble feedback for gamepad
 void MoonlightInstance::ClControllerRumble(unsigned short controllerNumber, unsigned short lowFreqMotor, unsigned short highFreqMotor) {
-  g_Instance->Health().RumbleReceived();
-
   // Check if the rumble feedback switch is checked
   if (!rumbleFeedbackSwitch) {
     return;
@@ -579,7 +577,6 @@ void MoonlightInstance::ClControllerRumble(unsigned short controllerNumber, unsi
   // The host repeats values, so only a change is passed on. The call does not wait for the interface (this is the
   // thread of the control stream) and carries three plain numbers: the interface turns them into magnitudes.
   if (s_RumbleDedupe.ShouldPost(controllerNumber, lowFreqMotor, highFreqMotor)) {
-    g_Instance->Health().RumblePosted();
     MAIN_THREAD_ASYNC_EM_ASM({
       if (typeof handleRumble === 'function') {
         handleRumble($0, $1, $2);

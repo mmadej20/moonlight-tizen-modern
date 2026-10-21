@@ -22,10 +22,6 @@ const sources = fs.readdirSync(wasmDir)
 
 const wide = /std::atomic<\s*(?:u?int64_t|(?:unsigned\s+)?long\s+long|size_t|double)\s*>/;
 
-// The statistics header is shared by every media thread and is the one that must never use wide atomics.
-const health = read('wasm/stream_health.hpp');
-assert(!wide.test(health), 'stream_health.hpp must not declare a 64-bit std::atomic');
-
 // Nowhere in the WASM sources may a compare-exchange run on a 64-bit atomic. Plain fetch_add and exchange on
 // 64-bit counters are the only wide operations that are known to work (diagnostic_log.hpp).
 const allowedWide = new Set([path.join('wasm', 'diagnostic_log.hpp')]);

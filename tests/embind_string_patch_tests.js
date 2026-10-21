@@ -99,9 +99,13 @@ for (const [name, source] of [['original', SOURCE], ['patched', patched]]) {
 // The Docker build runs the patch after the module is linked and fails when it does not apply
 const docker = read('Dockerfile');
 const dockerignore = read('.dockerignore');
-assert(/COPY --chown=moonlight tools\/find-malloc-lock\.js tools\/patch-futex-wait\.js tools\/patch-embind-string\.js /.test(docker));
-assert(/patch-futex-wait\.js build\/widget\/moonlight-wasm\.js && \\\n\t\$NODE moonlight-tizen\/tools\/patch-embind-string\.js build\/widget\/moonlight-wasm\.js\n/.test(docker),
-  'it runs in the same RUN as the other patches, on its own line');
+assert(/COPY --chown=moonlight tools\/patch-embind-string\.js \.\/moonlight-tizen\/tools\//.test(docker));
+assert(/RUN \/home\/moonlight\/emscripten-release-bundle\/emsdk\/node\/12\.9\.1_64bit\/bin\/node moonlight-tizen\/tools\/patch-embind-string\.js build\/widget\/moonlight-wasm\.js\n/.test(docker),
+  'it runs on the Node of the SDK, on the linked module');
+assert(docker.indexOf('cmake --install build') < docker.indexOf('patch-embind-string.js build/widget/moonlight-wasm.js'),
+  'the patch runs after the module is installed into the widget folder');
+assert(docker.indexOf('patch-embind-string.js build/widget/moonlight-wasm.js') < docker.indexOf('tizen package'),
+  'and before the application is packaged');
 assert(/^!tools\/patch-embind-string\.js$/m.test(dockerignore));
 
 console.log('embind_string_patch_tests: PASS');

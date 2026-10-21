@@ -234,9 +234,6 @@ void* MoonlightInstance::InputThreadFunc(void* context) {
 
   while (me->m_Running.load()) {
     if (schedule.ShouldPoll()) {
-      // Polling asks the main thread for the gamepad state, so the time of one poll also
-      // measures how responsive the main thread is
-      ScopedSection pollSection(me->m_StreamHealth.InputPoll());
       schedule.Polled(me->PollGamepads());
     }
     me->ReportMouseMovement();
@@ -373,7 +370,6 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   }
 
   m_ConnectionCancelled.store(false);
-  m_StreamHealth.Reset(StreamHealth::NowMs());
   m_WebAudioGeneration = EM_ASM_INT({
     return typeof _audGeneration === 'number' ? _audGeneration : 0;
   });
@@ -591,14 +587,6 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   }
 
   return MessageResult::Resolve();
-}
-
-std::string MoonlightInstance::GetStreamHealth() {
-  return m_StreamHealth.Snapshot(
-    StreamHealth::NowMs(),
-    reinterpret_cast<std::size_t>(sbrk(0)),
-    // This Emscripten has no emscripten_get_heap_size(); the heap has a fixed size, read it from JavaScript
-    static_cast<std::size_t>(EM_ASM_INT({ return HEAP8.length; })));
 }
 
 MessageResult MoonlightInstance::StopStream() {
@@ -860,33 +848,7 @@ void wakeOnLan(int callbackId, std::string macAddress) {
   g_Instance->WakeOnLan(callbackId, macAddress);
 }
 
-namespace {
-
-// Records how long a worker thread waits for the main thread. The main thread itself is skipped,
-// because it never waits for anyone here.
-class MainThreadCallScope {
- public:
-  MainThreadCallScope() {
-    if (g_Instance != nullptr && !emscripten_is_main_runtime_thread()) {
-      m_Section.emplace(g_Instance->Health().MainCall());
-    }
-  }
-
-  MainThreadCallScope(const MainThreadCallScope&) = delete;
-  MainThreadCallScope& operator=(const MainThreadCallScope&) = delete;
-
- private:
-  std::optional<ScopedSection> m_Section;
-};
-
-}  // namespace
-
-std::string getStreamHealth() {
-  return g_Instance->GetStreamHealth();
-}
-
 void PostToJs(std::string msg) {
-  MainThreadCallScope waiting;
   MAIN_THREAD_EM_ASM({
     const msg = UTF8ToString($0);
     handleMessage(msg);
@@ -901,7 +863,6 @@ void PostToJsAsync(std::string msg) {
 }
 
 void PostPromiseMessage(int callbackId, const std::string& type, const std::string& response) {
-  MainThreadCallScope waiting;
   MAIN_THREAD_EM_ASM({
     const type = UTF8ToString($1);
     const response = UTF8ToString($2);
@@ -910,7 +871,6 @@ void PostPromiseMessage(int callbackId, const std::string& type, const std::stri
 }
 
 void PostPromiseMessage(int callbackId, const std::string& type, const std::vector<uint8_t>& response) {
-  MainThreadCallScope waiting;
   MAIN_THREAD_EM_ASM({
     const type = UTF8ToString($1);
     const response = HEAPU8.slice($2, $2 + $3);
@@ -926,7 +886,6 @@ EMSCRIPTEN_BINDINGS(handle_message) {
   emscripten::function("toggleStats", &toggleStats);
   emscripten::function("drainDiagnosticLogs", &DrainDiagnosticLogs);
   emscripten::function("setDiagnosticLogEnabled", &SetDiagnosticLogEnabled);
-  emscripten::function("getStreamHealth", &getStreamHealth);
   emscripten::function("stun", &stun);
   emscripten::function("pair", &pair);
   emscripten::function("wakeOnLan", &wakeOnLan);
