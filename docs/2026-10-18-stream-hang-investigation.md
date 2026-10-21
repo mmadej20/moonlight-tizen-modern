@@ -697,3 +697,14 @@ bajtów. Łatka zawodzi budowanie, jeśli wzorca nie ma dokładnie raz. Zastosow
 
 **Weryfikacja.** `diag16` = `ALLOC_STRESS` + `DIAG_MALLOC` + ta poprawka, ten sam test (Desktop 3840x2160@60 HEVC,
 dławienie 12 Mbps, wcześniej zawieszenie w 1-6 min za każdym razem). Wynik poniżej.
+
+- `diag16` (12 Mbps, 12:23-12:51 UTC, ok. 28 min pod dławieniem, dwa strumienie przerwane przez samo dławienie: rozłączenie
+  kanału kontrolnego ENet, aplikacja wróciła do listy gier): **0 raportów alokatora** (`walk found a damaged chunk`,
+  `check failed`), 0 zawieszeń, 0 wyjątków `[wasm-exception]`. Walidacja całej sterty co 2. wejście była włączona.
+- Wersja produkcyjna (`artifacts/Moonlight-1.18.0-opt3-embindfix.wgt`: bez kopii dlmalloc i bez kanarka, tylko poprawka
+  `std::string`), dławienie 15 Mbps, 12:54-13:05 UTC (ok. 11 min, ponad 7500 wpisów `Network dropped` w logu): bez
+  zawieszenia, bez trapa, aplikacja odpowiadała do końca (strumień zamknięty przez użytkownika). Obraz przeskakuje przy
+  dławieniu, to normalne.
+
+Dla porównania wcześniej każde uruchomienie z dławieniem 12 Mbps kończyło się zawieszeniem w ciągu 1-6 min. Wniosek:
+poprawka usuwa zawieszenie. Czego to nie dowodzi: testowano jedno TV (UE43CU7172UXXH, Tizen 9) i jeden host (Apollo).
