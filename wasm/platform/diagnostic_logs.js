@@ -11,6 +11,13 @@
 
   var SESSION_LIMIT_BYTES = 2 * 1024 * 1024;
   var PENDING_LIMIT_BYTES = 256 * 1024;
+  // A log that reached its limit is cut down to this much, not by the size of one batch: rewriting a file of 2 MB on the
+  // main thread (read, cut, write) took more than a second on the TV, and a full log did it with every batch, once a second
+  var COMPACT_TARGET_BYTES = Math.floor(SESSION_LIMIT_BYTES * 0.75);
+  // Only the end of a long log is put on the page, and not more often than this
+  var VIEW_TAIL_BYTES = 128 * 1024;
+  var VIEW_REFRESH_MS = 3000;
+  var ENABLED_KEY = 'moonlight.diagnosticLogsEnabled';
   var CURRENT_FILE = 'wgt-private/moonlight-diagnostics-current.log';
   var PREVIOUS_FILE = 'wgt-private/moonlight-diagnostics-previous.log';
 
@@ -19,6 +26,28 @@
       return new TextEncoder().encode(text).length;
     }
     return unescape(encodeURIComponent(text)).length;
+  }
+
+  // Saving the logs on the device can be switched off; the default is on
+  function readEnabledSetting() {
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage.getItem(ENABLED_KEY) === 'false') {
+        return false;
+      }
+    } catch (error) {
+      // Storage may be unavailable; the logs stay on
+    }
+    return true;
+  }
+
+  function writeEnabledSetting(enabled) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(ENABLED_KEY, enabled ? 'true' : 'false');
+      }
+    } catch (error) {
+      // The choice then lasts until the app is closed
+    }
   }
 
   function redactDiagnosticText(text) {
@@ -166,6 +195,8 @@
     this.initialized = false;
     this.currentSizeBytes = null;
     this.selectedSession = 'current';
+    this.enabled = readEnabledSetting();
+    this.lastViewRefreshMs = 0;
   }
 
   DiagnosticLogManager.prototype.init = function() {
@@ -174,14 +205,42 @@
     }
     this.initialized = true;
     this.bindUi();
+    this.applyNativeEnabled();
     this.timer = setInterval(this.pollNative.bind(this), 1000);
+  };
+
+  // The native side stops formatting and keeping lines while the logs are off
+  DiagnosticLogManager.prototype.applyNativeEnabled = function() {
+    try {
+      if (typeof Module !== 'undefined' && typeof Module.setDiagnosticLogEnabled === 'function') {
+        Module.setDiagnosticLogEnabled(this.enabled);
+      }
+    } catch (error) {
+      this.setStatus('Unable to change native diagnostics: ' + error.message, true);
+    }
+  };
+
+  DiagnosticLogManager.prototype.isEnabled = function() {
+    return this.enabled;
+  };
+
+  DiagnosticLogManager.prototype.setEnabled = function(enabled) {
+    this.enabled = !!enabled;
+    writeEnabledSetting(this.enabled);
+    if (!this.enabled) {
+      this.pending = '';
+    }
+    this.applyNativeEnabled();
+    this.updateEnabledSwitch();
+    this.setStatus(this.enabled ? 'Saving of diagnostic logs is on.' : 'Saving of diagnostic logs is off.', false);
+    return typeof document !== 'undefined' ? this.refreshView() : Promise.resolve();
   };
 
   DiagnosticLogManager.prototype.pollNative = function() {
     try {
       if (typeof Module !== 'undefined' && typeof Module.drainDiagnosticLogs === 'function') {
         var batch = Module.drainDiagnosticLogs();
-        if (batch) {
+        if (batch && this.enabled) {
           this.pending = trimDiagnosticLog(this.pending + redactDiagnosticText(batch), PENDING_LIMIT_BYTES);
         }
       }
@@ -193,6 +252,10 @@
 
   DiagnosticLogManager.prototype.persistPending = function() {
     var self = this;
+    if (!self.enabled) {
+      self.pending = '';
+      return Promise.resolve();
+    }
     if (self.flushing || !self.pending) {
       return Promise.resolve();
     }
@@ -212,7 +275,7 @@
         });
       }
       return self.storage.read(CURRENT_FILE).then(function(current) {
-        var compacted = trimDiagnosticLog(current + batch, SESSION_LIMIT_BYTES);
+        var compacted = trimDiagnosticLog(current + batch, COMPACT_TARGET_BYTES);
         return self.storage.write(CURRENT_FILE, compacted).then(function() {
           self.currentSizeBytes = utf8Length(compacted);
         });
@@ -233,6 +296,9 @@
     var self = this;
     self.metadata = metadata || {};
     self.metadata.startedAt = self.metadata.startedAt || new Date().toISOString();
+    if (!self.enabled) {
+      return Promise.resolve();
+    }
     var header = redactDiagnosticText([
       '=== Moonlight stream session ===',
       'Started: ' + self.metadata.startedAt,
@@ -271,6 +337,9 @@
   // Adds a line that was detected by JavaScript. Native lines carry the stream clock, which does not
   // exist for events such as a stalled main thread or a previous run that ended unexpectedly.
   DiagnosticLogManager.prototype.appendLine = function(text, when) {
+    if (!this.enabled) {
+      return Promise.resolve();
+    }
     var stamp = (when instanceof Date ? when : new Date()).toISOString();
     var line = '[js ' + stamp + '] ' + String(text == null ? '' : text).replace(/[\r\n]+$/, '') + '\n';
     this.pending = trimDiagnosticLog(this.pending + redactDiagnosticText(line), PENDING_LIMIT_BYTES);
@@ -303,21 +372,41 @@
     return typeof document !== 'undefined' ? this.refreshView() : Promise.resolve();
   };
 
+  // The end of a text, from the start of a line, when the text is longer than the page should take
+  function tailOfLog(text, maxChars) {
+    if (text.length <= maxChars) {
+      return {text: text, cut: false};
+    }
+    var tail = text.slice(text.length - maxChars);
+    var newline = tail.indexOf('\n');
+    return {text: newline >= 0 ? tail.slice(newline + 1) : tail, cut: true};
+  }
+
   DiagnosticLogManager.prototype.refreshView = function() {
     var self = this;
+    if (typeof document === 'undefined') {
+      return Promise.resolve('');
+    }
+    self.lastViewRefreshMs = Date.now();
     return self.storage.read(self.selectedPath()).then(function(text) {
       var filter = document.getElementById('diagnosticFilter');
       var query = filter ? filter.value.toLowerCase() : '';
       var visible = query ? text.split('\n').filter(function(line) {
         return line.toLowerCase().indexOf(query) !== -1;
       }).join('\n') : text;
+      // A log of 2 MB with tens of thousands of lines hung the page, so only the end of it is shown
+      var shown = tailOfLog(visible, VIEW_TAIL_BYTES);
       var viewport = document.getElementById('diagnosticLogViewport');
       if (viewport) {
-        viewport.textContent = visible || 'No diagnostic log is available for this session.';
+        viewport.textContent = shown.text || (self.enabled
+          ? 'No diagnostic log is available for this session.'
+          : 'Saving of diagnostic logs is off.');
       }
       var summary = document.getElementById('diagnosticSummary');
       if (summary) {
-        summary.textContent = utf8Length(text) + ' bytes retained' + (self.storage.degraded ? ' (memory only)' : '');
+        summary.textContent = utf8Length(text) + ' bytes retained' + (self.storage.degraded ? ' (memory only)' : '')
+          + (shown.cut ? ', showing the last ' + Math.round(shown.text.length / 1024) + ' KB' : '')
+          + (self.enabled ? '' : ', saving is off');
       }
       return text;
     });
@@ -325,7 +414,7 @@
 
   DiagnosticLogManager.prototype.refreshViewIfVisible = function() {
     var pane = typeof document !== 'undefined' && document.getElementById('diagnosticSettings');
-    if (pane && pane.style.display !== 'none') {
+    if (pane && pane.style.display !== 'none' && Date.now() - this.lastViewRefreshMs >= VIEW_REFRESH_MS) {
       return this.refreshView();
     }
     return Promise.resolve();
@@ -383,15 +472,23 @@
 
   DiagnosticLogManager.prototype.clearAll = function() {
     var self = this;
-    if (typeof window !== 'undefined' && !window.confirm('Clear current and previous diagnostic logs?')) {
+    if (typeof window !== 'undefined' && !window.confirm('Clear all diagnostic logs?')) {
       return Promise.resolve(false);
     }
     self.pending = '';
+    // What the native side still holds is cleared too
+    try {
+      if (typeof Module !== 'undefined' && typeof Module.drainDiagnosticLogs === 'function') {
+        Module.drainDiagnosticLogs();
+      }
+    } catch (error) {
+      // Nothing to clear then
+    }
     return self.storage.write(CURRENT_FILE, '').then(function() {
       self.currentSizeBytes = 0;
       return self.storage.write(PREVIOUS_FILE, '');
     }).then(function() {
-      self.setStatus('Diagnostic logs cleared.', false);
+      self.setStatus('All diagnostic logs cleared.', false);
       return self.refreshView();
     });
   };
@@ -402,6 +499,18 @@
     if (status) {
       status.textContent = message;
       status.className = isError ? 'diagnostic-status diagnostic-error' : 'diagnostic-status';
+    }
+  };
+
+  DiagnosticLogManager.prototype.updateEnabledSwitch = function() {
+    if (typeof document === 'undefined') return;
+    var enabledSwitch = document.getElementById('diagnosticLogsEnabledSwitch');
+    if (!enabledSwitch) return;
+    enabledSwitch.checked = this.enabled;
+    var wrapper = enabledSwitch.parentElement;
+    if (wrapper && wrapper.MaterialSwitch) {
+      if (this.enabled) wrapper.MaterialSwitch.on();
+      else wrapper.MaterialSwitch.off();
     }
   };
 
@@ -418,6 +527,11 @@
     if (filter) filter.addEventListener('input', function() { self.refreshView(); });
     if (send) send.addEventListener('click', function() { self.exportSelected(); });
     if (clear) clear.addEventListener('click', function() { self.clearAll(); });
+    var enabledSwitch = document.getElementById('diagnosticLogsEnabledSwitch');
+    if (enabledSwitch) {
+      enabledSwitch.addEventListener('change', function() { self.setEnabled(enabledSwitch.checked); });
+    }
+    self.updateEnabledSwitch();
     var port = document.getElementById('diagnosticPort');
     if (port && !port.value) port.value = '48150';
     self.updateSessionButtons();
@@ -426,6 +540,10 @@
   return {
     redactDiagnosticText: redactDiagnosticText,
     trimDiagnosticLog: trimDiagnosticLog,
+    tailOfLog: tailOfLog,
+    COMPACT_TARGET_BYTES: COMPACT_TARGET_BYTES,
+    SESSION_LIMIT_BYTES: SESSION_LIMIT_BYTES,
+    ENABLED_KEY: ENABLED_KEY,
     validateDiagnosticDestination: validateDiagnosticDestination,
     buildDiagnosticExport: buildDiagnosticExport,
     DiagnosticLogManager: DiagnosticLogManager,

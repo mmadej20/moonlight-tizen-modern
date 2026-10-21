@@ -1172,6 +1172,10 @@ body {
     font: 1rem/1.35 monospace;
 }
 
+.diagnostic-toggle {
+    margin-top: 16px;
+}
+
 .diagnostic-actions {
     display: flex;
     gap: 16px;

@@ -505,9 +505,18 @@
                 <label for="diagnosticPort" data-i18n="Port">Port</label>
                 <input id="diagnosticPort" class="diagnostic-input" type="text" inputmode="numeric" pattern="[0-9]*" value="48150" aria-label="Diagnostic receiver port">
               </div>
+              <div class="diagnostic-toggle">
+                <label id="diagnosticLogsEnabledBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="diagnosticLogsEnabledSwitch">
+                  <input type="checkbox" id="diagnosticLogsEnabledSwitch" class="mdl-switch__input" checked>
+                  <span class="mdl-switch__label" data-i18n="Save diagnostic logs on this device">Save diagnostic logs on this device</span>
+                </label>
+                <span class="mdl-list__item-text-body" data-i18n="- Turn this off to stop writing logs on the device. Logs that are already saved stay until you clear them.">
+                  - Turn this off to stop writing logs on the device. Logs that are already saved stay until you clear them.
+                </span>
+              </div>
               <div class="diagnostic-actions">
                 <button type="button" id="sendDiagnosticLogsBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-i18n="Send logs to PC">Send logs to PC</button>
-                <button type="button" id="clearDiagnosticLogsBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-i18n="Clear logs">Clear logs</button>
+                <button type="button" id="clearDiagnosticLogsBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-i18n="Clear all logs">Clear all logs</button>
               </div>
               <div id="diagnosticStatus" class="diagnostic-status" aria-live="polite"></div>
             </div>

@@ -1,7 +1,9 @@
 #include "moonlight_wasm.hpp"
 #include "diagnostic_log.hpp"
+#include "log_repeat_filter.hpp"
 
 #include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -60,10 +62,24 @@ void MoonlightInstance::ClLogMessage(const char* format, ...) {
   vsnprintf(message, sizeof(message), format, va);
   va_end(va);
 
+  // The same message again and again (a queue that is full, a poll that fails) is logged once a second with the count
+  static LogRepeatFilter repeatFilter;
+  const uint64_t nowMs = LiGetMillis();
+  const LogRepeatFilter::Decision decision = repeatFilter.Check(message, nowMs);
+  if (decision.repeated > 0) {
+    char summary[80];
+    snprintf(summary, sizeof(summary), "(the previous message was repeated %u times)\n", decision.repeated);
+    emscripten_log(EM_LOG_CONSOLE, "%s", summary);
+    DiagnosticLogTryAppend(nowMs, summary);
+  }
+  if (!decision.log) {
+    return;
+  }
+
   // fprintf(stderr, ...) processes message in parts, so logs from different
   // threads may interleave. Send whole message at once to minimize this.
   emscripten_log(EM_LOG_CONSOLE, "%s", message);
-  DiagnosticLogTryAppend(LiGetMillis(), message);
+  DiagnosticLogTryAppend(nowMs, message);
 }
 
 void MoonlightInstance::ClConnectionStatusUpdate(int connectionStatus) {

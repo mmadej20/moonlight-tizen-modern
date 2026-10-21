@@ -36,5 +36,22 @@ int main() {
     assert(drained.find("capture-resumed") != std::string::npos);
   }
 
+  {
+    // The log can be switched off: nothing is formatted or kept, and it is not counted as dropped
+    DiagnosticLogBuffer buffer(256);
+    assert(buffer.Enabled());
+    buffer.SetEnabled(false);
+    assert(!buffer.Enabled());
+    assert(!buffer.TryAppend(1, "while-off"));
+    assert(buffer.Drain().empty());
+
+    buffer.SetEnabled(true);
+    assert(buffer.TryAppend(2, "after-on"));
+    const std::string drained = buffer.Drain();
+    assert(drained.find("after-on") != std::string::npos);
+    assert(drained.find("while-off") == std::string::npos);
+    assert(drained.find("dropped") == std::string::npos);
+  }
+
   return 0;
 }

@@ -925,6 +925,7 @@ EMSCRIPTEN_BINDINGS(handle_message) {
   emscripten::function("cancelRequest", &cancelRequest);
   emscripten::function("toggleStats", &toggleStats);
   emscripten::function("drainDiagnosticLogs", &DrainDiagnosticLogs);
+  emscripten::function("setDiagnosticLogEnabled", &SetDiagnosticLogEnabled);
   emscripten::function("getStreamHealth", &getStreamHealth);
   emscripten::function("stun", &stun);
   emscripten::function("pair", &pair);

@@ -29,7 +29,7 @@ assert.match(
 
 assert.match(
   connectionListener,
-  /DiagnosticLogTryAppend\(LiGetMillis\(\),\s*message\);/,
+  /const uint64_t nowMs = LiGetMillis\(\);[\s\S]*?DiagnosticLogTryAppend\(nowMs,\s*message\);/,
   'the connection listener must append received common-library logs to diagnostics'
 );
 

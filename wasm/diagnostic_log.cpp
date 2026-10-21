@@ -27,6 +27,10 @@ DiagnosticLogBuffer::DiagnosticLogBuffer(std::size_t capacityBytes)
     : m_CapacityBytes(capacityBytes) {}
 
 bool DiagnosticLogBuffer::TryAppend(uint64_t timestampMs, std::string_view message) {
+  if (!Enabled()) {
+    return false;
+  }
+
   std::string record = FormatRecord(timestampMs, message);
   if (record.size() > m_CapacityBytes) {
     m_DroppedRecords.fetch_add(1, std::memory_order_relaxed);
@@ -91,4 +95,8 @@ bool DiagnosticLogTryAppend(uint64_t timestampMs, std::string_view message) {
 
 std::string DrainDiagnosticLogs() {
   return g_DiagnosticLogBuffer.Drain();
+}
+
+void SetDiagnosticLogEnabled(bool enabled) {
+  g_DiagnosticLogBuffer.SetEnabled(enabled);
 }

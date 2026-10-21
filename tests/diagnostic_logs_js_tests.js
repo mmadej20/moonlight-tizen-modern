@@ -57,7 +57,8 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'wasm', 'index.html'), '
   'diagnosticHost',
   'diagnosticPort',
   'sendDiagnosticLogsBtn',
-  'clearDiagnosticLogsBtn'
+  'clearDiagnosticLogsBtn',
+  'diagnosticLogsEnabledSwitch'
 ].forEach((id) => {
   assert.strictEqual((html.match(new RegExp('id="' + id + '"', 'g')) || []).length, 1, id);
 });
