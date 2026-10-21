@@ -220,7 +220,7 @@ bool MoonlightInstance::PostHttpJob(std::string label, std::function<void()> job
 void MoonlightInstance::OpenUrl(int callbackId, std::string url,
                                 std::string ppk, bool binaryResponse,
                                 int timeoutMs) {
-  auto requestContext = m_HttpRequests.Create(callbackId, 3000, timeoutMs);
+  auto requestContext = m_HttpRequests.Create(callbackId, HttpConnectTimeoutMs(timeoutMs), timeoutMs);
   if (!requestContext) {
     PostPromiseMessage(callbackId, "reject", "Duplicate HTTP callback ID.");
     return;

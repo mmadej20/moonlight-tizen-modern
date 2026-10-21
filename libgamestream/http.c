@@ -83,6 +83,7 @@ int http_request(const char* url, const char* ppkstr,
   char* rewritten_url = NULL;
   char* resolve_string = NULL;
   struct curl_slist *resolve_list = NULL;
+  char curl_error[CURL_ERROR_SIZE];
 
   if (url == NULL || context == NULL || data == NULL)
     return GS_INVALID;
@@ -93,6 +94,8 @@ int http_request(const char* url, const char* ppkstr,
   if (curl == NULL)
     return GS_OUT_OF_MEMORY;
 
+  curl_error[0] = '\0';
+  curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, curl_error);
   curl_easy_setopt(curl, CURLOPT_CAINFO, "/curl/ca-bundle.crt");
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _write_curl);
   curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
@@ -191,7 +194,8 @@ int http_request(const char* url, const char* ppkstr,
     context->timing_valid = 1;
   }
 
-  printf("CURL request completed: %s\n", curl_easy_strerror(res));
+  // The text of curl says which limit ended a request that timed out (connect, total or too slow)
+  printf("CURL request completed: %s%s%s\n", curl_easy_strerror(res), curl_error[0] != '\0' ? ": " : "", curl_error);
   
   if (data->error == GS_RESPONSE_TOO_LARGE) {
     ret = GS_RESPONSE_TOO_LARGE;

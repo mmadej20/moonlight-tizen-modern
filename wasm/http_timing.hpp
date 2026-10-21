@@ -25,6 +25,14 @@ inline std::string DescribeHttpTiming(long namelookupMs, long connectMs, long ap
   return text;
 }
 
+// The time that a request may spend before the connection is made: name lookup, TCP connect and the TLS handshake, which
+// this device does in software. A request that the user waits for (launch, resume and quit have 10 s in total) gets
+// more: on a busy TV, right after the app was installed, the lookup of an address took 2.6 s and the handshake up to
+// 2.6 s, and a limit of 3 s ended the start of a stream. The requests that poll the host keep 3 s.
+inline long HttpConnectTimeoutMs(long totalTimeoutMs) {
+  return totalTimeoutMs >= 10000 ? 8000 : 3000;
+}
+
 // Only requests that took a second or more are worth a line
 inline bool ShouldLogHttpTiming(long totalMs) {
   return totalMs >= 1000;

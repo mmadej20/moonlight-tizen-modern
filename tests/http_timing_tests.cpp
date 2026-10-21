@@ -19,6 +19,14 @@ int main() {
   // Values that arrive in a surprising order never produce a negative stage.
   assert(DescribeHttpTiming(10, 5, 4, 3, 2) == "dns 10 ms, connect 0 ms, tls 0 ms, host 0 ms, transfer 0 ms, total 2 ms");
 
+  // Polling requests keep 3 s to connect; a request that the user waits for (10 s in total) gets 8 s, so that a slow
+  // name lookup and handshake on a busy TV do not end the start of a stream.
+  assert(HttpConnectTimeoutMs(0) == 3000);
+  assert(HttpConnectTimeoutMs(5000) == 3000);
+  assert(HttpConnectTimeoutMs(9999) == 3000);
+  assert(HttpConnectTimeoutMs(10000) == 8000);
+  assert(HttpConnectTimeoutMs(30000) == 8000);
+
   // Only requests that took a second or more are worth a line.
   assert(!ShouldLogHttpTiming(0));
   assert(!ShouldLogHttpTiming(999));

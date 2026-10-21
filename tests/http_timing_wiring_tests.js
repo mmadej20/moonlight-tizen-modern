@@ -52,4 +52,10 @@ assert(/HttpUrlPathForLog\(url\)/.test(open.slice(logAt, logAt + 400)), 'only th
 assert(/requestContext->timing_valid/.test(open.slice(logAt - 200, logAt + 50)), 'only a measured timing is logged');
 assert(/DescribeHttpTiming\(/.test(open.slice(logAt, logAt + 600)));
 
+// The connect limit follows the total limit, and curl's own text of an error is logged with the error.
+assert(/m_HttpRequests\.Create\(callbackId, HttpConnectTimeoutMs\(timeoutMs\), timeoutMs\)/.test(httpCpp));
+assert(!/m_HttpRequests\.Create\(callbackId, 3000,/.test(httpCpp), 'no fixed limit is left');
+assert(/curl_easy_setopt\(curl, CURLOPT_ERRORBUFFER, curl_error\);/.test(request));
+assert(/printf\("CURL request completed: %s%s%s\\n", curl_easy_strerror\(res\), [^;]*curl_error\);/.test(request));
+
 console.log('http timing wiring tests passed');
