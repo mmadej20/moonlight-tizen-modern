@@ -66,10 +66,13 @@ assert(/#define DEBUG 1/.test(PRELUDE));
 assert(/#define DIAG_CHECK_EVERY 16/.test(PRELUDE));
 // A failing validation runs once more after a barrier and says whether the second pass passed; the lock is surrounded by barriers
 assert(/diag_phase = 1;\s+do_check_malloc_state\(gm\);\s+diag_phase = 0;/.test(APPENDIX));
-assert(/diag_recheck\(\);\s+EM_ASM_\(\{ console\.error\("dlmalloc: the second pass PASSED/.test(PRELUDE));
+assert(/diag_recheck\(\);\s+diag_describe\(3\);\s+EM_ASM_\(\{ console\.error\("dlmalloc: the second pass PASSED/.test(PRELUDE));
 assert(/the second pass failed too/.test(PRELUDE));
 assert(/__atomic_fetch_add\(&diag_barrier_word, 0, __ATOMIC_SEQ_CST\)/.test(PRELUDE));
 assert(/if \(DIAG_FENCES\) \{\s+diag_barrier\(\);\s+\}\s+\{\s+int me|if \(DIAG_FENCES\) \{\s+diag_barrier\(\);\s+\}\s+int me/.test(PRELUDE));
+// The failure says what the top chunk and the state held at the moment, after the barriers and after the second pass
+assert(/diag_describe\(1\);[\s\S]*?diag_describe\(2\);[\s\S]*?diag_recheck\(\);\s+diag_describe\(3\);/.test(PRELUDE));
+assert(/static void diag_describe\(int when\) \{[\s\S]*?volatile struct malloc_state\*/.test(APPENDIX));
 // The state is copied when the lock is released and compared when it is taken, except for the lock itself
 assert(/static int diag_release\(pthread_mutex_t\* lk\) \{\s+int me = \(int\)\(intptr_t\)pthread_self\(\);\s+diag_snapshot\(\);/.test(PRELUDE));
 assert(/diag_verify\(line\);\s+if \(number % DIAG_CHECK_EVERY == 0\)/.test(PRELUDE));
