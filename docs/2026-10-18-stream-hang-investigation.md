@@ -650,3 +650,50 @@ to skutki. Poprzednia kopia dlmalloc tego nie wykrywała, bo `DEBUG` był wyłą
 (wszystkie chunki, biny, drzewa) z zapisem ostatnich 256 wejść (numer, wątek, linia w dlmalloc). Pierwszy rozjazd
 metadanych zatrzyma wątek i wypisze 64 ostatnie wejścia. Test na hoście (`dl_harness.c`: 4 wątki, 2,4 mln wejść) bez
 fałszywych alarmów; celowo zwiększony o 8 nagłówek wolnego chunka jest wykrywany.
+
+## 20. Przyczyna: odczyt `std::string` przez Embind zapisuje bajt za buforem (2026-10-21)
+
+**Droga do wyniku (`diag10`-`diag15`).** Kopia dlmalloc z `DEBUG 1` i walidacją całego stanu co 16. wejście (`diag10`,
+`diag11`: okno 16 wpisów z argumentami `malloc(n)`/`free(ptr)`) pokazała, że asercja potrafi zawieść, a chwilę później
+stan jest spójny (`diag12`: brak zmiany stanu `gm` bez blokady, brak współbieżnego wejścia). `diag13` dodał drugi
+przebieg walidacji po 20000 barierach pamięci i pełne bariery wokół blokady: pierwszy przebieg nadal widział na chwilę
+zły rozmiar chunka `top` (`do_check_top_chunk`, `sz == m->topsize`), drugi przechodził. Pełne bariery nie pomogły. Test
+na TV (4 workery, blokada na `Atomics.compareExchange`, 6,2 mln przejęć, 3 zwykłe słowa w różnych liniach pamięci
+podręcznej) nie dał ani jednej niezgodności, więc kolejność zapisów między rdzeniami działa. `diag14` złapał prawdziwe
+zawieszenie: wątek główny w `free` dostał `memory access out of bounds` z zajętą blokadą, bo następny chunk miał w
+nagłówku `0xf9` („wolny, 248 B") zamiast `0x4b` („zajęty, 72 B"), a jego dane to żywy tekst loga. `free` próbował
+scalić go do przodu i rozwinął wskaźniki z tekstu. `diag15` dodał przejście całego łańcucha chunków co drugie wejście
+i złapał to samo w locie: za chunkiem z napisem stanu strumienia (372 B) nagłówek następnego chunka miał na chwilę
+wartość `0` (po kilku ms prawidłowe `0x43`).
+
+**Przyczyna.** `fromWireType` dla `std::string` w kodzie, który generuje Samsung Emscripten 1.39.4.7:
+
+```
+var endChar=HEAPU8[value+4+length];var endCharSwap=0;
+if(endChar!=0){endCharSwap=endChar;HEAPU8[value+4+length]=0}
+... UTF8ToString(decodeStartPtr) ...
+if(endCharSwap!=0)HEAPU8[value+4+length]=endCharSwap
+```
+
+Bufor, który buduje strona C++ (`toWireType` w `wire.h`), to `malloc(4 + length)` bez terminatora. Odczyt wpisuje więc
+zero w bajt **za** buforem i po dekodowaniu przywraca stary bajt, nie trzymając blokady alokatora. Gdy `length` dzieli się
+przez 8 (napis stanu strumienia ma 368 B), ten bajt to najmłodszy bajt nagłówka następnego chunka sterty. Jeśli w tym
+czasie inny wątek zmieni ten nagłówek (malloc dzielący chunk, free scalający), przywrócenie starego bajtu cofa jego zmianę:
+nagłówek jest uszkodzony, a najbliższy `free` sąsiada wchodzi w śmieci. `getStreamHealth` i podobne funkcje wołane z JS
+na wątku głównym wołają to co sekundę. Dławienie QoS zwiększa ruch alokatora (retransmisje, komunikaty kontrolne ENet),
+więc okno wyścigu jest trafiane w minutach.
+
+To tłumaczy wszystkie wcześniejsze ślady: właściciel blokady = wątek główny, który zginął w `free` (`diag8`, sekcja 18),
+nagłówek wolnego chunka o 8 B za duży i nachodzące bloki (`diag9`, sekcja 19), para `{długość, wskaźnik}` w nagłówku
+(`diag10`), chwilowe zero w nagłówku (`diag13`, `diag15`) i `0xf9` zamiast `0x4b` (`diag14`). Do tego dochodzi pułapka
+diagnostyczna, która sama trzyma blokadę po wykryciu błędu: zawieszenie „po trapie" w `diag13` i `diag15` to skutek
+wykrycia, nie osobna przyczyna.
+
+**Poprawka.** `tools/patch-embind-string.js` (krok Dockera po linkowaniu, zaraz po `patch-futex-wait.js`; test
+`tests/embind_string_patch_tests.js`) zamienia gałąź UTF-8 na odczyt, który nic nie zapisuje: segmenty kończą się na
+bajcie zero wewnątrz napisu i na jego długości, a `UTF8ToString(ptr, liczba_bajtów)` tego Emscriptena przyjmuje limit
+bajtów. Łatka zawodzi budowanie, jeśli wzorca nie ma dokładnie raz. Zastosowana na prawdziwym `moonlight-wasm.js` z
+`diag9` (pozostało 0 wystąpień `endCharSwap`, składnia poprawna).
+
+**Weryfikacja.** `diag16` = `ALLOC_STRESS` + `DIAG_MALLOC` + ta poprawka, ten sam test (Desktop 3840x2160@60 HEVC,
+dławienie 12 Mbps, wcześniej zawieszenie w 1-6 min za każdym razem). Wynik poniżej.
