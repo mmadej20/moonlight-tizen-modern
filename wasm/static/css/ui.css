@@ -389,30 +389,32 @@ body {
     white-space: nowrap;
 }
 
+/* The buttons of a card sit in one column and are as wide as the card allows, so that they line up whatever their text is.
+   They show only on the card that is highlighted (the pad or the remote is on it, or the pointer is over it): the other cards
+   stay quiet. The space stays reserved, so nothing moves when the highlight does. */
 .ui-card__foot {
     display: flex;
     flex-direction: column;
+    align-items: stretch;
     gap: 14px;
     margin-top: auto;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s var(--ui-ease), transform 0.2s var(--ui-ease);
 }
 
-.host-action {
+.host-container.hovered .ui-card__foot,
+.host-container:hover .ui-card__foot,
+.host-container:focus .ui-card__foot,
+.host-container:focus-within .ui-card__foot {
+    opacity: 1;
+    transform: none;
+}
+
+.host-action, .host-menu {
     display: flex;
     align-items: center;
     gap: 14px;
-    font: 600 26px/1.2 var(--ui-font);
-    color: var(--ui-text);
-}
-
-.host-action:empty {
-    display: none;
-}
-
-.host-menu {
-    display: inline-flex;
-    align-items: center;
-    gap: 14px;
-    align-self: flex-start;
     height: 56px;
     padding: 0 24px;
     box-sizing: border-box;
@@ -421,7 +423,12 @@ body {
     background: var(--ui-surface-raised);
     color: var(--ui-text);
     font: 600 24px/1 var(--ui-font);
+    white-space: nowrap;
     cursor: pointer;
+}
+
+.host-action:empty {
+    display: none;
 }
 
 /* An offline host is quieter: the card keeps its place but does not compete with the ones that can be used */

@@ -145,6 +145,13 @@ for (const file of ['BricolageGrotesque-latin', 'BricolageGrotesque-latin-ext', 
 assert(/font-family: 'Bricolage Grotesque'/.test(fontsCss) && /font-family: 'Figtree'/.test(fontsCss));
 assert(!/https?:\/\//.test(fontsCss + uiCss), 'nothing is loaded from the network');
 
+// The buttons of a card line up in one column, in one frame, and show only on the highlighted card
+assert(/\.host-action, \.host-menu \{[^}]*border: 2px solid var\(--ui-line\)/.test(uiCss), 'both buttons have the same frame');
+assert(/\.ui-card__foot \{[^}]*flex-direction: column;[^}]*align-items: stretch;[^}]*opacity: 0;/.test(uiCss), 'a column as wide as the card, hidden');
+assert(/\.host-container\.hovered \.ui-card__foot,[^{]*\.host-container:hover \.ui-card__foot,[^{]*\.host-container:focus \.ui-card__foot,[^{]*\.host-container:focus-within \.ui-card__foot \{[^}]*opacity: 1;/.test(uiCss),
+  'they show when the card is highlighted by the pad, the remote, the pointer or the focus');
+assert(!/\.host-menu \{[^}]*align-self/.test(uiCss), 'the menu button is not narrower than the other one');
+
 // What keeps the focus smooth: the outline changes opacity and transform only, and nothing animates a shadow or a layout property
 assert(/\.ui-fx::after \{[^}]*transition: opacity 0\.2s var\(--ui-ease\), transform 0\.2s var\(--ui-ease\)/.test(uiCss));
 assert(!/transition:\s*all/.test(uiCss), 'no transition of everything');
