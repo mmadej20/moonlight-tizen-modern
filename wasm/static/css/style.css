@@ -1,8 +1,22 @@
+:root {
+    --text: #fff;
+    --text-secondary: #ececec;
+    --text-disabled: #cfcfcf;
+    --surface: #404354;
+    --surface-dark: #333846;
+    --accent: #00a3c6;
+    --danger: #f44336;
+    --success: #8bc34a;
+    --shadow: rgba(0, 0, 0, 0.4);
+    --shadow-strong: rgba(0, 0, 0, 0.6);
+    --ring-neutral: rgba(170, 170, 170, 1);
+}
+
 /* =============================
    Global Styles
 ============================= */
 body {
-    color: #fff;
+    color: var(--text);
     background-color: #282C38;
     font-family: 'Roboto', sans-serif;
     scroll-behavior: smooth;
@@ -14,7 +28,7 @@ body {
     width: 100%;
 }
 .mdl-cell {
-    color: #fff;
+    color: var(--text);
     padding: 25px;
     text-align: center;
 }
@@ -63,7 +77,7 @@ body {
     animation: fadeInOut 3s infinite;
 }
 #wasmSpinnerMessage, #loadingSpinnerMessage {
-    color: #fff;
+    color: var(--text);
     margin: 35px;
     font-size: 2rem;
     font-weight: 300;
@@ -75,7 +89,7 @@ body {
    Header Section
 ============================= */
 #main-header {
-    background-color: #333846;
+    background-color: var(--surface-dark);
     box-shadow: 0 0 4px 0 rgba(0, 0, 0, 1);
 }
 .mdl-layout__header-row {
@@ -87,38 +101,38 @@ body {
     height: 48px;
     margin: 2px 35px 2px 40px;
     border-radius: 50%;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 1px 4px var(--shadow);
 }
 #header-title {
-    color: #cfcfcf;
+    color: var(--text-disabled);
     font-size: 2.6rem;
     font-weight: 600;
     letter-spacing: 2px;
     text-transform: uppercase;
-    text-shadow: 2px 2px 10px rgba(0, 0, 0, 0.4);
+    text-shadow: 2px 2px 10px var(--shadow);
 }
 /* =============================
    Navigation Menu
 ============================= */
 #settingsBtn, #supportBtn, #restoreDefaultsBtn, #quitRunningAppBtn {
-    background-color: #404354;
+    background-color: var(--surface);
     width: 50px;
     height: 50px;
     margin: 0 10px;
     border-radius: 8px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 1px 4px var(--shadow);
 }
 #goBackBtn {
-    background-color: #404354;
+    background-color: var(--surface);
     position: fixed;
     left: 30px;
     width: 50px;
     height: 50px;
     border-radius: 8px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 1px 4px var(--shadow);
 }
 #updateAppBtn {
-    background-color: #404354;
+    background-color: var(--surface);
     right: 52px;
     height: 50px;
     padding: 0 20px;
@@ -129,7 +143,7 @@ body {
     transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out, box-shadow 0.2s ease-in-out;
 }
 #updateAppBtn:hover, #updateAppBtn:focus {
-    background-color: #404354;
+    background-color: var(--surface);
     box-shadow: 0 0 2px 3px rgba(239, 191, 4, 1);
 }
 #updateAppBtnText {
@@ -137,7 +151,7 @@ body {
     font-weight: 700;
     letter-spacing: 0.5px;
     text-transform: uppercase;
-    text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.4);
+    text-shadow: 2px 2px 5px var(--shadow);
 }
 .navigation-button-icons {
     margin: 0 8px 0 -4px;
@@ -159,10 +173,10 @@ body {
     background: rgba(62, 68, 84, 0.9);
     min-width: 0;
     border-radius: 12px 12px 0 0;
-    box-shadow: 0 0 8px 4px rgba(0, 163, 198, 1);
+    box-shadow: 0 0 8px 4px var(--accent);
 }
 .mdl-snackbar__text {
-    color: #fff;
+    color: var(--text);
     padding: 15px 20px 15px 20px;
     font-size: 1.45rem;
     font-weight: 500;
@@ -171,7 +185,7 @@ body {
     text-align: center;
 }
 .mdl-tooltip {
-    color: #fff;
+    color: var(--text);
     background-color: #3E4454;
     display: inline !important;
     position: fixed;
@@ -183,7 +197,7 @@ body {
     font-weight: 500;
     line-height: normal;
     letter-spacing: 0.5px;
-    box-shadow: 0 0 4px 0 rgba(0, 0, 0, 0.6);
+    box-shadow: 0 0 4px 0 var(--shadow-strong);
 }
 .hovered {
     background: rgba(158, 158, 158, 0.2);
@@ -210,22 +224,22 @@ body {
     justify-content: center;
 }
 .mdl-dialog {
-    color: #fff;
-    background-color: #333846;
+    color: var(--text);
+    background-color: var(--surface-dark);
     width: 30%;
     height: fit-content;
     padding: 20px;
     border-radius: 16px;
-    box-shadow: 0 0 12px 6px rgba(0, 163, 198, 1);
+    box-shadow: 0 0 12px 6px var(--accent);
 }
 .large-dialog {
-    color: #fff;
-    background-color: #333846;
+    color: var(--text);
+    background-color: var(--surface-dark);
     width: 90%;
     height: fit-content;
     padding: 20px;
     border-radius: 16px;
-    box-shadow: 0 0 12px 6px rgba(0, 163, 198, 1);
+    box-shadow: 0 0 12px 6px var(--accent);
 }
 .mdl-dialog__title {
     margin: 0;
@@ -280,14 +294,14 @@ body {
     text-indent: 10px;
 }
 .mdl-textfield__input.hovered, #ipAddressTextInput {
-    color: #fff;
+    color: var(--text);
     background-color: #585D75;
 }
 .mdl-textfield__input.hovered, .mdl-textfield__input:hover, .mdl-textfield__input:focus {
-    box-shadow: 0 0 1px 2px rgba(0, 163, 198, 1);
+    box-shadow: 0 0 1px 2px var(--accent);
 }
 .mdl-textfield.is-invalid .mdl-textfield__input:hover, .mdl-textfield.is-invalid .mdl-textfield__input:focus {
-    box-shadow: 0 0 1px 2px rgba(244, 67, 54, 1);
+    box-shadow: 0 0 1px 2px var(--danger);
 }
 #ipAddressTextInput::placeholder {
     color: rgba(255, 255, 255, 0.6);
@@ -303,7 +317,7 @@ body {
     font-size: 1rem;
 }
 .select-option-field-floating-label .mdl-textfield__label {
-    color: #00A3C6;
+    color: var(--accent);
     width: 100%;
     font-size: 1.65rem;
     font-weight: 200;
@@ -325,18 +339,18 @@ body {
 }
 .ip-address-select-field.hovered, #ipAddressField1,
 #ipAddressField2, #ipAddressField3, #ipAddressField4 {
-    color: #fff;
+    color: var(--text);
     background-color: #585D75;
 }
 .ip-address-select-field.hovered, .ip-address-select-field:hover {
-    box-shadow: 0 0 1px 2px rgba(0, 163, 198, 1);
+    box-shadow: 0 0 1px 2px var(--accent);
 }
 #supportQrCode {
     width: 50%;
     height: 50%;
     margin: 5px 25% 5px 25%;
     border-radius: 12px;
-    box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 4px var(--shadow);
     align-items: center;
     justify-content: center;
 }
@@ -352,19 +366,19 @@ body {
     height: 20px;
     border-radius: 50%;
     margin-right: 10px;
-    box-shadow: 0 0 4px 0 rgba(0, 0, 0, 0.6);
+    box-shadow: 0 0 4px 0 var(--shadow-strong);
 }
 .navGuideRemoteColor {
-    background-color: #00A3C6;
+    background-color: var(--accent);
 }
 .navGuideKeyboardColor {
-    background-color: #F44336;
+    background-color: var(--danger);
 }
 .navGuideGamepadColor {
-    background-color: #8BC34A;
+    background-color: var(--success);
 }
 .navGuideLabelText {
-    color: #ececec;
+    color: var(--text-secondary);
     font-size: 1.65rem;
     letter-spacing: 0.5px;
     text-transform: uppercase;
@@ -375,19 +389,19 @@ body {
     letter-spacing: 0.5px;
 }
 .navGuideRemoteText {
-    color: #00A3C6;
+    color: var(--accent);
     font-size: 1.45rem;
     letter-spacing: 0.5px;
     text-transform: uppercase;
 }
 .navGuideKeyboardText {
-    color: #F44336;
+    color: var(--danger);
     font-size: 1.45rem;
     letter-spacing: 0.5px;
     text-transform: uppercase;
 }
 .navGuideGamepadText {
-    color: #8BC34A;
+    color: var(--success);
     font-size: 1.45rem;
     letter-spacing: 0.5px;
     text-transform: uppercase;
@@ -411,7 +425,7 @@ body {
     box-sizing: border-box;
 }
 #autoWolCheckboxContainer .mdl-switch__label {
-    color: #ececec;
+    color: var(--text-secondary);
     font-size: 1.45rem;
     line-height: 36px;
     letter-spacing: 0.5px;
@@ -478,7 +492,7 @@ body {
     width: 100%;
 }
 #continueAddHost[disabled], #continueAddHost.mdl-button--disabled {
-    color: #fff;
+    color: var(--text);
     background-color: #838593 !important;
     pointer-events: auto;
     cursor: not-allowed;
@@ -488,7 +502,7 @@ body {
 #continueAddHost.mdl-button--disabled:hover, #continueAddHost.mdl-button--disabled:focus,
 #continueAddHost.mdl-button--disabled:active {
     background-color: #666875 !important;
-    box-shadow: 0 0 2px 3px rgba(170, 170, 170, 1) !important;
+    box-shadow: 0 0 2px 3px var(--ring-neutral) !important;
     cursor: not-allowed;
 }
 .host-menu-button, #closeHostMenu, #closeHostDetails,
@@ -540,34 +554,34 @@ body {
     border-radius: 0;
     z-index: 2;
     transform: scale(1.2);
-    outline: #00A3C6 solid 3px;
+    outline: var(--accent) solid 3px;
 }
 #host-grid .host-cell-inactive {
-    box-shadow: 0 0 0 2px rgba(244, 67, 54, 1);
+    box-shadow: 0 0 0 2px var(--danger);
 }
 #host-grid .host-cell-inactive.hovered, #host-grid .host-cell-inactive:hover,
 #host-grid .host-cell-inactive:focus, #host-grid .host-cell-inactive:active {
     border-radius: 0;
     z-index: 2;
     transform: scale(1.2);
-    outline: #F44336 solid 3px;
+    outline: var(--danger) solid 3px;
 }
 #host-grid .mdl-card__title {
     padding: 0;
 }
 .host-add-container > .mdl-card__title {
-    color: #fff;
+    color: var(--text);
     background: url('../res/ic_add_to_queue_white_48px.svg') center no-repeat rgba(62, 68, 84, 1);
 }
 .host-container > .mdl-card__title {
-    color: #fff;
+    color: var(--text);
     background: url('../res/ic_tv_white_48px.svg') center no-repeat rgba(62, 68, 84, 1);
 }
 #addHostContainer .host-title {
     text-transform: uppercase;
 }
 #host-grid .host-title {
-    color: #fff;
+    color: var(--text);
     background: rgba(0, 0, 0, 0.6);
     position: absolute;
     bottom: 0;
@@ -609,7 +623,7 @@ body {
     will-change: transform;
     transform: scale(1.2);
     transition: all 0.2s ease-in-out;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 1px 4px var(--shadow);
 }
 .host-menu.hovered, .host-menu:hover, .host-menu:focus, .host-menu:active {
     background-color: rgba(0, 163, 198, 0.6);
@@ -622,7 +636,7 @@ body {
     left: 50%;
     transform: translate(-50%, -60%);
     font-size: 32px;
-    color: #fff;
+    color: var(--text);
     text-shadow: 0 0 5px rgba(0,0,0,0.8);
     z-index: 5;
 }
@@ -670,7 +684,7 @@ body {
     border-radius: 0;
     z-index: 2;
     transform: scale(1.2);
-    outline: #00A3C6 solid 3px;
+    outline: var(--accent) solid 3px;
 }
 #game-grid .current-game-active {
     box-shadow: 0 0 0 2px rgba(139, 195, 74, 1);
@@ -680,13 +694,13 @@ body {
     border-radius: 0;
     z-index: 2;
     transform: scale(1.2);
-    outline: #8BC34A solid 3px;
+    outline: var(--success) solid 3px;
 }
 #game-grid .mdl-card__title {
     padding: 0;
 }
 #game-grid .game-title {
-    color: #fff;
+    color: var(--text);
     background: rgba(0, 0, 0, 0.6);
     position: absolute;
     bottom: 0;
@@ -724,7 +738,7 @@ body {
     overflow: hidden !important;
 }
 #connection-warnings {
-    color: #fff;
+    color: var(--text);
     background: transparent;
     position: absolute;
     top: 10px;
@@ -738,7 +752,7 @@ body {
     white-space: pre-wrap;
 }
 #performance-stats {
-    color: #fff;
+    color: var(--text);
     background: transparent;
     position: absolute;
     top: 10px;
@@ -777,7 +791,7 @@ body {
     overflow: hidden;
 }
 .settings-category {
-    color: #cfcfcf;
+    color: var(--text-disabled);
     margin: 25px;
     padding: 25px;
     border-bottom: 2px solid #666666;
@@ -789,10 +803,10 @@ body {
     box-shadow: 0 0 2px 3px rgba(0, 163, 198, 0.8);
 }
 .settings-category.selected {
-    color: #ececec;
+    color: var(--text-secondary);
     background: rgba(0, 163, 198, 0.8);
     transform: scale(1.02);
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 5px 15px var(--shadow);
 }
 .settings-category.selected:hover, .settings-category.selected:focus {
     transform: scale(1.05);
@@ -825,7 +839,7 @@ body {
     margin: 25px;
 }
 .settings-options label {
-    color: #cfcfcf;
+    color: var(--text-disabled);
     display: inline-block;
     margin-bottom: 12px;
     font-size: 1.7rem;
@@ -834,7 +848,7 @@ body {
     text-align: left;
 }
 .settings-options .mdl-list__item-text-body {
-    color: #ececec;
+    color: var(--text-secondary);
     display: block;
     margin-bottom: 12px;
     font-size: 1.4rem;
@@ -843,7 +857,7 @@ body {
     text-align: left;
 }
 .settings-options .mdl-switch__label {
-    color: #ececec;
+    color: var(--text-secondary);
     display: block;
     margin: 18px 0 12px 0;
     font-size: 1.45rem;
@@ -859,20 +873,20 @@ body {
 }
 .mdl-switch.is-checked .mdl-switch__track {
     background: rgba(0, 163, 198, 1);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 1px 4px var(--shadow);
 }
 .mdl-switch.is-checked .mdl-switch__thumb {
     background-color: #fff;
 }
 .mdl-switch.is-focused {
-    background-color: #404354;
-    box-shadow: 0 0 2px 3px rgba(0, 163, 198, 1);
+    background-color: var(--surface);
+    box-shadow: 0 0 2px 3px var(--accent);
 }
 .mdl-icon-toggle__label.material-icons {
     color: #818181;
 }
 .mdl-button {
-    color: #fff;
+    color: var(--text);
     border-radius: 8px;
     font-size: 1.15rem;
     font-weight: 500;
@@ -880,13 +894,13 @@ body {
     text-transform: none;
 }
 .mdl-button--raised.mdl-button--colored {
-    color: #fff;
-    background-color: #404354 !important;
+    color: var(--text);
+    background-color: var(--surface) !important;
 }
 .mdl-button--raised.mdl-button--colored:hover, .mdl-button--raised.mdl-button--colored:focus,
 .mdl-button--raised.mdl-button--colored:active {
-    background-color: #404354 !important;
-    box-shadow: 0 0 2px 3px rgba(0, 163, 198, 1);
+    background-color: var(--surface) !important;
+    box-shadow: 0 0 2px 3px var(--accent);
 }
 .mdl-button--raised.mdl-button--colored[disabled] {
 	color: #dedede !important;
@@ -895,7 +909,7 @@ body {
 }
 .mdl-button--raised.mdl-button--colored[disabled].hovered, .mdl-button--raised.mdl-button--colored[disabled]:hover,
 .mdl-button--raised.mdl-button--colored[disabled]:focus, .mdl-button--raised.mdl-button--colored[disabled]:active {
-    box-shadow: 0 0 2px 3px rgba(170, 170, 170, 1) !important;
+    box-shadow: 0 0 2px 3px var(--ring-neutral) !important;
 }
 .mdl-badge {
     margin-right: 30px !important;
@@ -930,17 +944,17 @@ body {
 }
 .badge-new {
     color: #76FF7A;
-    background-color: #404354;
+    background-color: var(--surface);
     border: 1px solid #76FA20;
 }
 .badge-preview {
   color: #E0C3FC;
-  background-color: #404354;
+  background-color: var(--surface);
   border: 1px solid #B388FF;
 }
 .badge-experimental {
     color: #FFC046;
-    background-color: #404354;
+    background-color: var(--surface);
     border: 1px solid #FFA620;
 }
 #selectResolution, #selectFramerate, #selectBitrate, #selectLanguage, #removeAllHostsBtn,
@@ -956,8 +970,8 @@ body {
 #selectAudioJitter, #playHostAudioBtn, #decryptHostAudioBtn,
 #selectCodec, #hdrModeBtn, #fullRangeBtn, #gameModeBtn, #unlockAllFpsBtn, #optimizeBitrateBtn,
 #disableWarningsBtn, #performanceStatsBtn, #navigationGuideBtn, #checkUpdatesBtn, #restartAppBtn {
-    color: #ececec;
-    background-color: #404354;
+    color: var(--text-secondary);
+    background-color: var(--surface);
     width: 100%;
     height: 60px;
     border-radius: 8px;
@@ -966,8 +980,8 @@ body {
     cursor: pointer;
 }
 #systemInfoBtn {
-    color: #ececec;
-    background-color: #404354;
+    color: var(--text-secondary);
+    background-color: var(--surface);
     width: 100%;
     height: 100%;
     padding: 15px 50px 20px 50px;
@@ -990,15 +1004,15 @@ body {
 }
 #gameModeBtn.is-disabled.hovered, #gameModeBtn.is-disabled:hover,
 #gameModeBtn.is-disabled:focus, #gameModeBtn.is-disabled:active {
-    box-shadow: 0 0 2px 3px rgba(170, 170, 170, 1) !important;
+    box-shadow: 0 0 2px 3px var(--ring-neutral) !important;
     cursor: not-allowed;
 }
 .mdl-menu__outline {
-    color: #fff;
-    background-color: #333846;
+    color: var(--text);
+    background-color: var(--surface-dark);
 }
 .mdl-menu__item {
-    color: #ececec;
+    color: var(--text-secondary);
     font-size: 1.25rem;
     letter-spacing: 0.5px;
     text-indent: 40px;
@@ -1020,7 +1034,7 @@ body {
     border-radius: 0 0 8px 8px;
 }
 .videoBitrateMenu, .audioJitterMenu {
-    background-color: #333846;
+    background-color: var(--surface-dark);
     display: flex;
     align-items: center;
 }
@@ -1036,20 +1050,20 @@ body {
     border-radius: 8px;
 }
 #bitrateLowestValue, #jitterLowestValue {
-    color: #ececec;
+    color: var(--text-secondary);
     margin: 0 -12px 0 14px;
     font-size: 1.45rem;
     letter-spacing: 0.5px;
 }
 #bitrateHighestValue, #jitterHighestValue {
-    color: #ececec;
+    color: var(--text-secondary);
     margin: 0 12px 0 -14px;
     font-size: 1.45rem;
     letter-spacing: 0.5px;
 }
 #bitrateLowestValue.hovered, #bitrateHighestValue.hovered,
 #jitterLowestValue.hovered, #jitterHighestValue.hovered {
-    background-color: #333846;
+    background-color: var(--surface-dark);
 }
 .dropdown-items {
     float: right;
@@ -1059,7 +1073,7 @@ body {
 #videoBitrateMenu > #selectBitrate, #languageMenu > #selectLanguage,
 #audioBackendMenu > #selectAudioBackend, #audioConfigMenu > #selectAudio,
 #audioJitterMenu > #selectAudioJitter, #videoCodecMenu > #selectCodec {
-    color: #ececec;
+    color: var(--text-secondary);
     background: url('../res/ic_arrow_drop_down_48px.svg') 94.8% 50% no-repeat rgba(64, 67, 84, 1);
 }
 #removeAllHostsIcon, #navigationGuideIcon, #checkUpdatesIcon,
@@ -1068,7 +1082,7 @@ body {
     width: 35px;
     height: 35px;
     margin: 2px 46px;
-    filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.4));
+    filter: drop-shadow(0 1px 4px var(--shadow));
 }
 /* =============================
    Interactive Elements
@@ -1092,8 +1106,8 @@ body {
 #optimizeBitrateBtn:focus, #disableWarningsBtn:hover, #disableWarningsBtn:focus, #performanceStatsBtn:hover, #performanceStatsBtn:focus,
 #systemInfoBtn:hover, #systemInfoBtn:focus, #navigationGuideBtn:hover, #navigationGuideBtn:focus, #checkUpdatesBtn:hover, #checkUpdatesBtn:focus,
 #restartAppBtn:hover, #restartAppBtn:focus {
-    background-color: #404354;
-    box-shadow: 0 0 2px 3px rgba(0, 163, 198, 1);
+    background-color: var(--surface);
+    box-shadow: 0 0 2px 3px var(--accent);
 }
 
 /* Diagnostic logs */
@@ -1114,8 +1128,8 @@ body {
     width: 100%;
     min-height: 48px;
     padding: 8px 12px;
-    color: #ececec;
-    background-color: #404354;
+    color: var(--text-secondary);
+    background-color: var(--surface);
     border: 1px solid #6b6f82;
     border-radius: 6px;
     font-size: 1.25rem;
@@ -1125,7 +1139,7 @@ body {
 #sendDiagnosticLogsBtn:focus, #clearDiagnosticLogsBtn:focus,
 .diagnostic-session-button:focus {
     outline: none;
-    box-shadow: 0 0 2px 3px rgba(0, 163, 198, 1);
+    box-shadow: 0 0 2px 3px var(--accent);
 }
 
 .diagnostic-session-actions {
@@ -1136,8 +1150,8 @@ body {
 .diagnostic-session-button {
     flex: 1;
     min-height: 48px;
-    color: #ececec;
-    background-color: #404354;
+    color: var(--text-secondary);
+    background-color: var(--surface);
     border: 1px solid #6b6f82;
     border-radius: 6px;
     font-size: 1.1rem;
@@ -1146,7 +1160,7 @@ body {
 .diagnostic-session-button.selected {
     color: #ffffff;
     background-color: #006f87;
-    border-color: #00a3c6;
+    border-color: var(--accent);
 }
 
 #diagnosticSummary {
@@ -1185,8 +1199,8 @@ body {
 #sendDiagnosticLogsBtn, #clearDiagnosticLogsBtn {
     flex: 1;
     min-height: 54px;
-    color: #ececec;
-    background-color: #404354;
+    color: var(--text-secondary);
+    background-color: var(--surface);
     font-size: 1.25rem;
 }
 
