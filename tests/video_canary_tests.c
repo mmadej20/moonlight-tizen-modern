@@ -35,8 +35,24 @@ static void testLog(const char* format, ...) {
     va_end(arguments);
 }
 
+static void* forcedNext;
+
+static unsigned int inUseCount(void) {
+    unsigned int count = 0;
+    int slot;
+    for (slot = 0; slot < SLOT_COUNT; slot++) {
+        count += inUse[slot] != 0;
+    }
+    return count;
+}
+
 static void* arenaMalloc(size_t size) {
     int slot;
+
+    // A block that the allocator should not have returned, for the test of the overlap check
+    if (forcedNext != NULL) {
+        return forcedNext;
+    }
     for (slot = 0; slot < SLOT_COUNT; slot++) {
         if (!inUse[slot]) {
             const uint32_t head = (uint32_t)(((size + 4 + 7) & ~(size_t)7) | 3);
@@ -184,15 +200,19 @@ int main(void) {
         assert(freeCalls == 4 + REGISTRY_SLOTS + 5);
     }
 
-    // The blocks of ENet: the thread that allocates and the one that frees are named in the report of a double free
+    // The blocks of ENet: a red zone on both sides, a pattern in a freed block that is kept for a while, the thread that
+    // allocates and the one that frees named in the reports
     {
         void* first;
         void* second;
         void* third;
         void* foreign;
+        void* tracked[ENET_SLOTS + 100];
         const unsigned int freesBefore = freeCalls;
         const unsigned int foreignBefore = enetForeignFrees;
-        void* tracked[5000];
+        const unsigned int liveBefore = enetLive;
+        const unsigned int inUseBefore = inUseCount();
+        unsigned int untrackedBefore;
 
         // Taken now, while no block of ENet was freed yet, so that no free of ENet has been at its address
         foreign = arenaMalloc(24);
@@ -207,75 +227,114 @@ int main(void) {
         fakeThread = 100;
         first = videoCanaryEnetMalloc(24);
         assert(first != NULL);
+        assert(((unsigned char*)first)[-1] == 0xA5 && ((unsigned char*)first)[24] == 0x5A);
         fakeNow += 30;
         fakeThread = 200;
         videoCanaryEnetFree(first);
-        assert(freeCalls == freesBefore + 1);
+        assert(freeCalls == freesBefore); // held, not freed
+        assert(((unsigned char*)first)[0] == 0xDD && ((unsigned char*)first)[23] == 0xDD);
         assert(logCount == 0);
 
         fakeNow += 5;
         fakeThread = 100;
         videoCanaryEnetFree(first);
-        assert(freeCalls == freesBefore + 1);
+        assert(freeCalls == freesBefore);
         assert(logged("is freed again by sender; it was allocated by sender, lived 30 ms and was freed by control 5 ms ago"));
         assert(logged("last frees, newest first: [0x"));
         assert(enetDoubleFrees == 1);
         clearLog();
 
+        // A write to a freed block is found when the block leaves the quarantine
+        ((unsigned char*)first)[3] = 0x11;
+        enetFlushHeld();
+        assert(logged("a block was written after it was freed: block 0x"));
+        assert(logged("freed by control 5 ms ago, 1 bytes changed (first at offset 3), red zones intact"));
+        assert(freeCalls == freesBefore + 1);
+        clearLog();
+
         // A live block whose chunk head says "free" is reported and left alone
         second = videoCanaryEnetMalloc(24);
-        *headOf(second) = 0x21;
+        *headOf((char*)second - 16) = 0x41;
         videoCanaryEnetFree(second);
-        assert(freeCalls == freesBefore + 1);
         assert(logged("a block was damaged while it was in use: block 0x"));
-        assert(logged("has chunk head 0x00000021, was 0x00000022"));
+        assert(logged("the chunk head is 0x00000041, was 0x00000042"));
+        assert(freeCalls == freesBefore + 1);
         clearLog();
 
         // A change of the head is found by the sweep, once, and the block can be freed afterwards
         third = videoCanaryEnetMalloc(24);
-        *headOf(third) = 0x2b;
+        *headOf((char*)third - 16) = 0x4b;
         videoCanarySweep("enet");
-        assert(logged("a live block changed"));
+        assert(logged("a live block changed: block 0x"));
+        assert(logged("the chunk head is 0x0000004b, was 0x00000042"));
         clearLog();
         videoCanarySweep("enet again");
         assert(!logged("a live block changed"));
         videoCanaryEnetFree(third);
-        assert(freeCalls == freesBefore + 2);
+        assert(logCount == 0);
 
         // The bit for the neighbour in front is not ours
         third = videoCanaryEnetMalloc(24);
-        *headOf(third) ^= 1u;
+        *headOf((char*)third - 16) ^= 1u;
         videoCanarySweep("enet pinuse");
         assert(!logged("a live block changed"));
         videoCanaryEnetFree(third);
-        assert(freeCalls == freesBefore + 3);
+        assert(logCount == 0);
+
+        // The red zones: an overrun of a block is found by the sweep, an underrun when the block is freed
+        third = videoCanaryEnetMalloc(24);
+        ((unsigned char*)third)[24] = 0;
+        videoCanarySweep("enet zone");
+        assert(logged("a live block changed: block 0x"));
+        assert(logged("the red zone behind the block was written"));
+        clearLog();
+        videoCanaryEnetFree(third);
+        assert(logCount == 0);
+        third = videoCanaryEnetMalloc(24);
+        ((unsigned char*)third)[-2] = 0;
+        videoCanaryEnetFree(third);
+        assert(logged("a block was written outside its bounds: block 0x"));
+        assert(logged("the red zone in front of the block was written"));
+        clearLog();
 
         // A pointer that ENet did not allocate is passed to the allocator
         videoCanaryEnetFree(foreign);
-        assert(freeCalls == freesBefore + 4);
         assert(enetForeignFrees == foreignBefore + 1);
         videoCanaryEnetFree(NULL);
 
         // More blocks than the table holds are not tracked, and blocks that come and go do not slow it down
-        for (i = 0; i < 5000; i++) {
+        untrackedBefore = enetUntracked;
+        for (i = 0; i < ENET_SLOTS + 100; i++) {
             tracked[i] = videoCanaryEnetMalloc(24);
             assert(tracked[i] != NULL);
         }
         assert(enetLive == ENET_SLOTS);
-        assert(enetUntracked == 5000 - ENET_SLOTS);
-        for (i = 0; i < 5000; i++) {
+        assert(enetUntracked == untrackedBefore + 100 + liveBefore);
+        for (i = 0; i < ENET_SLOTS + 100; i++) {
             videoCanaryEnetFree(tracked[i]);
         }
-        assert(enetLive == 0);
-        assert(freeCalls == freesBefore + 4 + 5000);
+        assert(enetLive == liveBefore);
         for (i = 0; i < 20000; i++) {
             void* block = videoCanaryEnetMalloc(24);
             assert(block != NULL);
             videoCanaryEnetFree(block);
         }
-        assert(enetLive == 0);
+        assert(enetLive == liveBefore);
         assert(enetTombs <= ENET_SLOTS);
-        assert(freeCalls == freesBefore + 4 + 5000 + 20000);
+        enetFlushHeld();
+        assert(inUseCount() <= inUseBefore + 3);
+        clearLog();
+
+        // The allocator returns memory that overlaps a block in use
+        first = videoCanaryEnetMalloc(24);
+        forcedNext = (char*)first - ENET_ZONE + 8;
+        second = videoCanaryEnetMalloc(24);
+        forcedNext = NULL;
+        assert(logged("overlapping allocation: block 0x"));
+        assert(logged("the allocator returned memory that overlaps the block 0x"));
+        assert(logged("which is still in use"));
+        assert(enetOverlaps == 1);
+        assert(second != NULL);
         clearLog();
     }
 
@@ -283,7 +342,7 @@ int main(void) {
     fakeNow += 40000;
     videoCanarySweep("status");
     assert(logged("buffers registered"));
-    assert(logged("ENetTrace: 0 blocks live"));
+    assert(logged("ENetTrace: ") && logged("blocks live"));
 
     puts("video canary tests passed");
     return 0;

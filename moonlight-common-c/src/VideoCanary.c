@@ -347,22 +347,33 @@ void videoCanaryFreeEntry(void* entry, void* allocPtr, const char* where) {
 
 // ---- ENet blocks ----
 //
-// docs/2026-10-18-stream-hang-investigation.md, section 15: a frozen stream trapped in free() of an ENet packet whose
-// memory was already free (a chunk of 32 bytes inside a free chunk of 808 bytes, next to the text of the stream health
-// snapshot). Every block that ENet allocates is entered here, and the last frees are remembered with the thread that
-// made them, so that a second free of the same block is reported together with the first one and does not reach the
-// allocator.
+// docs/2026-10-18-stream-hang-investigation.md, sections 15 and 16: frozen streams trapped in free() of an ENet packet
+// whose memory was already free, and in sendMessageEnet after live ENet blocks, allocated milliseconds earlier, had
+// their chunk heads replaced by random bytes. Every block that ENet allocates is entered here, with a red zone of 16
+// bytes on both sides, and the last frees are remembered with the thread that made them. A freed block is filled with
+// a pattern and kept for a while before it is really freed, and the pattern is checked when it leaves. So the report
+// says: the allocator returned memory that overlaps a block in use; a block was freed twice; the red zone of a block was
+// written (a neighbour or the block itself overran); a freed block was written after it was freed; the chunk head of a
+// live block changed.
 
-#define ENET_SLOTS 4096
+#define ENET_SLOTS 2048
 #define ENET_RING 512
+#define ENET_QUARANTINE 128
 #define ENET_THREADS 64
+#define ENET_ZONE 16
+#define ENET_PRE_BYTE 0xA5
+#define ENET_POST_BYTE 0x5A
+#define ENET_POISON_BYTE 0xDD
 #define ENET_TOMB ((void*)1)
 #define ENET_RECENT_PRINTED 6
 
+#define ENET_ZONE_PRE 1u
+#define ENET_ZONE_POST 2u
+
 typedef struct _ENET_BLOCK {
-    void* pointer; // NULL: never used, ENET_TOMB: removed
-    uint32_t size;
-    uint32_t head;
+    void* pointer; // what ENet got; NULL: never used, ENET_TOMB: removed
+    uint32_t size; // what ENet asked for
+    uint32_t head; // chunk head of the real block, without PINUSE
     uint32_t thread;
     uint64_t atMs;
 } ENET_BLOCK;
@@ -384,15 +395,21 @@ typedef struct _THREAD_NAME {
 static int enetLockWord;
 static ENET_BLOCK enetBlocks[ENET_SLOTS];
 static ENET_FREED enetFreed[ENET_RING];
+static ENET_FREED enetHeld[ENET_QUARANTINE];
 static THREAD_NAME threadNames[ENET_THREADS];
 static unsigned int threadNameCount;
 static unsigned int enetFreedCount;
+static unsigned int enetHeldNext;
+static unsigned int enetHeldCount;
 static unsigned int enetTombs;
 static unsigned int enetLive;
 static unsigned int enetMostLive;
 static unsigned int enetFrees;
 static unsigned int enetDoubleFrees;
 static unsigned int enetBadHeads;
+static unsigned int enetZoneHits;
+static unsigned int enetWrittenAfterFree;
+static unsigned int enetOverlaps;
 static unsigned int enetForeignFrees;
 static unsigned int enetUntracked;
 static unsigned int enetReports;
@@ -510,7 +527,9 @@ static int enetMayReport(void) {
     return enetReports <= 20 || enetReports % 1000 == 0;
 }
 
-static void enetReportBadHead(const char* what, const ENET_BLOCK* block, uint32_t headNow, uint32_t me) {
+// The first bytes of the block, and the 24 bytes in front of its red zone (the head of its chunk is among them)
+static void enetReportProblem(const char* what, const void* pointer, uint32_t size, uint32_t allocThread,
+                              uint64_t allocMs, const char* detail) {
     char before[64];
     char start[80];
     const uint64_t now = VIDEO_CANARY_NOW_MS();
@@ -518,14 +537,12 @@ static void enetReportBadHead(const char* what, const ENET_BLOCK* block, uint32_
     if (!enetMayReport()) {
         return;
     }
-    hexBytes(before, sizeof(before), (const unsigned char*)block->pointer - 24, 24);
-    hexBytes(start, sizeof(start), (const unsigned char*)block->pointer, 32);
-    VIDEO_CANARY_LOG("ENetTrace: %s: block 0x%lx (%u bytes) allocated by %s %llu ms ago has chunk head 0x%08x, was 0x%08x; "
-                     "seen by %s; report %u\n",
-                     what, (unsigned long)(uintptr_t)block->pointer, block->size, nameOfThread(block->thread),
-                     (unsigned long long)(now - block->atMs), (unsigned int)headNow, (unsigned int)block->head,
-                     nameOfThread(me), enetReports);
-    VIDEO_CANARY_LOG("ENetTrace: 24 bytes before the head %s, first 32 bytes of the block %s\n", before, start);
+    hexBytes(before, sizeof(before), (const unsigned char*)pointer - ENET_ZONE - 8, 24);
+    hexBytes(start, sizeof(start), (const unsigned char*)pointer, size < 32 ? (int)size : 32);
+    VIDEO_CANARY_LOG("ENetTrace: %s: block 0x%lx (%u bytes) allocated by %s %llu ms ago; %s; seen by %s; report %u\n",
+                     what, (unsigned long)(uintptr_t)pointer, size, nameOfThread(allocThread),
+                     (unsigned long long)(now - allocMs), detail, nameOfThread(VIDEO_CANARY_THREAD_ID()), enetReports);
+    VIDEO_CANARY_LOG("ENetTrace: 24 bytes before the red zone %s, first bytes of the block %s\n", before, start);
     enetReportRecent();
 }
 
@@ -543,16 +560,130 @@ static void enetReportDoubleFree(void* pointer, const ENET_FREED* previous, uint
     enetReportRecent();
 }
 
+static unsigned int zoneProblems(const void* pointer, uint32_t size) {
+    const unsigned char* before = (const unsigned char*)pointer - ENET_ZONE;
+    const unsigned char* after = (const unsigned char*)pointer + size;
+    unsigned int problems = 0;
+    unsigned int i;
+
+    for (i = 0; i < ENET_ZONE; i++) {
+        if (before[i] != ENET_PRE_BYTE) {
+            problems |= ENET_ZONE_PRE;
+        }
+        if (after[i] != ENET_POST_BYTE) {
+            problems |= ENET_ZONE_POST;
+        }
+    }
+    return problems;
+}
+
+static void zonesFill(void* pointer, uint32_t size) {
+    memset((unsigned char*)pointer - ENET_ZONE, ENET_PRE_BYTE, ENET_ZONE);
+    memset((unsigned char*)pointer + size, ENET_POST_BYTE, ENET_ZONE);
+}
+
+static const char* zoneText(unsigned int problems) {
+    if (problems == ENET_ZONE_PRE) {
+        return "the red zone in front of the block was written";
+    }
+    if (problems == ENET_ZONE_POST) {
+        return "the red zone behind the block was written";
+    }
+    return "the red zones on both sides of the block were written";
+}
+
+// Looks at a block that was freed and filled with the pattern; returns whether it was written
+static int enetHeldProblem(const ENET_FREED* held, unsigned int* changed, unsigned int* first, unsigned int* zones) {
+    const unsigned char* bytes = (const unsigned char*)held->pointer;
+    unsigned int i;
+
+    *changed = 0;
+    *first = 0;
+    *zones = zoneProblems(held->pointer, held->size);
+    for (i = 0; i < held->size; i++) {
+        if (bytes[i] != ENET_POISON_BYTE) {
+            if (*changed == 0) {
+                *first = i;
+            }
+            (*changed)++;
+        }
+    }
+    return *changed != 0 || *zones != 0;
+}
+
+// Puts the pattern back, so that one write is reported once
+static void enetHeldRestore(const ENET_FREED* held) {
+    memset(held->pointer, ENET_POISON_BYTE, held->size);
+    zonesFill(held->pointer, held->size);
+}
+
+static void enetReportHeld(const ENET_FREED* held, unsigned int changed, unsigned int first, unsigned int zones) {
+    char detail[200];
+
+    enetWrittenAfterFree++;
+    snprintf(detail, sizeof(detail), "freed by %s %llu ms ago, %u bytes changed (first at offset %u), %s",
+             nameOfThread(held->freeThread), (unsigned long long)(VIDEO_CANARY_NOW_MS() - held->freeMs), changed, first,
+             zones != 0 ? zoneText(zones) : "red zones intact");
+    enetReportProblem("a block was written after it was freed", held->pointer, held->size, held->allocThread,
+                      held->allocMs, detail);
+}
+
+// A block that leaves the quarantine
+static void enetCheckHeld(const ENET_FREED* held) {
+    unsigned int changed;
+    unsigned int first;
+    unsigned int zones;
+
+    if (enetHeldProblem(held, &changed, &first, &zones)) {
+        enetReportHeld(held, changed, first, zones);
+    }
+}
+
+static int rangesOverlap(const void* aStart, size_t aSize, const void* bStart, size_t bSize) {
+    const uintptr_t a = (uintptr_t)aStart;
+    const uintptr_t b = (uintptr_t)bStart;
+    return a < b + bSize && b < a + aSize;
+}
+
 void* videoCanaryEnetMalloc(size_t size) {
-    void* pointer = VIDEO_CANARY_MALLOC(size);
+    char* base = (char*)VIDEO_CANARY_MALLOC(size + 2 * ENET_ZONE);
+    char* pointer;
+    ENET_BLOCK other;
+    ENET_FREED otherHeld;
+    int overlapped = 0;
+    int overlappedHeld = 0;
     int at;
     int firstFree;
+    unsigned int index;
 
-    if (pointer == NULL) {
+    if (base == NULL) {
         return NULL;
     }
+    pointer = base + ENET_ZONE;
+    zonesFill(pointer, (uint32_t)size);
+
+    memset(&other, 0, sizeof(other));
+    memset(&otherHeld, 0, sizeof(otherHeld));
 
     lockEnet();
+    // The allocator must not return memory that is still in use or held
+    for (index = 0; index < ENET_SLOTS && !overlapped; index++) {
+        const ENET_BLOCK* block = &enetBlocks[index];
+        if (block->pointer != NULL && block->pointer != ENET_TOMB &&
+            rangesOverlap(base, size + 2 * ENET_ZONE, (char*)block->pointer - ENET_ZONE, block->size + 2 * ENET_ZONE)) {
+            other = *block;
+            overlapped = 1;
+        }
+    }
+    for (index = 0; index < ENET_QUARANTINE && !overlapped && !overlappedHeld; index++) {
+        const ENET_FREED* held = &enetHeld[index];
+        if (held->pointer != NULL &&
+            rangesOverlap(base, size + 2 * ENET_ZONE, (char*)held->pointer - ENET_ZONE, held->size + 2 * ENET_ZONE)) {
+            otherHeld = *held;
+            overlappedHeld = 1;
+        }
+    }
+
     if (enetTombs > ENET_SLOTS / 2) {
         enetRebuild();
     }
@@ -572,7 +703,7 @@ void* videoCanaryEnetMalloc(size_t size) {
     if (at >= 0) {
         enetBlocks[at].pointer = pointer;
         enetBlocks[at].size = (uint32_t)size;
-        enetBlocks[at].head = readHead(pointer) & HEAD_MASK;
+        enetBlocks[at].head = readHead(base) & HEAD_MASK;
         enetBlocks[at].thread = VIDEO_CANARY_THREAD_ID();
         enetBlocks[at].atMs = VIDEO_CANARY_NOW_MS();
     }
@@ -586,15 +717,34 @@ void* videoCanaryEnetMalloc(size_t size) {
         }
         enetUntracked++;
     }
+    if (overlapped || overlappedHeld) {
+        enetOverlaps++;
+    }
     unlockEnet();
+
+    if (overlapped || overlappedHeld) {
+        char detail[220];
+        const void* otherPointer = overlapped ? other.pointer : otherHeld.pointer;
+        const uint32_t otherSize = overlapped ? other.size : otherHeld.size;
+        const uint32_t otherThread = overlapped ? other.thread : otherHeld.allocThread;
+        const uint64_t otherMs = overlapped ? other.atMs : otherHeld.allocMs;
+        snprintf(detail, sizeof(detail), "the allocator returned memory that overlaps the block 0x%lx (%u bytes, allocated "
+                 "by %s %llu ms ago) which is still %s",
+                 (unsigned long)(uintptr_t)otherPointer, otherSize, nameOfThread(otherThread),
+                 (unsigned long long)(VIDEO_CANARY_NOW_MS() - otherMs), overlapped ? "in use" : "held after its free");
+        enetReportProblem("overlapping allocation", pointer, (uint32_t)size, VIDEO_CANARY_THREAD_ID(),
+                          VIDEO_CANARY_NOW_MS(), detail);
+    }
     return pointer;
 }
 
 void videoCanaryEnetFree(void* pointer) {
     ENET_BLOCK block;
     ENET_FREED previous;
+    ENET_FREED evicted;
     int tracked = 0;
     int previousKnown = 0;
+    int evictedOne = 0;
     const uint32_t me = VIDEO_CANARY_THREAD_ID();
     const uint64_t now = VIDEO_CANARY_NOW_MS();
     int firstFree;
@@ -606,24 +756,16 @@ void videoCanaryEnetFree(void* pointer) {
 
     memset(&block, 0, sizeof(block));
     memset(&previous, 0, sizeof(previous));
+    memset(&evicted, 0, sizeof(evicted));
 
     lockEnet();
     at = enetFind(pointer, &firstFree);
     if (at >= 0) {
-        ENET_FREED* freed = &enetFreed[enetFreedCount % ENET_RING];
         block = enetBlocks[at];
         enetBlocks[at].pointer = ENET_TOMB;
         enetTombs++;
         enetLive--;
         tracked = 1;
-        freed->pointer = pointer;
-        freed->size = block.size;
-        freed->allocThread = block.thread;
-        freed->freeThread = me;
-        freed->allocMs = block.atMs;
-        freed->freeMs = now;
-        enetFreedCount++;
-        enetFrees++;
     }
     else {
         unsigned int k;
@@ -640,15 +782,59 @@ void videoCanaryEnetFree(void* pointer) {
     unlockEnet();
 
     if (tracked) {
-        const uint32_t headNow = readHead(pointer);
-        const uint32_t needed = (block.size + 4u + 7u) & ~(uint32_t)7;
+        char* base = (char*)pointer - ENET_ZONE;
+        const uint32_t headNow = readHead(base);
+        const uint32_t needed = (block.size + 2u * ENET_ZONE + 4u + 7u) & ~(uint32_t)7;
+        const unsigned int zones = zoneProblems(pointer, block.size);
+        ENET_FREED freed;
+
         if ((headNow & 2u) == 0 || (headNow & ~(uint32_t)7) < needed || (headNow & HEAD_MASK) != block.head) {
             // Freeing a block like this would damage the heap further
+            char detail[120];
             enetBadHeads++;
-            enetReportBadHead("a block was damaged while it was in use", &block, headNow, me);
+            snprintf(detail, sizeof(detail), "the chunk head is 0x%08x, was 0x%08x, and the block is not freed",
+                     (unsigned int)headNow, (unsigned int)block.head);
+            enetReportProblem("a block was damaged while it was in use", pointer, block.size, block.thread, block.atMs,
+                              detail);
             return;
         }
-        VIDEO_CANARY_FREE(pointer);
+        if (zones != 0) {
+            enetZoneHits++;
+            enetReportProblem("a block was written outside its bounds", pointer, block.size, block.thread, block.atMs,
+                              zoneText(zones));
+        }
+
+        memset(&freed, 0, sizeof(freed));
+        freed.pointer = pointer;
+        freed.size = block.size;
+        freed.allocThread = block.thread;
+        freed.freeThread = me;
+        freed.allocMs = block.atMs;
+        freed.freeMs = now;
+
+        // The block stays where it is, with a pattern in it, until 128 other frees have followed
+        memset(pointer, ENET_POISON_BYTE, block.size);
+        zonesFill(pointer, block.size);
+
+        lockEnet();
+        enetFreed[enetFreedCount % ENET_RING] = freed;
+        enetFreedCount++;
+        enetFrees++;
+        if (enetHeldCount == ENET_QUARANTINE) {
+            evicted = enetHeld[enetHeldNext];
+            evictedOne = 1;
+        }
+        else {
+            enetHeldCount++;
+        }
+        enetHeld[enetHeldNext] = freed;
+        enetHeldNext = (enetHeldNext + 1) % ENET_QUARANTINE;
+        unlockEnet();
+
+        if (evictedOne) {
+            enetCheckHeld(&evicted);
+            VIDEO_CANARY_FREE((char*)evicted.pointer - ENET_ZONE);
+        }
     }
     else if (previousKnown) {
         // Freeing it again would damage the heap that this is meant to find out about
@@ -661,30 +847,80 @@ void videoCanaryEnetFree(void* pointer) {
     }
 }
 
+// For the host test: really frees what is held
+__attribute__((unused)) static void enetFlushHeld(void) {
+    unsigned int index;
+    for (index = 0; index < ENET_QUARANTINE; index++) {
+        if (enetHeld[index].pointer != NULL) {
+            enetCheckHeld(&enetHeld[index]);
+            VIDEO_CANARY_FREE((char*)enetHeld[index].pointer - ENET_ZONE);
+            enetHeld[index].pointer = NULL;
+        }
+    }
+    enetHeldCount = 0;
+    enetHeldNext = 0;
+}
+
 static void enetSweep(void) {
     ENET_BLOCK changed[4];
     uint32_t headsNow[4];
+    unsigned int zonesNow[4];
     unsigned int changedCount = 0;
+    ENET_FREED writtenHeld[2];
+    unsigned int writtenChanged[2];
+    unsigned int writtenFirst[2];
+    unsigned int writtenZones[2];
+    unsigned int writtenCount = 0;
     unsigned int index;
 
     lockEnet();
     for (index = 0; index < ENET_SLOTS; index++) {
         const void* pointer = enetBlocks[index].pointer;
         if (pointer != NULL && pointer != ENET_TOMB) {
-            const uint32_t headNow = readHead(pointer);
-            if ((headNow & HEAD_MASK) != enetBlocks[index].head && changedCount < 4) {
+            const uint32_t headNow = readHead((const char*)pointer - ENET_ZONE);
+            const unsigned int zones = zoneProblems(pointer, enetBlocks[index].size);
+            if (((headNow & HEAD_MASK) != enetBlocks[index].head || zones != 0) && changedCount < 4) {
                 changed[changedCount] = enetBlocks[index];
                 headsNow[changedCount] = headNow;
+                zonesNow[changedCount] = zones;
                 changedCount++;
                 enetBlocks[index].head = headNow & HEAD_MASK;
+                zonesFill(enetBlocks[index].pointer, enetBlocks[index].size);
             }
+        }
+    }
+    for (index = 0; index < ENET_QUARANTINE; index++) {
+        unsigned int heldChanged;
+        unsigned int heldFirst;
+        unsigned int heldZones;
+        if (enetHeld[index].pointer != NULL && enetHeldProblem(&enetHeld[index], &heldChanged, &heldFirst, &heldZones)) {
+            if (writtenCount < 2) {
+                writtenHeld[writtenCount] = enetHeld[index];
+                writtenChanged[writtenCount] = heldChanged;
+                writtenFirst[writtenCount] = heldFirst;
+                writtenZones[writtenCount] = heldZones;
+                writtenCount++;
+            }
+            enetHeldRestore(&enetHeld[index]);
         }
     }
     unlockEnet();
 
+    for (index = 0; index < writtenCount; index++) {
+        enetReportHeld(&writtenHeld[index], writtenChanged[index], writtenFirst[index], writtenZones[index]);
+    }
+
     for (index = 0; index < changedCount; index++) {
+        char detail[160];
         enetBadHeads++;
-        enetReportBadHead("a live block changed", &changed[index], headsNow[index], VIDEO_CANARY_THREAD_ID());
+        if (zonesNow[index] != 0) {
+            enetZoneHits++;
+        }
+        snprintf(detail, sizeof(detail), "the chunk head is 0x%08x, was 0x%08x%s%s", (unsigned int)headsNow[index],
+                 (unsigned int)changed[index].head, zonesNow[index] != 0 ? ", " : "",
+                 zonesNow[index] != 0 ? zoneText(zonesNow[index]) : "");
+        enetReportProblem("a live block changed", changed[index].pointer, changed[index].size, changed[index].thread,
+                          changed[index].atMs, detail);
     }
 }
 
@@ -730,8 +966,10 @@ void videoCanarySweep(const char* when) {
         lastStatusMs = now;
         VIDEO_CANARY_LOG("VideoCanary: %u buffers registered (most %u), %u sweeps, %u reports, %u double frees, %u not registered\n",
                          checked, mostLive, sweeps, reports, doubleFrees, unregisteredByDesign);
-        VIDEO_CANARY_LOG("ENetTrace: %u blocks live (most %u), %u frees, %u double frees, %u bad heads, %u foreign frees, %u untracked\n",
-                         enetLive, enetMostLive, enetFrees, enetDoubleFrees, enetBadHeads, enetForeignFrees, enetUntracked);
+        VIDEO_CANARY_LOG("ENetTrace: %u blocks live (most %u), %u frees, %u double frees, %u bad heads, %u red zone hits, "
+                         "%u written after free, %u overlaps, %u foreign frees, %u untracked\n",
+                         enetLive, enetMostLive, enetFrees, enetDoubleFrees, enetBadHeads, enetZoneHits,
+                         enetWrittenAfterFree, enetOverlaps, enetForeignFrees, enetUntracked);
     }
 }
 

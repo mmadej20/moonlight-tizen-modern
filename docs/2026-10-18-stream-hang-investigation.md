@@ -504,3 +504,43 @@ pierwszy); „a block was damaged while it was in use" przy braku podwójnego zw
 **Narzędzia.** Stosy z nazwami: `named_stacks.js` (w katalogu roboczym sesji) czyta sekcję nazw z modułu zbudowanego z
 `PROFILING_FUNCS=ON`. Odczyt pamięci zatrzymanego procesu: plik poleceń watchera (`{"thread": "<prefiks workera>",
 "expression": "..."}`) działa na zatrzymanym workerze, także po zawieszeniu.
+
+## 16. Drugie zawieszenie z pułapką, tym razem w `sendMessageEnet` (2026-10-21)
+
+Test: `opt3-diag4` (strażnik pakietów wideo, śledzenie bloków ENet z historią zwolnień, nazwy funkcji), dławienie QoS
+12 Mbit/s od 08:49:55, stream Desktop, watcher podłączony przed dławieniem. Pułapka po 45 s od startu dławienia
+(06:50:40 UTC), a sam stream i wideo szły dalej, więc to nie był pełny freeze, tylko śmierć wątku wejścia.
+
+**Fakty.**
+- Pułapka `memory access out of bounds` w wątku `InputSend`: `inputSendThreadProc` → `sendInputPacket` →
+  `sendInputPacketOnControlStream` → `sendMessageEnet` (na wierzchu sama `sendMessageEnet`, bo funkcje ENet są w niej
+  wstawione). Wątek trzymał `enetMutex`, więc wątek kontrolny przestał zwalniać pakiety 26-33 ms przed zgłoszeniem.
+  Reszta aplikacji żyła, kolejka wejścia zapełniała się i log zalewały wpisy „Input queue reached maximum size limit" (to
+  skutek śmierci wątku, nie przyczyna).
+- Przegląd rejestru (wątek odbioru wideo, co 32 pakiety) zgłosił jednocześnie trzy żywe bloki ENet zaalokowane przez
+  `InputSend` 24-32 ms wcześniej (37 B pod `0x301a330`, 84 B pod `0x301a360` i `0x301a2b8`), których słowa nagłówków
+  chunków są śmieciami (`0x2841f24d`, `0x00010025`, `0`) zamiast `0x32`/`0x5a`. Podwójnego zwolnienia ENet nie było (0
+  zgłoszeń).
+- Zrzut pamięci obszaru: normalny ruch ENet to powtarzające się trójki alokowane od góry sterty, jedna na komunikat
+  wejścia (pakiet 24 B w chunku 32, dane 37 B w chunku 48, komenda 84 B w chunku 88 lub 96), numery komunikatów
+  0x5d76, 0x5d77, 0x5d78, ... Wskazane przez rejestr adresy **leżą wewnątrz innych, prawidłowo wyglądających obiektów**
+  (np. `0x301a330` w środku danych komunikatu 0x5d78, `0x301a360` w środku komendy). Pamięć została więc przydzielona
+  dwa razy, albo wpis rejestru jest przeterminowany. Zaraz za ostatnią komendą słowo nagłówka chunka na szczycie sterty
+  (`top`) wynosi 1, czyli rozmiar zero (walker: `size below 16 at 0x301a398`).
+- Ślady z `getStreamHealth` tym razem nie ma.
+
+**Interpretacja.** Razem z sekcją 15 (pakiet ENet zwalniany w obszarze, który alokator uznał za wolny, i sklejone
+sąsiednie chunki zwolnione przez dwa różne wątki w tej samej chwili) to najlepiej pasuje do **alokatora, który przydziela
+lub scala bez wzajemnego wykluczenia wątków**: dwa wątki jednocześnie tną `top` (nakładające się przydziały i zerowy
+rozmiar `top`) albo jednocześnie zwalniają sąsiednie chunki (sklejenie 808 B). Samo nakładanie się obu zdarzeń na wątek
+wejścia (alokuje trójki) i wątek kontrolny (zwalnia je po potwierdzeniu) jest typowe dla wyścigu o mały rozmiar chunków
+przy wysokim tempie. Czego jeszcze nie wiemy: czy blokada `pthread_mutex` alokatora nie wyklucza, czy któraś ścieżka
+(np. `calloc`, `realloc`, `memalign`, wywołanie z JS) jej nie bierze.
+
+**Instrumentacja do sprawdzenia (build `diag5`).** Do śledzenia ENet dodane: strefy ochronne po 16 B przed i za każdym
+blokiem (przepełnienie bloku zmienia strefę), wypełnienie zwolnionego bloku wzorcem i kwarantanna na 128 zwolnień (zapis
+po zwolnieniu wychodzi przy opuszczaniu kwarantanny i w przeglądzie), sprawdzanie przy każdym przydziale, czy zwrócona
+pamięć nie nachodzi na blok używany albo trzymany („overlapping allocation: ... which is still in use"). Odczyt:
+„overlapping allocation" potwierdza hipotezę alokatora (kolejny krok to własny `dlmalloc` ze sprawdzoną blokadą spinową
+i licznikiem „kto jest w środku"); „a block was written outside its bounds" lub „after it was freed" wskazuje zapis z
+kodu aplikacji; samo „a live block changed" z głową bloku bez nakładania i bez stref oznacza zapis w nagłówek z zewnątrz.
