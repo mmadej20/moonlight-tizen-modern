@@ -230,7 +230,11 @@
 body {
     background: radial-gradient(900px 560px at 88% -8%, var(--ui-glow), transparent 70%), var(--ui-bg);
     background-attachment: fixed;
+    color: var(--ui-text);
     font-family: var(--ui-font);
+    scroll-behavior: smooth;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 .ui-header.mdl-layout__header {
@@ -1204,4 +1208,561 @@ body {
 
 #settings-hints {
     padding: 16px 96px 56px;
+}
+
+/* =============================
+   Dialogs, the loading spinner, the message at the foot of the screen and the update button
+   A dialog is a card on a dark scrim. Its buttons are the pills of the interface: the one that goes on is filled, the one
+   that goes back is framed. The focus of a dialog button is a plain outline: there are two or three buttons on the screen,
+   so nothing here needs a layer of its own.
+============================= */
+.dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(8, 12, 21, 0.78);
+}
+
+.mdl-dialog {
+    box-sizing: border-box;
+    width: 720px;
+    max-width: calc(100vw - 192px);
+    height: fit-content;
+    max-height: calc(100vh - 128px);
+    padding: 40px;
+    overflow-y: auto;
+    border: 2px solid var(--ui-line);
+    border-radius: 32px;
+    background: var(--ui-surface);
+    color: var(--ui-text);
+    box-shadow: none;
+    font-family: var(--ui-font);
+}
+
+.large-dialog {
+    width: 1500px;
+}
+
+.mdl-dialog__title {
+    margin: 0 0 20px;
+    padding: 0;
+    font: 700 44px/1.1 var(--ui-font-display);
+    letter-spacing: -0.01em;
+    color: var(--ui-text);
+}
+
+.mdl-dialog__content {
+    padding: 0;
+    color: var(--ui-mute);
+    font: 500 28px/1.4 var(--ui-font);
+}
+
+.mdl-dialog__content p, .mdl-dialog__content ul {
+    margin: 0;
+    font: 500 28px/1.4 var(--ui-font);
+    letter-spacing: 0;
+}
+
+.mdl-dialog__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 16px;
+    margin-top: 36px;
+    padding: 0;
+}
+
+.mdl-dialog button.mdl-button.mdl-button--raised.mdl-button--colored {
+    width: auto;
+    min-width: 0;
+    height: 64px;
+    margin: 0;
+    padding: 0 36px;
+    border-radius: 32px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-surface-raised);
+    color: var(--ui-text);
+    box-shadow: none;
+    font: 600 26px/60px var(--ui-font);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.mdl-dialog .mdl-button .mdl-button__ripple-container {
+    display: none;
+}
+
+/* The button that goes on is filled: Continue, Yes, Exit, Restart, and the Close of a dialog that has nothing else to offer */
+.mdl-dialog button.mdl-button.mdl-button--raised.mdl-button--colored[id^="continue"], .mdl-dialog button#closeAppSupport.mdl-button,
+.mdl-dialog button#closeNavGuide.mdl-button, .mdl-dialog button#closeUpdateApp.mdl-button, .mdl-dialog button#closeHostMenu.mdl-button,
+.mdl-dialog button#closeHostDetails.mdl-button, #warningDialog.single-button button#closeWarning.mdl-button {
+    background: var(--ui-moon);
+    border-color: var(--ui-moon);
+    color: var(--ui-ink);
+}
+
+.mdl-dialog .mdl-button:hover, .mdl-dialog .mdl-button:focus, .mdl-dialog .mdl-button.hovered {
+    outline: 6px solid var(--ui-ring);
+    outline-offset: 0;
+    border-color: var(--ui-moon);
+}
+
+.mdl-dialog .mdl-button[disabled], .mdl-dialog .mdl-button.mdl-button--disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+#continueWarning {
+    display: none;
+}
+
+/* The menu of a host: the choices are a column of wide buttons */
+dialog[id^="hostMenuDialog-"] .mdl-dialog__content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+dialog[id^="hostMenuDialog-"] .mdl-dialog__content button.mdl-button.mdl-button--raised.mdl-button--colored {
+    width: 100%;
+    text-align: left;
+}
+
+#pairingDialogText, #deleteHostDialogText, .host-details-text, #appSupportDialogText, #autoWolDialogText, #navGuideDialogText,
+#updateAppDialogText, #restoreDefaultsDialogText, #quitAppDialogText, #warningDialogText, #restartAppDialogText, #exitAppDialogText {
+    font: 500 28px/1.4 var(--ui-font);
+    letter-spacing: 0;
+}
+
+/* The fields of the dialog that adds a host */
+#ipAddressInputField {
+    display: block;
+    margin: 0;
+}
+
+.mdl-textfield {
+    width: 100%;
+    padding: 0;
+}
+
+.mdl-textfield--floating-label .mdl-textfield__label, .select-option-field-floating-label .mdl-textfield__label,
+.mdl-textfield--floating-label.is-focused .mdl-textfield__label, .mdl-textfield--floating-label.is-dirty .mdl-textfield__label,
+.mdl-textfield--floating-label.has-placeholder .mdl-textfield__label, .mdl-textfield--floating-label.is-invalid .mdl-textfield__label {
+    position: static;
+    display: block;
+    width: auto;
+    margin: 0 0 12px;
+    color: var(--ui-mute);
+    font: 600 24px/1.2 var(--ui-font);
+    letter-spacing: 0;
+    visibility: visible;
+    pointer-events: none;
+}
+
+.mdl-textfield__label::after {
+    display: none;
+}
+
+.mdl-textfield__input, #ipAddressTextInput {
+    box-sizing: border-box;
+    width: 100%;
+    height: 64px;
+    padding: 0 20px;
+    border: 2px solid var(--ui-line);
+    border-radius: 16px;
+    background: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 28px/1 var(--ui-font);
+    letter-spacing: 0;
+    text-indent: 0;
+}
+
+.mdl-textfield__input.hovered, .mdl-textfield__input:hover, .mdl-textfield__input:focus {
+    border-color: var(--ui-moon);
+    box-shadow: none;
+    outline: none;
+}
+
+.mdl-textfield.is-invalid .mdl-textfield__input:hover, .mdl-textfield.is-invalid .mdl-textfield__input:focus {
+    border-color: var(--ui-bad);
+    box-shadow: none;
+}
+
+#ipAddressTextInput::placeholder {
+    color: var(--ui-mute);
+}
+
+#ipAddressSelectFields {
+    display: none;
+    margin: 0;
+}
+
+.select-option-field {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 0;
+}
+
+.select-option-field > .mdl-textfield__label {
+    flex: 0 0 100%;
+}
+
+.ip-address-select-field, .ip-address-select-field.hovered, #ipAddressField1, #ipAddressField2, #ipAddressField3, #ipAddressField4 {
+    width: 132px;
+    height: 64px;
+    margin: 0 !important;
+    border: 2px solid var(--ui-line);
+    border-radius: 16px;
+    background-color: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 28px/1 var(--ui-font);
+    letter-spacing: 0;
+    text-indent: 10px;
+    cursor: pointer;
+}
+
+.ip-address-select-field.hovered, .ip-address-select-field:hover {
+    border-color: var(--ui-moon);
+    box-shadow: none;
+}
+
+#supportQrCode {
+    display: block;
+    width: 320px;
+    height: 320px;
+    margin: 12px 0 0;
+    border-radius: 20px;
+    box-shadow: none;
+}
+
+/* The guide to the controls: three colors tell the remote, the keyboard and the pad apart */
+#navGuideDialogText {
+    margin: 20px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.navGuideContainer {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 28px 4px 0;
+    font: 600 24px/1.2 var(--ui-font);
+}
+
+.navGuideLabel {
+    width: 20px;
+    height: 20px;
+    margin-right: 12px;
+    border-radius: 50%;
+    box-shadow: none;
+}
+
+.navGuideRemoteColor {
+    background-color: var(--ui-moon);
+}
+
+.navGuideKeyboardColor {
+    background-color: var(--ui-bad);
+}
+
+.navGuideGamepadColor {
+    background-color: var(--ui-ok);
+}
+
+.navGuideLabelText {
+    color: var(--ui-text);
+    font: 700 24px/1.2 var(--ui-font);
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.navGuideDialogControls {
+    padding: 8px 0;
+    font: 500 24px/1.4 var(--ui-font);
+    letter-spacing: 0;
+}
+
+.navGuideRemoteText, .navGuideKeyboardText, .navGuideGamepadText {
+    font: 700 24px/1.4 var(--ui-font);
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.navGuideRemoteText {
+    color: var(--ui-moon);
+}
+
+.navGuideKeyboardText {
+    color: var(--ui-bad);
+}
+
+.navGuideGamepadText {
+    color: var(--ui-ok);
+}
+
+/* The switch of the dialog that wakes a PC: the sentence on the left, the toggle on the right */
+#autoWolCheckboxContainer {
+    width: 100%;
+    margin: 28px 0 0;
+}
+
+#autoWolCheckboxContainer .mdl-switch {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 56px;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+#autoWolCheckboxContainer .mdl-switch__label {
+    left: 0;
+    margin: 0;
+    padding: 0;
+    color: var(--ui-text);
+    font: 600 26px/1.2 var(--ui-font);
+    letter-spacing: 0;
+}
+
+#autoWolCheckboxContainer .mdl-switch__track {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: auto;
+    width: 96px;
+    height: 56px;
+    margin: 0;
+    border-radius: 28px;
+    background: var(--ui-line);
+    transition: background-color 0.2s var(--ui-ease);
+}
+
+#autoWolCheckboxContainer .mdl-switch__thumb {
+    position: absolute;
+    top: 6px;
+    left: calc(100% - 90px);
+    right: auto;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    border-radius: 50%;
+    background: var(--ui-text);
+    box-shadow: none;
+    transition: transform 0.2s var(--ui-ease), background-color 0.2s var(--ui-ease);
+}
+
+#autoWolCheckboxContainer .mdl-switch.is-checked .mdl-switch__track {
+    background: var(--ui-moon);
+    box-shadow: none;
+}
+
+#autoWolCheckboxContainer .mdl-switch.is-checked .mdl-switch__thumb {
+    left: calc(100% - 90px);
+    transform: translateX(40px);
+    background: var(--ui-ink);
+}
+
+#autoWolCheckboxContainer .mdl-switch.hovered, #autoWolCheckboxContainer .mdl-switch.is-focused {
+    background: none;
+    box-shadow: none;
+}
+
+#autoWolCheckboxContainer .mdl-switch__focus-helper, #autoWolCheckboxContainer .mdl-switch__ripple-container {
+    display: none;
+}
+
+/* The loading screen: the logo, the bar and a message */
+#wasmSpinnerMessage, #loadingSpinnerMessage {
+    margin: 36px;
+    color: var(--ui-text);
+    font: 600 32px/1.3 var(--ui-font);
+    letter-spacing: 0;
+    text-align: center;
+}
+
+.mdl-progress {
+    border-radius: 8px;
+    background: var(--ui-line);
+    overflow: hidden;
+}
+
+.mdl-progress > .progressbar, .mdl-progress > .bufferbar, .mdl-progress > .auxbar {
+    border-radius: 8px;
+}
+
+.mdl-progress > .progressbar, .mdl-progress.mdl-progress__indeterminate > .bar1, .mdl-progress.mdl-progress__indeterminate > .bar3 {
+    background-color: var(--ui-moon);
+}
+
+/* MDL draws the buffer of a bar with a pale gradient and a mask of dots: a loading bar has no buffer */
+.mdl-progress > .bufferbar {
+    display: none;
+}
+
+.mdl-progress > .auxbar {
+    background-image: none !important;
+    -webkit-mask: none !important;
+    mask: none !important;
+}
+
+/* The message at the foot of the screen, and the tooltip of the update button */
+.mdl-snackbar {
+    min-width: 0;
+    max-width: 1200px;
+    border: 2px solid var(--ui-line);
+    border-bottom: 0;
+    border-radius: 28px 28px 0 0;
+    background: var(--ui-surface-raised);
+    box-shadow: none;
+}
+
+.mdl-snackbar__text {
+    padding: 24px 40px;
+    color: var(--ui-text);
+    font: 600 28px/1.3 var(--ui-font);
+    letter-spacing: 0;
+    text-align: center;
+}
+
+.mdl-tooltip {
+    top: 144px !important;
+    max-width: 320px;
+    padding: 12px 20px;
+    border: 2px solid var(--ui-line);
+    border-radius: 16px;
+    background-color: var(--ui-surface-raised);
+    color: var(--ui-text);
+    box-shadow: none;
+    font: 600 24px/1.3 var(--ui-font);
+    letter-spacing: 0;
+}
+
+/* The button of a new update shows in the header, a little after the page */
+#updateAppBtn {
+    height: 64px;
+    padding: 0 28px;
+    border-color: var(--ui-warn);
+    background: var(--ui-surface-raised);
+    color: var(--ui-warn);
+    opacity: 0;
+    transition: opacity 0.3s var(--ui-ease), transform 0.2s var(--ui-ease);
+}
+
+#updateAppBtn.is-shown {
+    opacity: 1;
+}
+
+#updateAppBtn .material-icons {
+    margin: 0;
+    font-size: 32px;
+}
+
+#updateAppBtnText {
+    font: 600 26px/1 var(--ui-font);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* =============================
+   The page: the loading screen in the middle, and the stream with its two overlays
+============================= */
+#listener {
+    height: 0;
+    margin-top: 0;
+    overflow: hidden;
+}
+
+#wasmSpinner, #loadingSpinner {
+    position: fixed;
+    bottom: 50%;
+    left: 50%;
+    display: none;
+    width: 35%;
+    height: 10px;
+    margin: 0 auto;
+    transform: translate(-50%, -50%);
+}
+
+#wasmSpinner {
+    z-index: 2;
+}
+
+#loadingSpinner {
+    z-index: 1;
+}
+
+/* The moon above the bar: the spinner is a positioned box, so the moon is placed by it */
+#wasmSpinnerLogo {
+    position: absolute;
+    bottom: 56px;
+    left: 50%;
+    width: 160px;
+    height: 160px;
+    margin-left: -80px;
+    fill: var(--ui-moon);
+    animation: fadeInOut 3s infinite;
+}
+
+@keyframes fadeInOut {
+    0%, 100% {
+        transform: scale(0.8);
+    }
+    50% {
+        transform: scale(1);
+    }
+}
+
+#snackButton {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+.hide-container {
+    display: none !important;
+}
+
+.fullscreen {
+    position: relative !important;
+    height: 100vh !important;
+    z-index: 1 !important;
+    margin: auto !important;
+    padding: 0 !important;
+    border: none !important;
+    overflow: hidden !important;
+}
+
+#connection-warnings, #performance-stats {
+    position: absolute;
+    top: 10px;
+    z-index: 3;
+    padding: 8px;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ui-text);
+    line-height: 1.2;
+    white-space: pre-wrap;
+}
+
+#connection-warnings {
+    right: 10px;
+    font-size: 1.85rem;
+    font-weight: 600;
+}
+
+#performance-stats {
+    left: 10px;
+    font-size: 1.65rem;
+    font-weight: 500;
+}
+
+/* The switch of the dialog that wakes a PC has no highlight of its own besides this */
+#autoWolCheckboxContainer .mdl-switch.hovered .mdl-switch__track {
+    outline: 6px solid var(--ui-ring);
 }

@@ -2047,13 +2047,12 @@ function updateAppButton(latestVersion) {
   var updateAppBtn = $('<button>', {
     type: 'button',
     id: 'updateAppBtn',
-    class: 'mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect',
+    class: 'ui-btn ui-fx',
     'aria-label': 'Update App'
   });
-  // Create the badge icon dynamically
-  var updateAppBtnBadge = $('<div>', {
-    class: 'navigation-button-icons material-icons mdl-badge mdl-badge--overlap',
-    'data-badge': '1',
+  // Create the icon dynamically
+  var updateAppBtnBadge = $('<i>', {
+    class: 'material-icons',
     text: 'update'
   });
   // Create the button text dynamically
@@ -2079,17 +2078,11 @@ function updateAppButton(latestVersion) {
   updateAppBtn.append(updateAppBtnBadge, updateAppBtnText);
   // Insert elements after the existing layout spacer
   $('.mdl-layout-spacer').after(updateAppBtn, updateAppBtnTooltip, extraLayoutSpacer);
-  // Upgrade newly added elements for MDL styling
-  componentHandler.upgradeElement(updateAppBtn[0]);
+  // Upgrade the tooltip for MDL (the button is one of our own pills)
   componentHandler.upgradeElement(updateAppBtnTooltip[0]);
   componentHandler.upgradeDom();
   // Smoothly fade-in the button after inserting
-  setTimeout(() => {
-    updateAppBtn.css({
-      opacity: 1,
-      transform: 'translateY(0)'
-    });
-  }, 1200);
+  setTimeout(() => updateAppBtn.addClass('is-shown'), 1200);
   // Attach the click event listener to the Update App button
   updateAppBtn.off('click');
   updateAppBtn.on('click', function() {

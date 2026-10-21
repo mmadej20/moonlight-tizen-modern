@@ -3,13 +3,14 @@
 const assert = require('assert');
 const fs = require('fs');
 
-// The colors that style.css repeats are custom properties. A color that has a token is not written out again in the
-// properties that give the token its role, so that changing a token changes the whole interface.
-const css = fs.readFileSync('wasm/static/css/style.css', 'utf8').replace(/\r\n/g, '\n');
+// The colors of the interface are custom properties of ui.css. Every var() names a token that is defined, the tokens keep the
+// colors the design was built with, and the stylesheet that came before (style.css) is gone, so there is one place for them.
+assert(!fs.existsSync('wasm/static/css/style.css'), 'the old stylesheet is gone');
+const css = fs.readFileSync('wasm/static/css/ui.css', 'utf8').replace(/\r\n/g, '\n');
 const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
 
 const rootMatch = withoutComments.match(/:root\s*\{([^}]*)\}/);
-assert(rootMatch, 'style.css has a :root block');
+assert(rootMatch, 'ui.css has a :root block');
 const tokens = {};
 rootMatch[1].split(';').forEach((declaration) => {
   const at = declaration.indexOf(':');
@@ -19,56 +20,34 @@ rootMatch[1].split(';').forEach((declaration) => {
   tokens[name] = declaration.slice(at + 1).trim();
 });
 
-const expected = {
-  '--text': '#fff',
-  '--text-secondary': '#ececec',
-  '--text-disabled': '#cfcfcf',
-  '--surface': '#404354',
-  '--surface-dark': '#333846',
-  '--accent': '#00a3c6',
-  '--danger': '#f44336',
-  '--success': '#8bc34a',
-  '--shadow': 'rgba(0, 0, 0, 0.4)',
-  '--shadow-strong': 'rgba(0, 0, 0, 0.6)',
-  '--ring-neutral': 'rgba(170, 170, 170, 1)'
+const colors = {
+  '--ui-bg': '#080C15',
+  '--ui-surface': '#131823',
+  '--ui-surface-raised': '#1F2733',
+  '--ui-line': '#3A4353',
+  '--ui-text': '#EFF2F7',
+  '--ui-mute': '#B4BBC8',
+  '--ui-moon': '#F5DE87',
+  '--ui-ink': '#1B1505',
+  '--ui-ok': '#4AE2AC',
+  '--ui-warn': '#F9B64F',
+  '--ui-bad': '#FE8B83'
 };
-assert.deepStrictEqual(tokens, expected, 'the tokens keep the colors the interface was built with');
+Object.keys(colors).forEach((name) => assert.strictEqual(tokens[name], colors[name], name + ' keeps its color'));
 
-// Every var() names a defined token
 const used = withoutComments.match(/var\((--[a-z-]+)\)/g) || [];
-assert(used.length >= 40, 'the tokens are used (' + used.length + ' uses)');
+assert(used.length >= 200, 'the tokens are used (' + used.length + ' uses)');
 used.forEach((use) => {
   const name = use.slice(4, -1);
   assert(name in tokens, name + ' is defined');
 });
 
-// Outside of :root a tokenised color is not written out again where the token has its role
+// A token is not written out again where it has its role: the colors of the page are in :root and nowhere else
 const rest = withoutComments.replace(/:root\s*\{[^}]*\}/, '');
 const norm = (value) => value.toLowerCase().replace(/\s+/g, '');
-const roles = [
-  ['--text', ['#fff'], ['color']],
-  ['--text-secondary', ['#ececec'], ['color']],
-  ['--text-disabled', ['#cfcfcf'], ['color']],
-  ['--surface', ['#404354'], ['background-color']],
-  ['--surface-dark', ['#333846'], ['background-color']],
-  ['--accent', ['#00a3c6', 'rgba(0,163,198,1)'], ['color', 'background-color', 'outline', 'border-color', 'box-shadow']],
-  ['--danger', ['#f44336', 'rgba(244,67,54,1)'], ['color', 'background-color', 'outline', 'box-shadow']],
-  ['--success', ['#8bc34a'], ['color', 'background-color', 'outline']],
-  ['--shadow', ['rgba(0,0,0,0.4)'], ['box-shadow', 'text-shadow', 'filter']],
-  ['--shadow-strong', ['rgba(0,0,0,0.6)'], ['box-shadow']],
-  ['--ring-neutral', ['rgba(170,170,170,1)'], ['box-shadow']]
-];
-const declarations = rest.match(/[a-zA-Z-]+\s*:\s*[^;{}]*/g) || [];
-declarations.forEach((declaration) => {
-  const at = declaration.indexOf(':');
-  const property = declaration.slice(0, at).trim().toLowerCase();
-  const value = declaration.slice(at + 1);
-  (value.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)/g) || []).forEach((color) => {
-    roles.forEach(([name, spellings, properties]) => {
-      assert(!(properties.includes(property) && spellings.includes(norm(color))),
-        'use ' + name + ' instead of ' + color + ' in ' + property + ': ' + declaration.trim());
-    });
-  });
+const spelled = Object.keys(colors).map((name) => [name, colors[name].toLowerCase()]);
+(rest.match(/#[0-9a-fA-F]{3,8}\b/g) || []).forEach((color) => {
+  spelled.forEach(([name, value]) => assert(norm(color) !== value, 'use ' + name + ' instead of ' + color));
 });
 
 console.log('style_tokens_tests: PASS');

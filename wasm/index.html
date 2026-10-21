@@ -10,7 +10,6 @@
   <link rel="stylesheet" href="static/css/roboto.css">
   <link rel="stylesheet" href="static/css/material-icons.css">
   <link rel="stylesheet" href="static/css/material.min.css">
-  <link rel="stylesheet" href="static/css/style.css">
   <link rel="stylesheet" href="static/css/ui-fonts.css">
   <link rel="stylesheet" href="static/css/ui.css">
   <script type="text/javascript" src="platform.js"></script>
@@ -622,7 +621,7 @@
       <div id="listener"></div>
       <!-- Wasm module placeholder, Wasm gets thrown into here -->
       <div id="wasmSpinner" class="mdl-progress mdl-js-progress mdl-progress__indeterminate">
-        <img src="static/res/ic_moonlight_logo.svg" id="wasmSpinnerLogo">
+        <svg id="wasmSpinnerLogo" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         <h4 id="wasmSpinnerMessage"></h4>
       </div>
       <div id="loadingSpinner" class="mdl-progress mdl-js-progress mdl-progress__indeterminate">

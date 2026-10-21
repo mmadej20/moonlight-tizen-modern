@@ -7,7 +7,6 @@ const vm = require('vm');
 const read = (file) => fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 const html = read('wasm/index.html');
 const index = read('wasm/platform/index.js');
-const style = read('wasm/static/css/style.css');
 const uiCss = read('wasm/static/css/ui.css');
 
 function extractFunction(source, name) {
@@ -81,14 +80,9 @@ assert(/showSettingsMode[\s\S]*?tidySettingHints\(\);\s*updateSettingsTitle\(\);
   'the hints and the title follow the language, because showSettingsMode runs again when it changes');
 assert(/selectedCategory\.classList\.add\('selected'\);\s*updateSettingsTitle\(\);/.test(index), 'the title follows the chosen category');
 
-// The old stylesheet of the settings is gone, and the header buttons no longer get its glow
-assert(!/setting-option|settings-category|settings-options|settings-left-pane|diagnostic-|#selectResolution|mdl-switch__thumb[^}]*\{[^}]*74\.5rem/.test(style),
-  'style.css has no rule of the old settings');
-const glow = style.slice(style.indexOf('Interactive Elements'), style.indexOf('{', style.indexOf('Interactive Elements')));
-for (const id of ['settingsBtn', 'supportBtn', 'goBackBtn', 'restoreDefaultsBtn', 'quitRunningAppBtn']) {
-  assert(!glow.includes('#' + id), id + ' is a button of the new interface and has its own outline');
-}
-assert(glow.includes('#continueAddHost'), 'the dialogs keep theirs until they are redesigned');
+// The old stylesheet is gone with the rules of the settings and the glow that the header buttons got from it
+assert(!fs.existsSync('wasm/static/css/style.css'));
+assert(!/#selectResolution|74\.5rem/.test(uiCss), 'nothing of the old settings is left in the new stylesheet');
 
 // The look: a row is a grid with the control on the right and highlights as a whole
 assert(/\.setting-option \{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) auto;/.test(uiCss));

@@ -25,7 +25,8 @@ function extractFunction(source, name) {
 
 // The page: the new stylesheets come after the old one, the header keeps the ids that the navigation uses, and the hosts
 // screen is one container that holds the heading, the row of cards and the hints
-assert(html.indexOf('static/css/ui-fonts.css') > html.indexOf('static/css/style.css'));
+assert(!html.includes('static/css/style.css') && !fs.existsSync('wasm/static/css/style.css'), 'the old stylesheet is gone');
+assert(html.indexOf('static/css/ui-fonts.css') > html.indexOf('static/css/material.min.css'));
 assert(html.indexOf('static/css/ui.css') > html.indexOf('static/css/ui-fonts.css'));
 for (const id of ['goBackBtn', 'settingsBtn', 'supportBtn', 'restoreDefaultsBtn', 'quitRunningAppBtn']) {
   assert(new RegExp('<button[^>]*id="' + id + '"[^>]*class="ui-btn ui-fx"').test(html), id + ' is a button of the new header');

@@ -9,7 +9,6 @@ const html = read('wasm/index.html');
 const index = read('wasm/platform/index.js');
 const messages = read('wasm/platform/messages.js');
 const navigation = read('wasm/platform/navigation.js');
-const style = read('wasm/static/css/style.css');
 const uiCss = read('wasm/static/css/ui.css');
 
 function extractFunction(source, name) {
@@ -98,7 +97,7 @@ assert(/focusTile\(Views\.Apps\.view\.current\(\), 'smooth'\)/.test(navigation.s
 }
 
 // The look: a tile does not change its size, the outline is the same kind of layer as everywhere, the old rules are gone
-assert(!/game-grid|game-container|game-title|game-text|disable-animation|scrollText/.test(style), 'the old rules of the games section are removed');
+assert(!/mdl-card|disable-animation|scrollText/.test(uiCss), 'the old rules of the games section are gone');
 assert(/#game-grid \{[^}]*overflow-x: auto;[^}]*overflow-y: hidden;/.test(uiCss), 'the row scrolls sideways');
 assert(/\.ui-tile \{[^}]*flex: none;[^}]*width: 260px;[^}]*transform-origin: 50% 195px;/.test(uiCss), 'a tile has a fixed place and grows around its box art');
 assert(/\.ui-tile:hover, \.ui-tile:focus, \.ui-tile\.hovered \{[^}]*transform: scale\(1\.12\);/.test(uiCss), 'a tile grows with a transform, not with its size');
