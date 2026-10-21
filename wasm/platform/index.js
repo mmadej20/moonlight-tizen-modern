@@ -55,7 +55,7 @@ var codecWarning = false; // Flag indicating whether the video codec warning mes
 var repeatAction = null; // Flag indicating whether the repeat action is set, initial value is null
 var lastInvokeTime = 0; // Flag indicating the last invoke time, initial value is 0
 var repeatTimeout = null; // Flag indicating whether the repeat timeout is set, initial value is null
-var navigationTimeout = null; // Flag indicating whether the navigation timeout is set, initial value is null
+var lastNavigationTime = 0; // The time of the last navigation action of the pad, initial value is 0
 const BUILD_TYPE = '__BUILD_TYPE__'; // Placeholder for build type, which should be replaced during the build process
 const BUILD_COMMIT = '__BUILD_COMMIT__'; // Placeholder for build commit, which should be replaced during the build process
 const REPO_OWNER = '__REPO_OWNER__'; // Placeholder for repository owner, which should be replaced during the build process
@@ -68,7 +68,7 @@ var _isSmartHubSupported = false; // Flag indicating if Smart Hub Preview is sup
 const REPEAT_DELAY = 350; // Repeat delay set to 350ms (milliseconds)
 const REPEAT_INTERVAL = 100; // Repeat interval set to 100ms (milliseconds)
 const ACTION_THRESHOLD = 0.5; // Threshold for initial navigation set to 0.5
-const NAVIGATION_DELAY = 150; // Navigation delay set to 150ms (milliseconds)
+const NAVIGATION_COOLDOWN = 100; // A navigation action of the pad that follows another one within 100ms is ignored
 const UPDATE_TIMESTAMP = 'lastUpdateCheck'; // Use the update check timestamp key to determine the last update check
 const UPDATE_VERSION = 'latestUpdateVersion'; // // Use the update version key to cache the latest version found
 const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // Automatic check for updates interval is set to 24 hours
@@ -170,9 +170,10 @@ function attachListeners() {
       if (type === 'button') {
         // Handle button mapping
         const buttonMapping = {
-          0: () => delayedNavigation(() => Navigation.accept()),
-          1: () => delayedNavigation(() => Navigation.back()),
-          8: () => delayedNavigation(() => Navigation.move()),
+          0: () => throttledNavigation(() => Navigation.accept()),
+          1: () => throttledNavigation(() => Navigation.back()),
+          2: () => throttledNavigation(() => Navigation.press()),
+          3: () => throttledNavigation(() => Navigation.menu()),
         };
         // Handle D-Pad mapping
         const dPadMapping = {
@@ -203,10 +204,10 @@ function attachListeners() {
       } else if (type === 'axis') {
         // Handle axis mapping
         const axisMapping = {
-          0: (value) => value < -ACTION_THRESHOLD ? (delayedNavigation(() => Navigation.left()), () => Navigation.left()) : 
-            value > ACTION_THRESHOLD ? (delayedNavigation(() => Navigation.right()), () => Navigation.right()) : null,
-          1: (value) => value < -ACTION_THRESHOLD ? (delayedNavigation(() => Navigation.up()), () => Navigation.up()) : 
-            value > ACTION_THRESHOLD ? (delayedNavigation(() => Navigation.down()), () => Navigation.down()) : null,
+          0: (value) => value < -ACTION_THRESHOLD ? (throttledNavigation(() => Navigation.left()), () => Navigation.left()) : 
+            value > ACTION_THRESHOLD ? (throttledNavigation(() => Navigation.right()), () => Navigation.right()) : null,
+          1: (value) => value < -ACTION_THRESHOLD ? (throttledNavigation(() => Navigation.up()), () => Navigation.up()) : 
+            value > ACTION_THRESHOLD ? (throttledNavigation(() => Navigation.down()), () => Navigation.down()) : null,
         };
         // Handle axis value
         if (axisMapping[index]) {
@@ -279,48 +280,74 @@ function repeatActionHandler() {
   }
 }
 
-// Delays navigation-related callback execution after a specified delay
-function delayedNavigation(callback) {
-  // Clear any existing navigation timeout
-  clearTimeout(navigationTimeout);
-  // Set a new navigation timeout with the provided callback and delay
-  navigationTimeout = setTimeout(callback, NAVIGATION_DELAY);
+// Runs a navigation action of the pad at once, and ignores another one that follows within the cooldown: a button that
+// bounces, or a stick that is pushed and let go quickly, must not act twice. The pad used to wait 150 ms before every action.
+function throttledNavigation(callback) {
+  const now = Date.now();
+  if (now - lastNavigationTime < NAVIGATION_COOLDOWN) {
+    return;
+  }
+  lastNavigationTime = now;
+  callback();
 }
 
-// Updates the host status indicator based on the host's online and paired status
+// Updates the card of a host: its state, the status pill and the action of the A button
 function updateHostStatusIndicator(host) {
-  // Find the desired host cell using the server UUID
-  var hostCell = document.querySelector('#host-' + host.serverUid);
-  var indicator = document.querySelector('#host-status-' + host.serverUid);
+  var card = document.getElementById('host-container-' + host.serverUid);
+  var pill = document.getElementById('host-status-' + host.serverUid);
+  var action = document.getElementById('host-action-' + host.serverUid);
 
-  // Update the host cell inactive styling class
-  if (hostCell) {
-    // Check if the host is currently online
-    if (host.online) {
-      // If the host is online, show it as active
-      hostCell.classList.remove('host-cell-inactive');
-    } else {
-      // If the host is offline, show it as inactive
-      hostCell.classList.add('host-cell-inactive');
+  // The card has one of four states, which the style of the card follows
+  var state = 'unknown';
+  if (host.online === true && host.paired) {
+    state = 'online';
+  } else if (host.online === true) {
+    state = 'unpaired';
+  } else if (host.online === false) {
+    state = 'offline';
+  }
+  if (card) {
+    card.setAttribute('data-state', state);
+  }
+
+  // The status pill says the state in words, and its color and shape say it again
+  if (pill) {
+    var labels = { online: 'Online', unpaired: 'Not paired', offline: 'Offline' };
+    var modifiers = { online: ' ui-pill--ok', unpaired: ' ui-pill--warn', offline: ' ui-pill--mute' };
+    pill.style.display = labels[state] ? '' : 'none';
+    pill.className = 'ui-pill' + (modifiers[state] || '');
+    pill.textContent = '';
+    if (labels[state]) {
+      var dot = document.createElement('span');
+      dot.className = 'ui-pill__dot';
+      var text = document.createElement('span');
+      text.textContent = t(labels[state]);
+      pill.appendChild(dot);
+      pill.appendChild(text);
     }
   }
 
-  // If the indicator element is not found, exit the function early
-  if (!indicator) {
-    return;
-  }
-  // Set the appropriate status indicator based on the host status
-  if (host.online === undefined || host.online === null) {
-    indicator.style.display = 'none';
-  } else if (!host.online) {
-    indicator.style.display = 'block';
-    indicator.innerHTML = 'warning';
-  } else if (host.online && !host.paired) {
-    indicator.style.display = 'block';
-    indicator.innerHTML = 'lock';
-  } else {
-    indicator.style.display = 'none';
-    indicator.innerHTML = '';
+  // What the A button does with this card: open the library, pair, or wake the computer
+  if (action) {
+    var actionLabel = '';
+    if (state === 'online') {
+      actionLabel = 'Open library';
+    } else if (state === 'unpaired') {
+      actionLabel = 'Pair with PIN';
+    } else if (state === 'offline' && host.autoWolEnabled === true) {
+      actionLabel = 'Wake PC';
+    }
+    action.textContent = '';
+    if (actionLabel) {
+      var glyph = document.createElement('span');
+      glyph.className = 'ui-glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.textContent = 'A';
+      var label = document.createElement('span');
+      label.textContent = t(actionLabel);
+      action.appendChild(glyph);
+      action.appendChild(label);
+    }
   }
 }
 
@@ -459,7 +486,6 @@ function snackbarLogLong(...args) {
 // Handle layout elements when displaying the Hosts view
 function showHostsMode() {
   console.log('%c[index.js, showHostsMode]', 'color: green;', 'Entering "Show Hosts" mode.');
-  $('#header-title').html(t('Hosts'));
   $('#header-logo').show();
   $('#main-header').show();
   $('.nav-menu-parent').show();
@@ -1242,33 +1268,40 @@ function autoWolDialog(host, onSuccess, onCancel) {
 
 // Add the new NvHTTP Host object inside the host grid
 function addHostToGrid(host, ismDNSDiscovered) {
-  // Create the host container with the appropriate attributes for the host card
+  // Create the host card with the appropriate attributes; its state is set by updateHostStatusIndicator()
   var hostContainer = $('<div>', {
     id: 'host-container-' + host.serverUid,
-    class: 'host-container mdl-card mdl-shadow--4dp',
+    class: 'host-container ui-card ui-fx',
     role: 'link',
     tabindex: 0,
-    'aria-label': host.hostname
+    'aria-label': host.hostname,
+    'data-state': 'unknown'
   });
 
-  // Create the host cell to serve as a holder for the host box
+  // The top row: the icon of a computer and the status pill
   var hostCell = $('<div>', {
     id: 'host-' + host.serverUid,
-    class: 'mdl-card__title mdl-card--expand'
+    class: 'ui-card__top'
   });
-
-  // Create the host title wrapper to hold the host title text
-  var hostTitle = $('<div>', {
-    class: 'host-title mdl-card__title-text'
+  var hostIcon = $('<div>', { class: 'ui-card__icon' }).html(
+    '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>');
+  var hostStatusIndicator = $('<span>', {
+    id: 'host-status-' + host.serverUid,
+    class: 'ui-pill'
   });
+  hostCell.append(hostIcon, hostStatusIndicator);
 
-  // Create the host text placeholder that will contain the host name
-  var hostText = $('<span>', {
-    class: 'host-text',
-    text: host.hostname
+  // The name and the address of the host
+  var hostTitle = $('<div>', { class: 'host-title' });
+  hostTitle.append($('<span>', { class: 'host-text', text: host.hostname }));
+  var hostAddress = $('<div>', { class: 'host-address', text: host.address });
+  var hostMain = $('<div>', { class: 'ui-card__main' }).append(hostTitle, hostAddress);
+
+  // The foot: what the A button does, and the button that opens the menu of the host (the X button)
+  var hostAction = $('<div>', {
+    id: 'host-action-' + host.serverUid,
+    class: 'host-action'
   });
-
-  // Create the host menu button with the appropriate attributes for the host menu
   var hostMenu = $('<div>', {
     id: 'hostMenuButton-' + host.serverUid,
     class: 'host-menu',
@@ -1276,39 +1309,12 @@ function addHostToGrid(host, ismDNSDiscovered) {
     tabindex: 0,
     'aria-label': host.hostname + ' menu'
   });
+  hostMenu.append(
+    $('<span>', { class: 'ui-glyph', 'aria-hidden': 'true', text: 'X' }),
+    $('<span>', { text: t('Options') }));
+  var hostFoot = $('<div>', { class: 'ui-card__foot' }).append(hostAction, hostMenu);
 
-  // Create the host center icon to indicate the host's status (online/offline/unpaired)
-  var hostStatusIndicator = $('<i>', {
-    id: 'host-status-' + host.serverUid,
-    class: 'material-icons host-center-icon'
-  });
-
-  // Append the host text to the host title wrapper
-  hostTitle.append(hostText);
-
-  // Handle animation state based on host title text length
-  if (host.hostname.length <= 26) {
-    // For host title text of 26 characters or less, disable scrolling text animation
-    hostText.addClass('disable-animation');
-  } else {
-    // For host title text longer than 26 characters, enable scrolling text animation
-    hostText.removeClass('disable-animation');
-  }
-
-  // Append the host title to the host cell
-  hostCell.append(hostTitle);
-
-  // Append the host cell to the host container
-  hostContainer.append(hostCell);
-
-  // Append the host menu button to the host container
-  hostContainer.append(hostMenu);
-
-  // Append the host status indicator to the host container
-  hostContainer.append(hostStatusIndicator);
-
-  // Set initial status
-  updateHostStatusIndicator(host);
+  hostContainer.append(hostCell, hostMain, hostFoot);
 
   // Attach the click event listener to the host container
   hostContainer.off('click');
@@ -1334,11 +1340,14 @@ function addHostToGrid(host, ismDNSDiscovered) {
     hostMenuDialog(host);
   });
 
-  // Append the host container to the host grid
-  $('#host-grid').append(hostContainer);
+  // The add host card stays the last one in the row
+  $('#addHostContainer').before(hostContainer);
 
   // Store the host object in the hosts array using its server UID as the key
   hosts[host.serverUid] = host;
+
+  // Set initial status
+  updateHostStatusIndicator(host);
 
   // Update the host's external IPv4 address if it was discovered via mDNS
   if (ismDNSDiscovered) {
@@ -1739,13 +1748,12 @@ function appSupportDialog() {
 // Handle layout elements when displaying the Settings view
 function showSettingsMode() {
   console.log('%c[index.js, showSettingsMode]', 'color: green;', 'Entering "Show Settings" mode.');
-  $('#header-title').html(t('Settings'));
   $('#header-logo').show();
   $('#main-header').show();
   $('#goBackBtn').show();
   $('#restoreDefaultsBtn').show();
   $('#main-content').children().not('#listener, #loadingSpinner, #wasmSpinner').show();
-  $('#host-grid').hide();
+  $('#hosts-screen').hide();
   $('#game-grid').hide();
   $('.nav-menu-parent').hide();
   $('#updateAppBtn').hide();
@@ -1773,7 +1781,7 @@ function showSettings() {
   // Hide the main header and content before showing a loading screen
   $('#main-header').children().hide();
   $('#main-header').css({'backgroundColor': 'transparent', 'boxShadow': 'none'});
-  $('#host-grid, #game-grid').hide();
+  $('#hosts-screen, #game-grid').hide();
 
   // Show a spinner while the setting list loads
   $('#wasmSpinner').css('display', 'inline-block');
@@ -2510,13 +2518,12 @@ function sortTitles(list, sortOrder) {
 // Handle layout elements when displaying the Apps view
 function showAppsMode() {
   console.log('%c[index.js, showAppsMode]', 'color: green;', 'Entering "Show Apps" mode.');
-  $('#header-title').html(t('Apps'));
   $('#header-logo').show();
   $('#main-header').show();
   $('#goBackBtn').show();
   $('#quitRunningAppBtn').show();
   $('#main-content').children().not('#listener, #loadingSpinner, #wasmSpinner').show();
-  $('#host-grid').hide();
+  $('#hosts-screen').hide();
   $('#settings-list').hide();
   $('.nav-menu-parent').hide();
   $('#updateAppBtn').hide();
@@ -2578,7 +2585,7 @@ function showApps(host) {
     // Hide the main header before showing a loading screen
     $('#main-header').children().hide();
     $('#main-header').css({'backgroundColor': 'transparent', 'boxShadow': 'none'});
-    $('#host-grid, #settings-list').hide();
+    $('#hosts-screen, #settings-list').hide();
 
     // Show a spinner while the app list loads
     $('#wasmSpinner').css('display', 'inline-block');

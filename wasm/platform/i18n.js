@@ -3,10 +3,11 @@
 
   const LANGUAGE_SETTING_KEY = 'languagePreference';
   const SOURCE_LOCALE = 'en-US';
-  const SUPPORTED_LOCALES = ['en-US', 'pt-BR'];
+  const SUPPORTED_LOCALES = ['en-US', 'pl-PL', 'pt-BR'];
   const LOCALE_LABELS = {
     'auto': 'Auto',
     'en-US': 'English (United States)',
+    'pl-PL': 'Polski',
     'pt-BR': 'Português (Brasil)',
   };
 

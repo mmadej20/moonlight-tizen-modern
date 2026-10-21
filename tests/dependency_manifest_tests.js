@@ -24,6 +24,7 @@ const expectedJavaScriptSuites = [
   'tests/embind_string_patch_tests.js',
   'tests/gamepad_polling_tests.js',
   'tests/gamepad_sampling_wiring_tests.js',
+  'tests/hosts_screen_tests.js',
   'tests/http_bridge_tests.js',
   'tests/http_timing_wiring_tests.js',
   'tests/log_repeat_wiring_tests.js',

@@ -453,48 +453,22 @@ const Views = {
   Hosts: {
     view: new ListView(() => document.getElementById('host-grid').children),
     up: function() {
-      // If there are more rows behind, then go to the previous row
-      if (this.view.prevCardRow(5)) {
-        focusElement(this.view.current());
-      } else {
-        // If there are no more rows, check if the current item is a host
-        const currentItem = resolveElement(this.view.current());
-        if (currentItem && currentItem.id !== 'addHostContainer') {
-          // Navigate to the HostsMenuHighlight view to highlight the host's menu icon
-          Navigation.change(Views.HostsMenuHighlight);
-          focusElement(Views.HostsMenuHighlight.view.current());
-        } else {
-          // Set focus on the first navigation item in HostsNav view when transitioning from Add Host container
-          Navigation.change(Views.HostsNav);
-          focusElement(Views.HostsNav.view.current());
-        }
-      }
+      // Nothing is above the row of cards but the header
+      Navigation.change(Views.HostsNav);
+      focusElement(Views.HostsNav.view.current());
     },
-    down: function() {
-      // If there are more rows after, then go to the next row
-      if (this.view.nextCardRow(5)) {
-        focusElement(this.view.current());
-      }
-    },
+    down: function() {},
     left: function() {
-      this.view.prevCard(5);
+      this.view.prev();
       focusElement(this.view.current());
     },
     right: function() {
-      this.view.nextCard(5);
+      this.view.next();
       focusElement(this.view.current());
     },
     accept: function() {
-      const currentItem = resolveElement(this.view.current());
-      // Check if the current item is the Add Host container
-      if (currentItem && currentItem.id === 'addHostContainer') {
-        // Click the Add Host container itself to open the Add Host dialog
-        clickElement(currentItem);
-      } else {
-        // If the current item has children, click the first child element (the host card)
-        const hostCard = currentItem.children ? currentItem.children[0] : null;
-        clickElement(hostCard);
-      }
+      // The card itself handles the click: it opens the library, starts the pairing or the Add Host dialog
+      clickElement(this.view.current());
     },
     back: function() {
       // Show the Exit Moonlight dialog and push the view
@@ -502,28 +476,21 @@ const Views = {
     },
     press: function() {
       const currentItem = resolveElement(this.view.current());
-      // Check if the current item is not the Add Host container
+      // Check if the current item is not the Add Host card
       if (currentItem && currentItem.id !== 'addHostContainer') {
-        // If the current item has children, set focus on the second child element (the menu button)
-        const menuButton = currentItem.children ? currentItem.children[1] : null;
+        // Click the Host Menu button of the card, show the Host Menu dialog and push the view
+        const menuButton = currentItem.querySelector('.host-menu');
         focusElement(menuButton);
-        // Click the Host Menu button, show the Host Menu dialog and push the view
-        setTimeout(() => clickElement(menuButton), 250);
+        clickElement(menuButton);
       }
     },
+    menu: function() {
+      // The Y button: the settings of the application
+      clickElement('settingsBtn');
+    },
     switch: function() {
-      const currentItem = resolveElement(this.view.current());
-      // Check if the current item is the Add Host container
-      if (currentItem && currentItem.id === 'addHostContainer') {
-        // Set focus on the Add Host container itself
-        focusElement(currentItem);
-      } else {
-        // Scroll to the current Host card row to ensure is visible when switching back from another view
-        this.view.currentCardRow(5);
-        // If the current item has children, set focus on the first child element (the host card)
-        const hostCard = currentItem.children ? currentItem.children[0] : null;
-        focusElement(hostCard);
-      }
+      // Put the focus back on the card, for example when switching back from another view
+      focusElement(this.view.current());
     },
     enter: function() {
       mark(this.view.current());
@@ -537,9 +504,9 @@ const Views = {
   HostsNav: {
     view: new ListView(() => {
       if (document.getElementById('updateAppBtn')) {
-        return ['updateAppBtn', 'settingsBtn', 'supportBtn'];
+        return ['updateAppBtn', 'supportBtn', 'settingsBtn'];
       } else {
-        return ['settingsBtn', 'supportBtn'];
+        return ['supportBtn', 'settingsBtn'];
       }
     }),
     up: function() {},
@@ -564,54 +531,6 @@ const Views = {
       // Navigate to the Hosts view
       Navigation.change(Views.Hosts);
       // Set focus on the first navigation item in Hosts view when transitioning from HostsNav view
-      focusElement(Views.Hosts.view.current());
-    },
-    press: function() {},
-    switch: function() {
-      focusElement(this.view.current());
-    },
-    enter: function() {
-      mark(this.view.current());
-    },
-    leave: function() {
-      unmark(this.view.current());
-    },
-  },
-  HostsMenuHighlight: {
-    view: new ListView(() => {
-      // Return the menu button of the currently selected host
-      const currentHost = resolveElement(Views.Hosts.view.current());
-      if (currentHost && currentHost.id !== 'addHostContainer') {
-        const menuButton = currentHost.children ? currentHost.children[1] : null;
-        return menuButton ? [menuButton] : [];
-      }
-      return [];
-    }),
-    up: function() {
-      // Navigate to the HostsNav view (Settings button)
-      Navigation.change(Views.HostsNav);
-      focusElement(Views.HostsNav.view.current());
-    },
-    down: function() {
-      // Return to the Hosts view
-      Navigation.change(Views.Hosts);
-      focusElement(Views.Hosts.view.current());
-    },
-    left: function() {},
-    right: function() {},
-    accept: function() {
-      // Open the host menu dialog (same behavior as CH+)
-      const currentHost = resolveElement(Views.Hosts.view.current());
-      if (currentHost && currentHost.id !== 'addHostContainer') {
-        const menuButton = currentHost.children ? currentHost.children[1] : null;
-        if (menuButton) {
-          clickElement(menuButton);
-        }
-      }
-    },
-    back: function() {
-      // Return to the Hosts view
-      Navigation.change(Views.Hosts);
       focusElement(Views.Hosts.view.current());
     },
     press: function() {},
@@ -2088,6 +2007,7 @@ const Navigation = (function() {
     accept: runOp('accept'),
     back: runOp('back'),
     press: runOp('press'),
+    menu: runOp('menu'),
     switch: runOp('switch'),
     push: Stack.push,
     change: Stack.change,

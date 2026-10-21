@@ -1,0 +1,435 @@
+/* =============================
+   Interface of Moonlight Tizen
+   Tokens and components of the redesign. Everything here is prefixed `ui-`, so that it can live next to the old
+   stylesheet while the screens are moved over one by one. The target is a 1920x1080 TV on Tizen 9.
+
+   What makes it smooth on a TV: focus is shown by an outline layer that only changes opacity and transform (both stay
+   on the compositor), nothing animates a shadow, a blur or a layout property, and the large cards are `contain`ed so a
+   change inside one never lays out the page.
+============================= */
+
+:root {
+    --ui-bg: #080C15;
+    --ui-surface: #131823;
+    --ui-surface-raised: #1F2733;
+    --ui-line: #3A4353;
+    --ui-text: #EFF2F7;
+    --ui-mute: #B4BBC8;
+    --ui-moon: #F5DE87;
+    --ui-ink: #1B1505;
+    --ui-ok: #4AE2AC;
+    --ui-warn: #F9B64F;
+    --ui-bad: #FE8B83;
+    --ui-ring: rgba(245, 222, 135, 0.22);
+    --ui-scrim: rgba(8, 12, 21, 0.6);
+    --ui-glow: rgba(32, 46, 71, 0.55);
+    --ui-moon-wash: rgba(245, 222, 135, 0.14);
+    --ui-font-display: 'Bricolage Grotesque', system-ui, sans-serif;
+    --ui-font: 'Figtree', system-ui, sans-serif;
+    --ui-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* A screen: the dark ground with a soft light in the upper right corner, and the margins of a TV (safe area) */
+.ui-screen {
+    background: radial-gradient(900px 560px at 88% -8%, var(--ui-glow), transparent 70%), var(--ui-bg);
+    color: var(--ui-text);
+    font-family: var(--ui-font);
+    padding: 64px 96px 56px;
+    box-sizing: border-box;
+}
+
+.ui-title {
+    margin: 0;
+    font: 700 72px/1.05 var(--ui-font-display);
+    letter-spacing: -0.02em;
+}
+
+.ui-subtitle {
+    font: 500 28px/1.3 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+/* Focus. An element with `ui-fx` shows its outline layer when the remote or the pad is on it (`hovered`, set by the
+   navigation), when the browser focuses it, and when the pointer is over it. */
+.ui-fx {
+    position: relative;
+    transition: transform 0.2s var(--ui-ease);
+}
+
+.ui-fx::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    border: 6px solid var(--ui-ring);
+    border-radius: inherit;
+    opacity: 0;
+    transform: scale(0.97);
+    transition: opacity 0.2s var(--ui-ease), transform 0.2s var(--ui-ease);
+    pointer-events: none;
+}
+
+.ui-fx:hover::after, .ui-fx:focus::after, .ui-fx.hovered::after {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.ui-fx:hover, .ui-fx:focus, .ui-fx.hovered {
+    transform: scale(1.02);
+    outline: none;
+}
+
+.ui-btn.ui-fx:hover, .ui-btn.ui-fx:focus, .ui-btn.ui-fx.hovered {
+    transform: scale(1.04);
+}
+
+/* A button of the pad drawn as a circle with its letter (A, B, X, Y), or as a rounded badge for a longer name */
+.ui-glyph {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    font: 700 20px/1 var(--ui-font);
+}
+
+.ui-glyph--wide {
+    width: auto;
+    min-width: 52px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 12px;
+    font-size: 18px;
+}
+
+.ui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    height: 64px;
+    padding: 0 28px;
+    box-sizing: border-box;
+    border-radius: 32px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-surface-raised);
+    color: var(--ui-text);
+    font: 600 26px/1 var(--ui-font);
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.ui-btn--primary {
+    background: var(--ui-moon);
+    border-color: var(--ui-moon);
+    color: var(--ui-ink);
+}
+
+.ui-btn svg {
+    flex: none;
+}
+
+.ui-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    height: 40px;
+    padding: 0 16px;
+    box-sizing: border-box;
+    border-radius: 20px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-scrim);
+    font: 600 22px/1 var(--ui-font);
+}
+
+.ui-pill--ok {
+    color: var(--ui-ok);
+    border-color: var(--ui-ok);
+}
+
+.ui-pill--warn {
+    color: var(--ui-warn);
+    border-color: var(--ui-warn);
+}
+
+.ui-pill--mute {
+    color: var(--ui-mute);
+}
+
+.ui-pill__dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.ui-pill--mute .ui-pill__dot {
+    background: none;
+    border: 2.5px solid currentColor;
+    box-sizing: border-box;
+}
+
+.ui-pill--warn .ui-pill__dot {
+    border-radius: 0;
+    transform: rotate(45deg);
+}
+
+.ui-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 40px;
+    padding: 0 16px;
+    box-sizing: border-box;
+    border-radius: 12px;
+    background: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 22px/1 var(--ui-font);
+}
+
+.ui-card {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    padding: 36px;
+    border-radius: 32px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-surface);
+    color: var(--ui-text);
+    contain: layout style;
+}
+
+.ui-card.hovered, .ui-card:focus {
+    background: var(--ui-surface-raised);
+    border-color: var(--ui-moon);
+}
+
+/* The hints at the foot of a screen: which pad button does what */
+.ui-hints {
+    display: flex;
+    align-items: center;
+    gap: 44px;
+    font: 500 24px/1 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+.ui-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.ui-hint .ui-glyph {
+    color: var(--ui-text);
+}
+
+/* =============================
+   Page shell: the background of the whole application, and the header that every screen shares
+============================= */
+body {
+    background: radial-gradient(900px 560px at 88% -8%, var(--ui-glow), transparent 70%), var(--ui-bg);
+    background-attachment: fixed;
+    font-family: var(--ui-font);
+}
+
+.ui-header.mdl-layout__header {
+    min-height: 0;
+    padding: 64px 96px 0;
+    box-sizing: border-box;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+}
+
+.ui-header .ui-header__row {
+    height: 64px;
+    min-height: 64px;
+    padding: 0;
+    gap: 16px;
+}
+
+.ui-brand {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-left: 0;
+}
+
+#header-logo {
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+#header-title {
+    color: var(--ui-text);
+    font: 700 40px/1 var(--ui-font-display);
+    letter-spacing: -0.01em;
+    text-transform: none;
+    text-shadow: none;
+}
+
+.ui-header__nav {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* The header buttons are shown and hidden by the application with show() and hide() */
+.ui-header .ui-btn {
+    margin: 0;
+}
+
+/* =============================
+   Hosts: where are we playing today
+============================= */
+/* The screen is as tall as the window below the header (64 px of margin and 64 px of header), so the hints sit at the bottom */
+#hosts-screen {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 128px);
+    box-sizing: border-box;
+}
+
+#hosts-heading {
+    margin: 72px 96px 0;
+}
+
+#host-grid {
+    display: flex;
+    flex: 1;
+    gap: 20px;
+    margin: 0;
+    padding: 52px 96px 24px;
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+/* The row has room for the focus outline: the scroll area would clip it otherwise */
+#host-grid > .ui-card {
+    flex: 1 1 0;
+    min-width: 380px;
+    max-width: 560px;
+    min-height: 420px;
+    max-height: 520px;
+    cursor: pointer;
+}
+
+#host-grid > #addHostContainer {
+    flex: 0 0 200px;
+    min-width: 200px;
+    align-items: center;
+    justify-content: center;
+    border-style: dashed;
+    background: transparent;
+    color: var(--ui-mute);
+}
+
+#addHostContainer.hovered, #addHostContainer:focus, #addHostContainer:hover {
+    color: var(--ui-text);
+}
+
+.ui-card__add {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    font: 600 24px/1.2 var(--ui-font);
+    text-align: center;
+}
+
+.ui-card__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ui-card__icon {
+    display: grid;
+    place-items: center;
+    width: 88px;
+    height: 88px;
+    border-radius: 24px;
+    background: var(--ui-bg);
+    color: var(--ui-mute);
+}
+
+.host-container[data-state="online"] .ui-card__icon {
+    background: var(--ui-moon-wash);
+    color: var(--ui-moon);
+}
+
+#host-grid .host-title {
+    margin-top: 28px;
+    font: 700 48px/1.05 var(--ui-font-display);
+    letter-spacing: -0.01em;
+    color: var(--ui-text);
+}
+
+/* A long name wraps onto a second line and then ends in an ellipsis, so there is nothing that scrolls */
+#host-grid .host-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    word-break: break-word;
+}
+
+.host-address {
+    margin-top: 10px;
+    font: 500 26px/1.3 var(--ui-font);
+    color: var(--ui-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ui-card__foot {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: auto;
+}
+
+.host-action {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font: 600 26px/1.2 var(--ui-font);
+    color: var(--ui-text);
+}
+
+.host-action:empty {
+    display: none;
+}
+
+.host-menu {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    align-self: flex-start;
+    height: 56px;
+    padding: 0 24px;
+    box-sizing: border-box;
+    border-radius: 28px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-surface-raised);
+    color: var(--ui-text);
+    font: 600 24px/1 var(--ui-font);
+    cursor: pointer;
+}
+
+/* An offline host is quieter: the card keeps its place but does not compete with the ones that can be used */
+.host-container[data-state="offline"] .host-title,
+.host-container[data-state="offline"] .host-address {
+    color: var(--ui-mute);
+}
+
+#hosts-hints {
+    padding: 8px 96px 56px;
+}
