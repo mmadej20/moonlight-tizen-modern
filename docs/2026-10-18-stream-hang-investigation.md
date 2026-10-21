@@ -544,3 +544,37 @@ pamięć nie nachodzi na blok używany albo trzymany („overlapping allocation:
 „overlapping allocation" potwierdza hipotezę alokatora (kolejny krok to własny `dlmalloc` ze sprawdzoną blokadą spinową
 i licznikiem „kto jest w środku"); „a block was written outside its bounds" lub „after it was freed" wskazuje zapis z
 kodu aplikacji; samo „a live block changed" z głową bloku bez nakładania i bez stref oznacza zapis w nagłówek z zewnątrz.
+
+## 17. Błędy startu streama (`-9`) i zacinanie aplikacji: pełny plik logów (2026-10-21)
+
+To wyjaśnia błędy startu z sekcji 14 i te po instalacji `diag6`/`nodiag`. **Nie miały związku z kanarkiem ani z
+restartem TV**, a przetrwały restarty TV i reinstalacje.
+
+**Objawy.** `/launch` kończył się po 4-20 s błędem `-9`, animacja „Starting Desktop" się zacinała, strona z logami się
+zawieszała, wibracja pada po starcie aplikacji trwała za długo, a kolejne żądania HTTP czekały w kolejce po kilka
+sekund (`ran for 19511 ms` przy limitach 8 s i 10 s: czas poszedł poza rachunek curl, bo wyjście wątków roboczych
+przechodzi przez zablokowany główny wątek).
+
+**Przyczyna.** Aplikacja trzyma log diagnostyczny w pliku `wgt-private/moonlight-diagnostics-current.log` (limit 2 MiB)
+w pamięci prywatnej aplikacji (pliki sprzed 18.10, więc przeżywają instalacje). W przebiegach, w których wątek wejścia
+padł albo stanął (`diag4`, `diag5`), biblioteka strumieniowa zalała log komunikatem „Input queue reached maximum size
+limit" (ok. 80 tys. linii). Plik zapełnił się do limitu (2 097 115 B, 38 595 linii, z czego 37 897 to ten komunikat i 217
+razy „Main thread stalled for N ms"). Odtąd **każda porcja logu (co sekundę) powodowała odczyt całego pliku (400 ms),
+przycięcie go i zapis 2 MB od nowa, na głównym wątku**, bo przycięcie schodziło dokładnie do limitu i następna porcja
+znów go przekraczała. Główny wątek był przez to zajęty przez większość czasu: opóźniał DNS (przechodzi przez niego),
+wyjście konsoli wątków roboczych, animacje i stronę logów (która dodatkowo wczytywała cały plik jako jeden tekst).
+
+**Sprawdzenie na TV.** `tools/tv-debug/page_eval.js` (wyrażenia wykonywane w stronie działającej aplikacji, bez
+pauzowania) pokazał rozmiar plików i ich zawartość; po wyczyszczeniu obu plików aplikacja od razu działała poprawnie.
+
+**Poprawka (`b7759ea`).**
+- Ten sam komunikat powtórzony w ciągu sekundy jest pomijany i liczony („the previous message was repeated N times"),
+  przed konsolą i przed logiem (`wasm/log_repeat_filter.hpp`).
+- Pełny log jest przycinany do trzech czwartych limitu, więc kolejne porcje są tylko dopisywane.
+- Strona logów pokazuje tylko ostatnie 128 KB i odświeża się nie częściej niż co 3 s.
+- Przełącznik „Save diagnostic logs on this device" (domyślnie włączony, zapamiętany w `localStorage`) wyłącza zapis
+  także po stronie natywnej, a przycisk „Clear all logs" czyści oba pliki oraz to, co trzyma strona natywna.
+
+**Skutek uboczny dla śledztwa.** Komunikat o kolejce wejścia jest tylko skutkiem śmierci wątku wejścia (sekcja 16), nie
+usterką wejścia, i nic w kodzie wejścia nie było do cofnięcia. Limit połączenia 8 s dla `launch`/`resume`/`cancel` z
+`17cee3a` zostaje jako dodatkowe zabezpieczenie, ale nie był przyczyną.
