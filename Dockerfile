@@ -172,7 +172,8 @@ RUN NODE=/home/moonlight/emscripten-release-bundle/emsdk/node/12.9.1_64bit/bin/n
 	/home/moonlight/emscripten-release-bundle/emsdk/fastcomp/bin/wasm-dis build/widget/moonlight-wasm.wasm -o build/module.wat && \
 	if [ "$LOCK_GUARD" = "on" ]; then $NODE moonlight-tizen/tools/find-malloc-lock.js build/module.wat build/widget/platform/malloc_lock.js; \
 	else echo "Lock guard off: the address of the allocator lock stays 0"; fi && \
-	$NODE moonlight-tizen/tools/patch-futex-wait.js build/widget/moonlight-wasm.js && \n	$NODE moonlight-tizen/tools/patch-embind-string.js build/widget/moonlight-wasm.js
+	$NODE moonlight-tizen/tools/patch-futex-wait.js build/widget/moonlight-wasm.js && \
+	$NODE moonlight-tizen/tools/patch-embind-string.js build/widget/moonlight-wasm.js
 RUN cp moonlight-tizen/res/icon.png build/widget/
 
 # A/B builds only: --build-arg REQUIRED_VERSION=9.0 declares another minimum Tizen version in config.xml (the module is

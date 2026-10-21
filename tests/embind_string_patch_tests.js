@@ -100,7 +100,8 @@ for (const [name, source] of [['original', SOURCE], ['patched', patched]]) {
 const docker = read('Dockerfile');
 const dockerignore = read('.dockerignore');
 assert(/COPY --chown=moonlight tools\/find-malloc-lock\.js tools\/patch-futex-wait\.js tools\/patch-embind-string\.js /.test(docker));
-assert(/\$NODE moonlight-tizen\/tools\/patch-embind-string\.js build\/widget\/moonlight-wasm\.js/.test(docker));
+assert(/patch-futex-wait\.js build\/widget\/moonlight-wasm\.js && \\\n\t\$NODE moonlight-tizen\/tools\/patch-embind-string\.js build\/widget\/moonlight-wasm\.js\n/.test(docker),
+  'it runs in the same RUN as the other patches, on its own line');
 assert(/^!tools\/patch-embind-string\.js$/m.test(dockerignore));
 
 console.log('embind_string_patch_tests: PASS');
