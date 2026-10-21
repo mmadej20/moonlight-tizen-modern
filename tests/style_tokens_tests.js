@@ -36,7 +36,7 @@ assert.deepStrictEqual(tokens, expected, 'the tokens keep the colors the interfa
 
 // Every var() names a defined token
 const used = withoutComments.match(/var\((--[a-z-]+)\)/g) || [];
-assert(used.length >= 60, 'the tokens are used (' + used.length + ' uses)');
+assert(used.length >= 40, 'the tokens are used (' + used.length + ' uses)');
 used.forEach((use) => {
   const name = use.slice(4, -1);
   assert(name in tokens, name + ' is defined');

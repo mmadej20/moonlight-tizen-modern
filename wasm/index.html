@@ -68,6 +68,7 @@
       </div>
       </section>
       <div id="settings-list" class="hide-container">
+        <div id="settings-body">
         <!-- Left Pane: Settings Categories -->
         <div id="settings-left-pane">
           <div class="settings-categories">
@@ -111,6 +112,7 @@
         </div>
         <!-- Right Pane: Settings Options -->
         <div id="settings-right-pane">
+          <h2 id="settings-title" class="ui-heading"></h2>
           <div id="basicSettings" class="settings-options">
             <div class="setting-option">
               <label data-i18n="Video resolution">Video resolution</label>
@@ -120,7 +122,7 @@
               <div id="videoResolutionMenu">
                 <button type="button" id="selectResolution" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="1280:720" data-i18n="1280 x 720 (720p)">1280 x 720 (720p)</button>
               </div>
-              <ul class="videoResolutionMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectResolution">
+              <ul class="videoResolutionMenu mdl-menu mdl-menu--bottom-right mdl-js-menu mdl-js-ripple-effect" for="selectResolution">
                 <li class="mdl-menu__item" data-value="854:480" data-i18n="854 x 480 (480p)">854 x 480 (480p)</li>
                 <li class="mdl-menu__item" data-value="1280:720" data-i18n="1280 x 720 (720p)">1280 x 720 (720p)</li>
                 <li class="mdl-menu__item" data-value="1920:1080" data-i18n="1920 x 1080 (1080p)">1920 x 1080 (1080p)</li>
@@ -136,7 +138,7 @@
               <div id="videoFramerateMenu">
                 <button type="button" id="selectFramerate" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="60" data-i18n="60 FPS">60 FPS</button>
               </div>
-              <ul class="videoFramerateMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectFramerate">
+              <ul class="videoFramerateMenu mdl-menu mdl-menu--bottom-right mdl-js-menu mdl-js-ripple-effect" for="selectFramerate">
                 <li class="mdl-menu__item" data-value="30" data-i18n="30 FPS">30 FPS</li>
                 <li class="mdl-menu__item" data-value="60" data-i18n="60 FPS">60 FPS</li>
               </ul>
@@ -149,7 +151,7 @@
               <div id="videoBitrateMenu">
                 <button type="button" id="selectBitrate" class="mdl-button mdl-js-button mdl-js-ripple-effect">10 Mbps</button>
               </div>
-              <div class="videoBitrateMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectBitrate">
+              <div class="videoBitrateMenu mdl-menu mdl-menu--bottom-right mdl-js-menu mdl-js-ripple-effect" for="selectBitrate">
                 <span id="bitrateLowestValue">0.5</span>
                 <input type="range" id="bitrateSlider" class="mdl-slider mdl-js-slider" min="0.5" max="150" step="0.5" value="10">
                 <span id="bitrateHighestValue">150</span>
@@ -179,7 +181,7 @@
               <div id="languageMenu">
                 <button type="button" id="selectLanguage" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="auto">Auto</button>
               </div>
-              <ul class="languageMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectLanguage"></ul>
+              <ul class="languageMenu mdl-menu mdl-menu--bottom-right mdl-js-menu mdl-js-ripple-effect" for="selectLanguage"></ul>
             </div>
             <div class="setting-option">
               <label data-i18n="Host address field mode">Host address field mode</label>
@@ -241,7 +243,7 @@
           <div id="inputSettings" class="settings-options">
             <div class="setting-option">
               <label data-i18n="Rumble feedback">Rumble feedback</label>
-              <span class="mdl-list__item-text-body"></span>
+              <span class="mdl-list__item-text-body" data-i18n="Allow gamepad rumble feedback support while streaming">Allow gamepad rumble feedback support while streaming</span>
               <div id="rumbleFeedbackMenu">
                 <label id="rumbleFeedbackBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="rumbleFeedbackSwitch">
                   <input type="checkbox" id="rumbleFeedbackSwitch" class="mdl-switch__input">
@@ -253,7 +255,7 @@
             </div>
             <div class="setting-option">
               <label data-i18n="Mouse emulation">Mouse emulation</label>
-              <span class="mdl-list__item-text-body"></span>
+              <span class="mdl-list__item-text-body" data-i18n="Allow gamepad to switch to mouse mode when holding the Start button">Allow gamepad to switch to mouse mode when holding the Start button</span>
               <div id="mouseEmulationMenu">
                 <label id="mouseEmulationBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="mouseEmulationSwitch">
                   <input type="checkbox" id="mouseEmulationSwitch" class="mdl-switch__input">
@@ -265,7 +267,7 @@
             </div>
             <div class="setting-option">
               <label data-i18n="Flip A/B face buttons">Flip A/B face buttons</label>
-              <span class="mdl-list__item-text-body"></span>
+              <span class="mdl-list__item-text-body" data-i18n="Swap A and B face buttons on the gamepad while streaming">Swap A and B face buttons on the gamepad while streaming</span>
               <div id="flipABfaceButtonsMenu">
                 <label id="flipABfaceButtonsBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="flipABfaceButtonsSwitch">
                   <input type="checkbox" id="flipABfaceButtonsSwitch" class="mdl-switch__input">
@@ -277,7 +279,7 @@
             </div>
             <div class="setting-option">
               <label data-i18n="Flip X/Y face buttons">Flip X/Y face buttons</label>
-              <span class="mdl-list__item-text-body"></span>
+              <span class="mdl-list__item-text-body" data-i18n="Swap X and Y face buttons on the gamepad while streaming">Swap X and Y face buttons on the gamepad while streaming</span>
               <div id="flipXYfaceButtonsMenu">
                 <label id="flipXYfaceButtonsBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="flipXYfaceButtonsSwitch">
                   <input type="checkbox" id="flipXYfaceButtonsSwitch" class="mdl-switch__input">
@@ -297,7 +299,7 @@
               <div id="audioBackendMenu">
                 <button type="button" id="selectAudioBackend" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="EMSS" data-i18n="EMSS">EMSS</button>
               </div>
-              <ul class="audioBackendMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectAudioBackend">
+              <ul class="audioBackendMenu mdl-menu mdl-menu--bottom-right mdl-js-menu mdl-js-ripple-effect" for="selectAudioBackend">
                 <li class="mdl-menu__item" data-value="EMSS" data-i18n="EMSS">EMSS</li>
                 <li class="mdl-menu__item" data-value="WebAudio" data-i18n="Web Audio">Web Audio</li>
                 <li class="mdl-menu__item" data-value="Disabled" data-i18n="Disabled">Disabled</li>
@@ -313,7 +315,7 @@
               <div id="audioConfigMenu">
                 <button type="button" id="selectAudio" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="Stereo" data-i18n="Stereo">Stereo</button>
               </div>
-              <ul class="audioConfigMenu mdl-menu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectAudio">
+              <ul class="audioConfigMenu mdl-menu mdl-menu mdl-menu--bottom-right mdl-js-menu mdl-js-ripple-effect" for="selectAudio">
                 <li class="mdl-menu__item" data-value="Stereo" data-i18n="Stereo">Stereo</li>
                 <li class="mdl-menu__item" data-value="51Surround" data-i18n="5.1 Surround Sound">5.1 Surround Sound</li>
                 <li class="mdl-menu__item" data-value="71Surround" data-i18n="7.1 Surround Sound">7.1 Surround Sound</li>
@@ -341,7 +343,7 @@
               <div id="audioJitterMenu">
                 <button type="button" id="selectAudioJitter" class="mdl-button mdl-js-button mdl-js-ripple-effect">100 ms</button>
               </div>
-              <div class="audioJitterMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectAudioJitter">
+              <div class="audioJitterMenu mdl-menu mdl-menu--bottom-right mdl-js-menu mdl-js-ripple-effect" for="selectAudioJitter">
                 <span id="jitterLowestValue">50</span>
                 <input type="range" id="jitterSlider" class="mdl-slider mdl-js-slider" min="50" max="500" step="25" value="100">
                 <span id="jitterHighestValue">500</span>
@@ -349,7 +351,7 @@
             </div>
             <div class="setting-option">
               <label data-i18n="Play audio on host">Play audio on host</label>
-              <span class="mdl-list__item-text-body"></span>
+              <span class="mdl-list__item-text-body" data-i18n="Allow playing audio from the computer and this device">Allow playing audio from the computer and this device</span>
               <div id="playHostAudioMenu">
                 <label id="playHostAudioBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="playHostAudioSwitch">
                   <input type="checkbox" id="playHostAudioSwitch" class="mdl-switch__input">
@@ -386,7 +388,7 @@
               <div id="videoCodecMenu">
                 <button type="button" id="selectCodec" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="H264" data-i18n="H.264">H.264</button>
               </div>
-              <ul class="videoCodecMenu mdl-menu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectCodec">
+              <ul class="videoCodecMenu mdl-menu mdl-menu mdl-menu--bottom-right mdl-js-menu mdl-js-ripple-effect" for="selectCodec">
                 <li id="h264" class="mdl-menu__item" data-value="H264" data-i18n="H.264">H.264</li>
                 <li id="hevc" class="mdl-menu__item" data-value="HEVC" data-i18n="HEVC">HEVC</li>
                 <li id="av1" class="mdl-menu__item" data-value="AV1" data-i18n="AV1">AV1</li>
@@ -468,7 +470,7 @@
             </div>
             <div class="setting-option">
               <label data-i18n="Connection warnings">Connection warnings</label>
-              <span class="mdl-list__item-text-body"></span>
+              <span class="mdl-list__item-text-body" data-i18n="Disable on-screen connection warning messages while streaming">Disable on-screen connection warning messages while streaming</span>
               <div id="connectionWarningsMenu">
                 <label id="disableWarningsBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="disableWarningsSwitch">
                   <input type="checkbox" id="disableWarningsSwitch" class="mdl-switch__input">
@@ -480,7 +482,7 @@
             </div>
             <div class="setting-option">
               <label data-i18n="Performance statistics">Performance statistics</label>
-              <span class="mdl-list__item-text-body"></span>
+              <span class="mdl-list__item-text-body" data-i18n="Display real-time stream performance information while streaming">Display real-time stream performance information while streaming</span>
               <div id="performanceStatsMenu">
                 <label id="performanceStatsBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="performanceStatsSwitch">
                   <input type="checkbox" id="performanceStatsSwitch" class="mdl-switch__input">
@@ -599,6 +601,11 @@
               </div>
             </div>
           </div>
+        </div>
+        </div>
+        <div id="settings-hints" class="ui-hints">
+          <span class="ui-hint"><span class="ui-glyph" aria-hidden="true">A</span><span data-i18n="Select">Select</span></span>
+          <span class="ui-hint"><span class="ui-glyph" aria-hidden="true">B</span><span data-i18n="Back">Back</span></span>
         </div>
       </div>
       <section id="apps-screen" style="display: none">

@@ -604,3 +604,604 @@ body {
     font: 500 32px/1.4 var(--ui-font);
     color: var(--ui-mute);
 }
+
+/* =============================
+   Settings: the categories on the left, the options of the chosen category on the right
+   The markup is the one of the old interface (the navigation looks for the controls by their order inside a row), so a
+   row is a grid: the title and the hint on the left, the control on the right. A row is highlighted as a whole.
+============================= */
+#settings-list {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 128px);
+    margin: 0;
+    box-sizing: border-box;
+}
+
+#settings-body {
+    display: flex;
+    flex: 1;
+    gap: 32px;
+    min-height: 0;
+    padding: 40px 96px 0;
+}
+
+#settings-left-pane {
+    flex: none;
+    width: 380px;
+    padding: 0;
+    overflow-y: auto;
+}
+
+.settings-categories {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 4px 24px;
+}
+
+.settings-category {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    min-height: 68px;
+    margin: 0;
+    padding: 12px 24px;
+    box-sizing: border-box;
+    border-radius: 22px;
+    border: 2px solid transparent;
+    background: transparent;
+    color: var(--ui-mute);
+    font: 600 28px/1.1 var(--ui-font);
+    cursor: pointer;
+}
+
+.settings-category .settings-category-icons {
+    margin: 0;
+    font-size: 32px;
+    color: inherit;
+}
+
+.settings-category label {
+    position: static;
+    margin: 0;
+    font: inherit;
+    letter-spacing: 0;
+    color: inherit;
+    cursor: pointer;
+}
+
+.settings-category.selected {
+    background: var(--ui-surface-raised);
+    border-color: var(--ui-line);
+    color: var(--ui-text);
+    transform: none;
+    box-shadow: none;
+}
+
+.settings-category.selected .settings-category-icons {
+    color: var(--ui-moon);
+}
+
+.settings-category.hovered, .settings-category:hover, .settings-category:focus,
+.settings-category.selected:hover, .settings-category.selected:focus {
+    background: var(--ui-surface-raised);
+    border-color: var(--ui-moon);
+    color: var(--ui-text);
+    transform: none;
+    box-shadow: none;
+    outline: none;
+}
+
+#settings-right-pane {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+#settings-title {
+    flex: none;
+    margin: 0 8px 20px;
+    font: 700 48px/1.05 var(--ui-font-display);
+    letter-spacing: -0.01em;
+    color: var(--ui-text);
+}
+
+/* The options of a category scroll inside the pane: the title stays. The room around is for the outline of a row */
+.settings-options {
+    display: none;
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 4px 8px 32px;
+    overflow-y: auto;
+}
+
+.setting-option {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 32px;
+    row-gap: 6px;
+    min-height: 96px;
+    margin: 0 0 12px;
+    padding: 20px 28px;
+    box-sizing: border-box;
+    border-radius: 24px;
+    border: 2px solid transparent;
+    background: var(--ui-surface);
+}
+
+.setting-option:has(.hovered, :focus, .is-focused) {
+    background: var(--ui-surface-raised);
+    border-color: var(--ui-moon);
+}
+
+.setting-option > label {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0;
+    font: 600 28px/1.15 var(--ui-font);
+    letter-spacing: 0;
+    color: var(--ui-text);
+}
+
+.setting-option > .mdl-list__item-text-body {
+    grid-column: 1;
+    grid-row: 2;
+    display: block;
+    margin: 0;
+    font: 500 22px/1.3 var(--ui-font);
+    letter-spacing: 0;
+    color: var(--ui-mute);
+}
+
+.setting-option > .mdl-list__item-text-body:empty {
+    display: none;
+}
+
+.setting-option > div[id$="Menu"] {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+}
+
+.setting-option .badge {
+    margin: 0;
+    padding: 0 12px;
+    height: 32px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--ui-bg);
+    color: var(--ui-warn);
+    font: 600 20px/32px var(--ui-font);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* A field that opens a menu: the value and a chevron */
+.setting-option .mdl-button[id^="select"] {
+    display: block;
+    width: 420px;
+    height: 56px;
+    min-width: 0;
+    padding: 0 56px 0 20px;
+    box-sizing: border-box;
+    border-radius: 16px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-bg) url('../res/ic_arrow_drop_down_48px.svg') right 12px center / 36px no-repeat;
+    color: var(--ui-text);
+    font: 600 26px/52px var(--ui-font);
+    letter-spacing: 0;
+    text-align: left;
+    text-indent: 0;
+    text-transform: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A button that does something */
+.setting-option #removeAllHostsBtn, .setting-option #navigationGuideBtn,
+.setting-option #checkUpdatesBtn, .setting-option #restartAppBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    width: auto;
+    max-width: 680px;
+    height: auto;
+    min-height: 56px;
+    padding: 10px 24px;
+    box-sizing: border-box;
+    border-radius: 16px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 24px/1.2 var(--ui-font);
+    letter-spacing: 0;
+    text-align: center;
+    text-indent: 0;
+    text-transform: none;
+    white-space: normal;
+}
+
+.setting-option #removeAllHostsBtn {
+    color: var(--ui-bad);
+    border-color: var(--ui-bad);
+}
+
+.setting-option #removeAllHostsIcon, .setting-option #navigationGuideIcon,
+.setting-option #checkUpdatesIcon, .setting-option #restartApplicationIcon {
+    order: -1;
+    float: none;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    filter: none;
+}
+
+/* The information about the system is a panel under the title, not a field at the right */
+.setting-option > #systemInfoMenu {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    margin-top: 12px;
+}
+
+.setting-option #systemInfoBtn {
+    display: block;
+    width: 100%;
+    height: auto;
+    padding: 18px 28px;
+    box-sizing: border-box;
+    border-radius: 16px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-bg);
+    color: var(--ui-mute);
+    font: 500 22px/1.4 var(--ui-font);
+    letter-spacing: 0;
+    text-align: left;
+    text-transform: none;
+    white-space: pre-line;
+}
+
+.setting-option .mdl-button.hovered, .setting-option .mdl-button:hover, .setting-option .mdl-button:focus {
+    border-color: var(--ui-moon);
+    outline: none;
+}
+
+.setting-option #removeAllHostsBtn.hovered, .setting-option #removeAllHostsBtn:hover, .setting-option #removeAllHostsBtn:focus {
+    border-color: var(--ui-bad);
+}
+
+/* A switch: a track and a thumb, the thumb moves with a transform. The sentence that was beside it is the hint of the row
+   now (a row that had no hint shows it there), so here it is only for the screen reader */
+.setting-option .mdl-switch {
+    display: block;
+    width: 96px;
+    height: 56px;
+    margin: 0;
+    padding: 0;
+}
+
+.setting-option > div[id$="Menu"] .mdl-switch__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+.settings-options .mdl-switch__track {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 96px;
+    height: 56px;
+    margin: 0;
+    border-radius: 28px;
+    background: var(--ui-line);
+    transition: background-color 0.2s var(--ui-ease);
+}
+
+.settings-options .mdl-switch__thumb {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    border-radius: 50%;
+    background: var(--ui-text);
+    box-shadow: none;
+    transition: transform 0.2s var(--ui-ease), background-color 0.2s var(--ui-ease);
+}
+
+.settings-options .mdl-switch.is-checked .mdl-switch__track {
+    background: var(--ui-moon);
+    box-shadow: none;
+}
+
+.settings-options .mdl-switch.is-checked .mdl-switch__thumb {
+    left: 6px;
+    transform: translateX(40px);
+    background: var(--ui-ink);
+}
+
+.settings-options .mdl-switch__focus-helper, .settings-options .mdl-switch__ripple-container {
+    display: none;
+}
+
+.settings-options .mdl-switch.hovered, .settings-options .mdl-switch.is-focused, .settings-options .mdl-switch.is-disabled {
+    background: none;
+    box-shadow: none;
+}
+
+.settings-options .mdl-switch.is-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* The menu of a field opens under its row, at the right edge, where the fields are. MDL sets the place and the size of the
+   container itself, so what it sets is replaced here: the width of the container, and the side that it is aligned to */
+.setting-option .mdl-menu__container {
+    top: calc(100% - 8px) !important;
+    right: 28px !important;
+    left: auto !important;
+    width: 520px !important;
+    height: auto !important;
+}
+
+.setting-option .mdl-menu__container:has(.mdl-slider) {
+    width: 760px !important;
+}
+
+.setting-option .mdl-menu__outline {
+    width: 100% !important;
+    border-radius: 20px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-surface-raised);
+    box-shadow: none;
+    box-sizing: border-box;
+}
+
+.setting-option .mdl-menu {
+    width: 100% !important;
+    padding: 8px 0;
+}
+
+.setting-option .mdl-menu__item {
+    height: 56px;
+    padding: 0 28px;
+    color: var(--ui-text);
+    font: 600 24px/56px var(--ui-font);
+    letter-spacing: 0;
+    text-indent: 0;
+    text-align: left;
+}
+
+.setting-option .mdl-menu__item.hovered, .setting-option .mdl-menu__item:hover, .setting-option .mdl-menu__item:focus {
+    background: var(--ui-moon-wash);
+    color: var(--ui-moon);
+}
+
+.setting-option .mdl-menu__item[disabled] {
+    opacity: 0.4;
+}
+
+/* The menus of a slider: the lowest value, the slider and the highest value */
+.setting-option .mdl-menu.videoBitrateMenu, .setting-option .mdl-menu.audioJitterMenu {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    height: 96px;
+    padding: 0 28px;
+    box-sizing: border-box;
+}
+
+#bitrateLowestValue, #bitrateHighestValue, #jitterLowestValue, #jitterHighestValue {
+    margin: 0;
+    color: var(--ui-mute);
+    font: 600 22px/1 var(--ui-font);
+}
+
+#bitrateLowestValue.hovered, #bitrateHighestValue.hovered, #jitterLowestValue.hovered, #jitterHighestValue.hovered {
+    background: none;
+}
+
+.setting-option .mdl-slider__container {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    height: 32px;
+}
+
+.setting-option .mdl-slider {
+    width: 100%;
+}
+
+.setting-option .mdl-slider__background-flex {
+    top: 50%;
+    height: 12px;
+    margin-top: -6px;
+    border-radius: 6px;
+}
+
+.setting-option .mdl-slider__background-lower {
+    background: var(--ui-moon);
+}
+
+.setting-option .mdl-slider__background-upper {
+    background: var(--ui-line);
+}
+
+.setting-option .mdl-slider::-webkit-slider-thumb {
+    background: var(--ui-moon);
+}
+
+/* Logs: a panel with its own controls, not a row with one control */
+.setting-option.diagnostic-panel {
+    display: block;
+}
+
+.diagnostic-panel > label {
+    margin-bottom: 6px;
+}
+
+.diagnostic-controls, .diagnostic-destination {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 12px 16px;
+    align-items: center;
+    margin-top: 16px;
+}
+
+.diagnostic-controls > label, .diagnostic-destination > label {
+    font: 600 24px/1.2 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+.diagnostic-input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 56px;
+    padding: 0 20px;
+    border-radius: 16px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 24px/1 var(--ui-font);
+}
+
+.diagnostic-input:focus, #diagnosticLogViewport:focus, #sendDiagnosticLogsBtn:focus, #clearDiagnosticLogsBtn:focus,
+.diagnostic-session-button:focus {
+    outline: none;
+    border-color: var(--ui-moon);
+    box-shadow: none;
+}
+
+.diagnostic-session-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.diagnostic-session-button {
+    flex: 1;
+    min-height: 56px;
+    padding: 0 20px;
+    border-radius: 16px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-bg);
+    color: var(--ui-mute);
+    font: 600 24px/1 var(--ui-font);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.diagnostic-session-button.selected {
+    background: var(--ui-moon);
+    border-color: var(--ui-moon);
+    color: var(--ui-ink);
+}
+
+#diagnosticSummary {
+    grid-column: 1 / -1;
+    color: var(--ui-mute);
+    font: 500 22px/1.3 var(--ui-font);
+}
+
+#diagnosticLogViewport {
+    grid-column: 1 / -1;
+    box-sizing: border-box;
+    width: 100%;
+    height: 340px;
+    margin: 0;
+    padding: 16px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--ui-text);
+    background: var(--ui-bg);
+    border: 2px solid var(--ui-line);
+    border-radius: 16px;
+    font: 18px/1.4 monospace;
+}
+
+.diagnostic-toggle {
+    margin-top: 16px;
+}
+
+.diagnostic-toggle .mdl-switch {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 56px;
+}
+
+.diagnostic-toggle .mdl-switch__label {
+    left: 0;
+    margin: 0;
+    padding: 0;
+    color: var(--ui-text);
+    font: 600 26px/1.15 var(--ui-font);
+    letter-spacing: 0;
+}
+
+.diagnostic-toggle .mdl-switch__track {
+    left: auto;
+    right: 0;
+}
+
+.diagnostic-toggle .mdl-switch__thumb, .diagnostic-toggle .mdl-switch.is-checked .mdl-switch__thumb {
+    left: calc(100% - 90px);
+}
+
+.diagnostic-toggle > .mdl-list__item-text-body {
+    display: block;
+    margin-top: 6px;
+    font: 500 22px/1.3 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+.diagnostic-actions {
+    display: flex;
+    gap: 16px;
+    margin-top: 16px;
+}
+
+#sendDiagnosticLogsBtn, #clearDiagnosticLogsBtn {
+    flex: 1;
+    min-height: 56px;
+    border-radius: 16px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 24px/1 var(--ui-font);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.diagnostic-status {
+    min-height: 28px;
+    margin-top: 12px;
+    color: var(--ui-ok);
+    font: 500 22px/1.3 var(--ui-font);
+}
+
+.diagnostic-error {
+    color: var(--ui-bad);
+}
+
+#settings-hints {
+    padding: 16px 96px 56px;
+}

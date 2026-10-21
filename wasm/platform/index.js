@@ -1764,6 +1764,8 @@ function showSettingsMode() {
   $('#main-content').removeClass('fullscreen');
   $('#listener').removeClass('fullscreen');
 
+  tidySettingHints();
+  updateSettingsTitle();
   stopPollingHosts();
   Navigation.start();
   // Register showSettingsMode to re-run every time the language changes
@@ -1802,6 +1804,23 @@ function showSettings() {
     Navigation.push(Views.Settings);
     showSettingsMode();
   }, 500);
+}
+
+// The title above the options is the name of the chosen category
+function updateSettingsTitle() {
+  const selected = document.querySelector('.settings-category.selected label');
+  document.getElementById('settings-title').textContent = selected ? selected.textContent : '';
+}
+
+// The hints of the options are written as "- text" in the strings, and the new interface shows the text without the dash
+function tidySettingHints() {
+  document.querySelectorAll('.settings-options .mdl-list__item-text-body').forEach(function(hint) {
+    const text = hint.textContent;
+    const tidy = text.replace(/^\s*-\s+/, '').trim();
+    if (tidy !== text) {
+      hint.textContent = tidy;
+    }
+  });
 }
 
 // Reset the current settings view by clearing the selection and hiding the right pane
@@ -1846,6 +1865,7 @@ function handleSettingsView(category) {
   if (selectedCategory) {
     // Mark the category as selected
     selectedCategory.classList.add('selected');
+    updateSettingsTitle();
   } else {
     // Otherwise, exit early
     return;
