@@ -22,6 +22,7 @@ const expectedJavaScriptSuites = [
   'tests/diag_dlmalloc_patch_tests.js',
   'tests/diagnostic_log_manager_tests.js',
   'tests/diagnostic_logs_js_tests.js',
+  'tests/embind_string_patch_tests.js',
   'tests/find_malloc_lock_tests.js',
   'tests/futex_guard_tests.js',
   'tests/futex_guard_wiring_tests.js',

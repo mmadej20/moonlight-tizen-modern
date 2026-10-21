@@ -11,6 +11,7 @@ moonlight-tv-logs
 tools/*
 !tools/find-malloc-lock.js
 !tools/patch-futex-wait.js
+!tools/patch-embind-string.js
 !tools/patch-diag-dlmalloc.js
 docs
 tests

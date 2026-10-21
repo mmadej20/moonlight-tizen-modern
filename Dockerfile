@@ -164,7 +164,7 @@ RUN cmake --install build --prefix build
 # wasm/platform/futex_guard.js. Both steps fail the build when the module or the loop does not look as expected, so that
 # a toolchain update cannot drop the protection unnoticed. They run on the Node that ships with the Emscripten SDK.
 # The tools are copied here, after the build, so that changing them does not invalidate the compiled module.
-COPY --chown=moonlight tools/find-malloc-lock.js tools/patch-futex-wait.js ./moonlight-tizen/tools/
+COPY --chown=moonlight tools/find-malloc-lock.js tools/patch-futex-wait.js tools/patch-embind-string.js ./moonlight-tizen/tools/
 # The guard is off by default until it has been checked on a TV: the address of the lock stays 0, which makes the guard
 # do nothing (and lets a freeze be observed as it is). --build-arg LOCK_GUARD=on writes the real address.
 ARG LOCK_GUARD=off
@@ -172,7 +172,7 @@ RUN NODE=/home/moonlight/emscripten-release-bundle/emsdk/node/12.9.1_64bit/bin/n
 	/home/moonlight/emscripten-release-bundle/emsdk/fastcomp/bin/wasm-dis build/widget/moonlight-wasm.wasm -o build/module.wat && \
 	if [ "$LOCK_GUARD" = "on" ]; then $NODE moonlight-tizen/tools/find-malloc-lock.js build/module.wat build/widget/platform/malloc_lock.js; \
 	else echo "Lock guard off: the address of the allocator lock stays 0"; fi && \
-	$NODE moonlight-tizen/tools/patch-futex-wait.js build/widget/moonlight-wasm.js
+	$NODE moonlight-tizen/tools/patch-futex-wait.js build/widget/moonlight-wasm.js && \n	$NODE moonlight-tizen/tools/patch-embind-string.js build/widget/moonlight-wasm.js
 RUN cp moonlight-tizen/res/icon.png build/widget/
 
 # A/B builds only: --build-arg REQUIRED_VERSION=9.0 declares another minimum Tizen version in config.xml (the module is

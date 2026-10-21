@@ -32,7 +32,7 @@ assert(/function describeFutexGuard\(\) \{\s+return window\.futexGuard \? window
 
 // The Docker build finds the lock in the linked module and patches the wait loop, after the install step that copies
 // the stub, and fails when either does not work
-assert(/COPY --chown=moonlight tools\/find-malloc-lock\.js tools\/patch-futex-wait\.js \.\/moonlight-tizen\/tools\//.test(dockerfile));
+assert(/COPY --chown=moonlight tools\/find-malloc-lock\.js tools\/patch-futex-wait\.js tools\/patch-embind-string\.js \.\/moonlight-tizen\/tools\//.test(dockerfile));
 const install = dockerfile.indexOf('RUN cmake --install build --prefix build');
 const find = dockerfile.indexOf('find-malloc-lock.js build/module.wat build/widget/platform/malloc_lock.js');
 const patch = dockerfile.indexOf('patch-futex-wait.js build/widget/moonlight-wasm.js');
