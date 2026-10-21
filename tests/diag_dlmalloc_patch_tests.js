@@ -64,6 +64,12 @@ assert.strictEqual(patched, PRELUDE + expected + APPENDIX);
 // The checks of dlmalloc for DEBUG builds are on, and every 16th entry validates the whole state under the lock
 assert(/#define DEBUG 1/.test(PRELUDE));
 assert(/#define DIAG_CHECK_EVERY 16/.test(PRELUDE));
+// A failing validation runs once more after a barrier and says whether the second pass passed; the lock is surrounded by barriers
+assert(/diag_phase = 1;\s+do_check_malloc_state\(gm\);\s+diag_phase = 0;/.test(APPENDIX));
+assert(/diag_recheck\(\);\s+EM_ASM_\(\{ console\.error\("dlmalloc: the second pass PASSED/.test(PRELUDE));
+assert(/the second pass failed too/.test(PRELUDE));
+assert(/__atomic_fetch_add\(&diag_barrier_word, 0, __ATOMIC_SEQ_CST\)/.test(PRELUDE));
+assert(/if \(DIAG_FENCES\) \{\s+diag_barrier\(\);\s+\}\s+\{\s+int me|if \(DIAG_FENCES\) \{\s+diag_barrier\(\);\s+\}\s+int me/.test(PRELUDE));
 // The state is copied when the lock is released and compared when it is taken, except for the lock itself
 assert(/static int diag_release\(pthread_mutex_t\* lk\) \{\s+int me = \(int\)\(intptr_t\)pthread_self\(\);\s+diag_snapshot\(\);/.test(PRELUDE));
 assert(/diag_verify\(line\);\s+if \(number % DIAG_CHECK_EVERY == 0\)/.test(PRELUDE));
@@ -74,7 +80,7 @@ assert(/int kind; unsigned int arg;/.test(PRELUDE));
 assert.throws(() => patch(source.replace('void dlfree(void* mem) {', 'void dlfree2(void* mem) {')), /exactly one/);
 assert(/if \(number % DIAG_CHECK_EVERY == 0\) \{\s+diag_periodic_check\(\);/.test(PRELUDE));
 assert(/static void diag_periodic_check\(void\);/.test(PRELUDE), 'declared before the original, which does not call it but the entry does');
-assert(/static void diag_periodic_check\(void\) \{\s+do_check_malloc_state\(gm\);/.test(APPENDIX), 'defined after the original, which has the state');
+assert(/static void diag_periodic_check\(void\) \{\s+diag_phase = 1;\s+do_check_malloc_state\(gm\);/.test(APPENDIX), 'defined after the original, which has the state');
 assert(patched.endsWith(APPENDIX));
 
 // The entries are told when a check fails; the JavaScript of that dump has no bare comma, which would split the arguments of EM_ASM_

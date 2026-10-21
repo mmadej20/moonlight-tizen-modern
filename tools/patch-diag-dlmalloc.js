@@ -3,12 +3,15 @@
 // The dlmalloc of the Emscripten release build defines ABORT as __builtin_unreachable(), so every check that finds a
 // damaged heap (a free of a block that is not in use, a next chunk that does not agree with this one, an address outside
 // of the heap) is dead code for the compiler, and a damaged heap goes on until something far away traps. The copy made
-// here keeps the algorithm and the lock of the original and changes four things (a bare comma in the JavaScript of an
+// here keeps the algorithm and the lock of the original and changes five things (a bare comma in the JavaScript of an
 // EM_ASM_ would split the macro arguments, so the code below declares one variable per statement):
 //   - a failed check stops the thread (a wasm trap, which the watcher of tools/tv-debug catches with the stack) and
 //     tells the line of the check on the console;
 //   - the lock of the main allocator state records its owner, and a thread that gets the lock while another one is
 //     recorded as inside, or releases a lock that another one is recorded to own, says so on the console;
+//   - when the validation of the whole state finds it damaged, it runs once more after a barrier and says whether the
+//     second pass passed (the damage was only seen by the first) or failed too, and the lock is taken and released with
+//     a full barrier (DIAG_FENCES), to find out whether a freeze needs those;
 //   - the state of the allocator is copied when its lock is released and compared when the lock is taken again (the lock
 //     itself left out), so that a write to the state by anything that does not hold the lock is caught at the next entry;
 //   - the checks of dlmalloc for DEBUG builds are on, and every 16th entry into the allocator, under its lock, validates
@@ -36,9 +39,32 @@ var PRELUDE = [
   'static diag_entry diag_ring[DIAG_RING];',
   'static unsigned int diag_seq;',
   'static void diag_periodic_check(void);',
+  'static void diag_recheck(void);',
+  'static int diag_phase;',
+  'static int diag_barrier_word;',
+  '#ifndef DIAG_FENCES',
+  '#define DIAG_FENCES 1',
+  '#endif',
+  '/* An atomic read-modify-write is a full barrier in WebAssembly threads. */',
+  'static void diag_barrier(void) {',
+  '  __atomic_fetch_add(&diag_barrier_word, 0, __ATOMIC_SEQ_CST);',
+  '}',
   'static void diag_snapshot(void);',
   'static void diag_verify(int line);',
   'static void diag_dlmalloc_abort(int line) {',
+  '  if (diag_phase == 1) {',
+  '    int first = line;',
+  '    int k;',
+  '    diag_phase = 2;',
+  '    for (k = 0; k < 20000; k++) {',
+  '      diag_barrier();',
+  '    }',
+  '    EM_ASM_({ console.error("dlmalloc: the check failed at line " + $0 + ", running the whole check a second time"); }, line);',
+  '    diag_recheck();',
+  '    EM_ASM_({ console.error("dlmalloc: the second pass PASSED, so only the first pass saw the state damaged (line " + $0 + ")"); }, first);',
+  '  } else if (diag_phase == 2) {',
+  '    EM_ASM_({ console.error("dlmalloc: the second pass failed too, at line " + $0 + ", so the damage is there"); }, line);',
+  '  }',
   '  EM_ASM_({ console.error("dlmalloc: a check failed at line " + $0 + " of the diagnostic copy, thread " + $1); },',
   '           line, (int)(intptr_t)pthread_self());',
   '  EM_ASM_({',
@@ -62,6 +88,9 @@ var PRELUDE = [
   'static int diag_acquire(pthread_mutex_t* lk, int line, int kind, unsigned int arg) {',
   '  int r = pthread_mutex_lock(lk);',
   '  if (r == 0) {',
+  '    if (DIAG_FENCES) {',
+  '      diag_barrier();',
+  '    }',
   '    int me = (int)(intptr_t)pthread_self();',
   '    int previous = __atomic_exchange_n(&diag_owner, me, __ATOMIC_SEQ_CST);',
   '    if (previous != 0) {',
@@ -86,6 +115,9 @@ var PRELUDE = [
   'static int diag_release(pthread_mutex_t* lk) {',
   '  int me = (int)(intptr_t)pthread_self();',
   '  diag_snapshot();',
+  '  if (DIAG_FENCES) {',
+  '    diag_barrier();',
+  '  }',
   '  int previous = __atomic_exchange_n(&diag_owner, 0, __ATOMIC_SEQ_CST);',
   '  if (previous != me) {',
   '    EM_ASM_({ console.error("dlmalloc: thread " + $0 + " releases the lock that thread " + $1 + " is recorded to own"); },',
@@ -124,6 +156,11 @@ var APPENDIX = [
   '',
   '/* Added by tools/patch-diag-dlmalloc.js: validates every chunk, bin and tree; runs under the lock of the allocator. */',
   'static void diag_periodic_check(void) {',
+  '  diag_phase = 1;',
+  '  do_check_malloc_state(gm);',
+  '  diag_phase = 0;',
+  '}',
+  'static void diag_recheck(void) {',
   '  do_check_malloc_state(gm);',
   '}',
   '',
