@@ -6,9 +6,9 @@
 // terminator) has no zero at the end. That byte is outside of the buffer, and nothing holds the lock of the allocator while
 // it is written: when the length of the string is a multiple of 8, it is the lowest byte of the head of the next chunk of
 // the heap, so a malloc or free of another thread that changes that head in between has its change overwritten by the old
-// byte. The heap is then damaged, and the next free that looks at the head crashes with the lock of the allocator taken
-// (docs/2026-10-18-stream-hang-investigation.md, section 20). UTF8ToString of this Emscripten takes the number of bytes to
-// read, so the terminator is not needed.
+// byte. The heap is then damaged, and the next free that looks at the head crashes with the lock of the allocator taken,
+// which freezes the whole application. UTF8ToString of this Emscripten takes the number of bytes to read, so the
+// terminator is not needed.
 //
 // Usage: node tools/patch-embind-string.js <moonlight-wasm.js>
 // Runs on the Node 12 that ships with the Emscripten SDK, so it sticks to old syntax.

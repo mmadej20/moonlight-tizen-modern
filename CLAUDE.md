@@ -13,8 +13,9 @@ This repository is developed in one checkout on one long-lived branch, `main`.
 
 ## Working with upstream
 
-`upstream` is `brightcraft/moonlight-tizen`. Follow `docs/upstream-sync.md` to merge it, and keep its table of
-intentional differences current when a merge changes one.
+`upstream` is `brightcraft/moonlight-tizen`. Merge it on a normal short-lived branch and keep the behavior that this fork
+changes on purpose. The old notes on merging and the table of intentional differences are on the local branch
+`local/docs-archive` (not pushed): `git show local/docs-archive:docs/upstream-sync.md`.
 
 ## Tests
 

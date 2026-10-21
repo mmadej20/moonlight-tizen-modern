@@ -4,7 +4,7 @@
 // compare-exchange call has the wrong signature: asm2wasm warns "adding operands in call to
 // ___atomic_compare_exchange_8". A thread that loops on `std::atomic<int64_t>::compare_exchange_*`
 // then spins forever. It froze the connection thread at its first status message and left the
-// application on "Starting <game>..." for good (see docs/2026-10-18-stream-hang-investigation.md).
+// application on "Starting <game>..." for good.
 // 32-bit atomics compile to real wasm instructions, so everything shared between threads stays 32 bits wide.
 
 const assert = require('assert');

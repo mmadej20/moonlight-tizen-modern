@@ -10,7 +10,6 @@ build/
 moonlight-tv-logs
 tools/*
 !tools/patch-embind-string.js
-docs
 tests
 artifacts
 node_modules

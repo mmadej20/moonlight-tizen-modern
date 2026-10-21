@@ -1,9 +1,9 @@
 # TV debugging tools
 
-Small scripts for working with a real TV. The tooling that was used to hunt the freeze described in
-`docs/2026-10-18-stream-hang-investigation.md` (the DevTools forensics watcher, the heap walker, the allocator stress
-test and the diagnostic dlmalloc, the video packet canary, the QoS throttle scripts) is not on `main` any more. It lives
-on the branch `diagnostics/freeze-hunt`, which also has the tests for it and the notes on how to use it.
+Small scripts for working with a real TV. The tooling that was used to hunt a freeze of the stream (the DevTools
+forensics watcher, the heap walker, the allocator stress test and the diagnostic dlmalloc, the video packet canary, the
+QoS throttle scripts) is not on `main` any more. It lives on the branch `diagnostics/freeze-hunt`, which also has the
+tests for it and the notes on how to use it.
 
 ## Getting a debug session
 

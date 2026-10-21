@@ -4,7 +4,7 @@
 >
 > **This is a fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen) maintained for one specific TV: the Samsung UE43CU7172U (UE43CU7172UXXH, Tizen 9).**
 >
-> Everything here is built and tested only on that model, streaming from a Sunshine/Apollo host. It is not an official release and it differs from upstream in several places (see [docs/upstream-sync.md](docs/upstream-sync.md)); for any other TV, use upstream. Fixes that are not specific to this TV will be sent to upstream as pull request.
+> Everything here is built and tested only on that model, streaming from a Sunshine/Apollo host. It is not an official release and it differs from upstream in several places; for any other TV, use upstream. Fixes that are not specific to this TV will be sent to upstream as pull request.
 >
 > The badges below belong to the upstream project.
 
@@ -128,5 +128,3 @@ This project is made possible thanks to the people who dedicate their time, know
 ## Local TV fixes
 
 This fork integrates upstream v1.16.0 while retaining the Tizen 9 media startup, audio synchronization, frame timing, cancellable operations, and diagnostic logging fixes. EMSS remains the default audio backend; Web Audio is optional. Experimental RFI recovery remains disabled by default. The compatibility build uses jQuery 2.2.0 and Samsung Emscripten 1.39.4.7.
-
-See [diagnostic logs](docs/diagnostic-logs.md) and the [integration plan](docs/superpowers/plans/2026-09-06-upstream-merge-and-pairing.md).
