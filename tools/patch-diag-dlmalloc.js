@@ -3,12 +3,14 @@
 // The dlmalloc of the Emscripten release build defines ABORT as __builtin_unreachable(), so every check that finds a
 // damaged heap (a free of a block that is not in use, a next chunk that does not agree with this one, an address outside
 // of the heap) is dead code for the compiler, and a damaged heap goes on until something far away traps. The copy made
-// here keeps the algorithm and the lock of the original and changes three things (a bare comma in the JavaScript of an
+// here keeps the algorithm and the lock of the original and changes four things (a bare comma in the JavaScript of an
 // EM_ASM_ would split the macro arguments, so the code below declares one variable per statement):
 //   - a failed check stops the thread (a wasm trap, which the watcher of tools/tv-debug catches with the stack) and
 //     tells the line of the check on the console;
 //   - the lock of the main allocator state records its owner, and a thread that gets the lock while another one is
 //     recorded as inside, or releases a lock that another one is recorded to own, says so on the console;
+//   - the state of the allocator is copied when its lock is released and compared when the lock is taken again (the lock
+//     itself left out), so that a write to the state by anything that does not hold the lock is caught at the next entry;
 //   - the checks of dlmalloc for DEBUG builds are on, and every 16th entry into the allocator, under its lock, validates
 //     the whole state (every chunk of the heap, the bins, the trees). The first entry that finds the state damaged stops
 //     the thread and tells the last 64 entries (number, thread, line of the entry in dlmalloc, and for malloc and free the size or pointer), so that the operation that
@@ -34,6 +36,8 @@ var PRELUDE = [
   'static diag_entry diag_ring[DIAG_RING];',
   'static unsigned int diag_seq;',
   'static void diag_periodic_check(void);',
+  'static void diag_snapshot(void);',
+  'static void diag_verify(int line);',
   'static void diag_dlmalloc_abort(int line) {',
   '  EM_ASM_({ console.error("dlmalloc: a check failed at line " + $0 + " of the diagnostic copy, thread " + $1); },',
   '           line, (int)(intptr_t)pthread_self());',
@@ -71,6 +75,7 @@ var PRELUDE = [
   '      diag_ring[number % DIAG_RING].line = line;',
   '      diag_ring[number % DIAG_RING].kind = kind;',
   '      diag_ring[number % DIAG_RING].arg = arg;',
+  '      diag_verify(line);',
   '      if (number % DIAG_CHECK_EVERY == 0) {',
   '        diag_periodic_check();',
   '      }',
@@ -80,6 +85,7 @@ var PRELUDE = [
   '}',
   'static int diag_release(pthread_mutex_t* lk) {',
   '  int me = (int)(intptr_t)pthread_self();',
+  '  diag_snapshot();',
   '  int previous = __atomic_exchange_n(&diag_owner, 0, __ATOMIC_SEQ_CST);',
   '  if (previous != me) {',
   '    EM_ASM_({ console.error("dlmalloc: thread " + $0 + " releases the lock that thread " + $1 + " is recorded to own"); },',
@@ -119,6 +125,34 @@ var APPENDIX = [
   '/* Added by tools/patch-diag-dlmalloc.js: validates every chunk, bin and tree; runs under the lock of the allocator. */',
   'static void diag_periodic_check(void) {',
   '  do_check_malloc_state(gm);',
+  '}',
+  '',
+  '/* The state of the allocator is copied when the lock is released and compared when it is taken, except for the lock itself:',
+  '   anything that changed it in between did it without the lock. */',
+  'static unsigned char diag_snap[sizeof(struct malloc_state)];',
+  'static int diag_snap_valid;',
+  'static void diag_snapshot(void) {',
+  '  memcpy(diag_snap, (void*)gm, sizeof(struct malloc_state));',
+  '  diag_snap_valid = 1;',
+  '}',
+  'static void diag_verify(int line) {',
+  '  const size_t lock_at = offsetof(struct malloc_state, mutex);',
+  '  const size_t lock_end = lock_at + sizeof(((struct malloc_state*)0)->mutex);',
+  '  const unsigned char* now = (const unsigned char*)gm;',
+  '  size_t i;',
+  '  if (!diag_snap_valid) {',
+  '    return;',
+  '  }',
+  '  for (i = 0; i < sizeof(struct malloc_state); i++) {',
+  '    if (i >= lock_at && i < lock_end) {',
+  '      continue;',
+  '    }',
+  '    if (diag_snap[i] != now[i]) {',
+  '      EM_ASM_({ console.error("dlmalloc: the state of the allocator changed while nobody was inside it: byte " + $0 + " was " + $1 + " and is " + $2 + ", entry at line " + $3); },',
+  '               (int)i, (int)diag_snap[i], (int)now[i], line);',
+  '      diag_dlmalloc_abort(-1);',
+  '    }',
+  '  }',
   '}',
   ''
 ].join('\n');

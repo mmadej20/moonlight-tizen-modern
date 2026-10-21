@@ -205,7 +205,7 @@ function onEvent(message) {
       const text = p.args.map(argText).join(' ');
       const quiet = /No error|Failed to sample gamepad|setsockopt\(/.test(text);
       const important = !quiet && (p.type === 'error' || p.type === 'warning' || p.type === 'assert' || /abort|exception|crash/i.test(text));
-      log('[' + where + '] console.' + p.type + ' ' + text.replace(/\s+/g, ' ').slice(0, 600), important);
+      log('[' + where + '] console.' + p.type + ' ' + text.replace(/\s+/g, ' ').slice(0, /^dlmalloc:/.test(text) ? 6000 : 600), important);
       break;
     }
     case 'Runtime.exceptionThrown': {

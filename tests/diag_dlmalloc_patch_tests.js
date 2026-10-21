@@ -64,6 +64,11 @@ assert.strictEqual(patched, PRELUDE + expected + APPENDIX);
 // The checks of dlmalloc for DEBUG builds are on, and every 16th entry validates the whole state under the lock
 assert(/#define DEBUG 1/.test(PRELUDE));
 assert(/#define DIAG_CHECK_EVERY 16/.test(PRELUDE));
+// The state is copied when the lock is released and compared when it is taken, except for the lock itself
+assert(/static int diag_release\(pthread_mutex_t\* lk\) \{\s+int me = \(int\)\(intptr_t\)pthread_self\(\);\s+diag_snapshot\(\);/.test(PRELUDE));
+assert(/diag_verify\(line\);\s+if \(number % DIAG_CHECK_EVERY == 0\)/.test(PRELUDE));
+assert(/memcpy\(diag_snap, \(void\*\)gm, sizeof\(struct malloc_state\)\)/.test(APPENDIX));
+assert(/offsetof\(struct malloc_state, mutex\)/.test(APPENDIX) && /changed while nobody was inside it/.test(APPENDIX));
 // A malloc and a free say what they were asked for: the ring keeps the kind and the argument of the entry
 assert(/int kind; unsigned int arg;/.test(PRELUDE));
 assert.throws(() => patch(source.replace('void dlfree(void* mem) {', 'void dlfree2(void* mem) {')), /exactly one/);
