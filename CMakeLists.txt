@@ -300,6 +300,16 @@ set_target_properties(moonlight-wasm
              -s USE_CRYPTO=1 \
              -s USE_SSL=1 \
              -s USE_CURL=1")
+# Diagnostic builds only: replaces the allocator by the copy of dlmalloc that the Docker build makes (wasm/diag_dlmalloc.c,
+# tools/patch-diag-dlmalloc.js), with its checks switched on. The release dlmalloc compiles them away.
+option(MOONLIGHT_DIAG_MALLOC "Use a diagnostic copy of dlmalloc with its checks switched on" OFF)
+if(MOONLIGHT_DIAG_MALLOC)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/wasm/diag_dlmalloc.c")
+        message(FATAL_ERROR "wasm/diag_dlmalloc.c is made by tools/patch-diag-dlmalloc.js in the Docker build")
+    endif()
+    target_sources(moonlight-wasm PRIVATE wasm/diag_dlmalloc.c)
+    set_source_files_properties(wasm/diag_dlmalloc.c PROPERTIES COMPILE_FLAGS "-s USE_PTHREADS=1")
+endif()
 # Diagnostic builds only: keeps the function names in the module, so that the paused stacks of a freeze can be read.
 # The code and the function numbers stay the same.
 option(MOONLIGHT_PROFILING_FUNCS "Keep the function names in the module" OFF)

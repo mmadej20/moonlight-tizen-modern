@@ -90,11 +90,22 @@ ARG OPT_LEVEL=-O2
 ARG ALLOC_STRESS=OFF
 # Diagnostic builds only: --build-arg PROFILING_FUNCS=ON keeps the function names, to read the stacks of a freeze
 ARG PROFILING_FUNCS=OFF
+# Diagnostic builds only: --build-arg DIAG_MALLOC=ON replaces the allocator by a copy of the dlmalloc of the toolchain with
+# its checks switched on and a record of who is inside (tools/patch-diag-dlmalloc.js). The build fails when the source of
+# the toolchain does not look as the patch expects.
+ARG DIAG_MALLOC=OFF
+COPY --chown=moonlight tools/patch-diag-dlmalloc.js ./moonlight-tizen/tools/
+RUN if [ "$DIAG_MALLOC" = "ON" ]; then \
+		/home/moonlight/emscripten-release-bundle/emsdk/node/12.9.1_64bit/bin/node moonlight-tizen/tools/patch-diag-dlmalloc.js \
+			/home/moonlight/emscripten-release-bundle/emsdk/fastcomp/emscripten/system/lib/dlmalloc.c \
+			moonlight-tizen/wasm/diag_dlmalloc.c; \
+	else echo "Diagnostic allocator off"; fi
 RUN cmake \
 	-DCMAKE_TOOLCHAIN_FILE=/home/moonlight/emscripten-release-bundle/emsdk/fastcomp/emscripten/cmake/Modules/Platform/Emscripten.cmake \
 	-DMOONLIGHT_OPT_LEVEL=${OPT_LEVEL} \
 	-DMOONLIGHT_ALLOC_STRESS=${ALLOC_STRESS} \
 	-DMOONLIGHT_PROFILING_FUNCS=${PROFILING_FUNCS} \
+	-DMOONLIGHT_DIAG_MALLOC=${DIAG_MALLOC} \
 	-DCMAKE_C_COMPILER_LAUNCHER=ccache \
 	-DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
 	-G Ninja \
