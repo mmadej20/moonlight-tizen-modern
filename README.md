@@ -4,7 +4,7 @@
 >
 > **This is a fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen) maintained for one specific TV: the Samsung UE43CU7172U (UE43CU7172UXXH, Tizen 9).**
 >
-> Everything here is built and tested only on that model, streaming from a Sunshine/Apollo host. It is not an official release and it differs from upstream in several places (see [docs/upstream-sync.md](docs/upstream-sync.md)); for any other TV, use upstream. Fixes that are not specific to this TV are sent upstream as pull requests, for example the heap corruption that froze the stream (an Embind `std::string` read that wrote a byte past its buffer; see [docs/2026-10-18-stream-hang-investigation.md](docs/2026-10-18-stream-hang-investigation.md), section 20). The tooling that was used to find it lives on the branch `diagnostics/freeze-hunt`.
+> Everything here is built and tested only on that model, streaming from a Sunshine/Apollo host. It is not an official release and it differs from upstream in several places (see [docs/upstream-sync.md](docs/upstream-sync.md)); for any other TV, use upstream. Fixes that are not specific to this TV will be sent to upstream as pull request.
 >
 > The badges below belong to the upstream project.
 
