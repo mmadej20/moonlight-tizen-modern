@@ -578,3 +578,42 @@ pauzowania) pokazał rozmiar plików i ich zawartość; po wyczyszczeniu obu pli
 **Skutek uboczny dla śledztwa.** Komunikat o kolejce wejścia jest tylko skutkiem śmierci wątku wejścia (sekcja 16), nie
 usterką wejścia, i nic w kodzie wejścia nie było do cofnięcia. Limit połączenia 8 s dla `launch`/`resume`/`cancel` z
 `17cee3a` zostaje jako dodatkowe zabezpieczenie, ale nie był przyczyną.
+
+## 18. Wynik `diag7` i `diag8`: blokadę alokatora zgubił główny wątek (2026-10-21)
+
+**`diag7`.** Trap z kontroli alokatora był winą mojego trackera, nie sterty: rejestr ENet (2048 pozycji) przepełnił się
+przy 2013 blokach naraz i `videoCanaryEnetFree` zwolnił wskaźnik użytkownika zamiast bazy bloku. Stan sterty po
+awarii był spójny. Poprawka w `503f36a` (rejestr 16384 pozycji, mapa pokrycia pamięci, blok poza rejestrem dostaje
+zwykły `malloc` bez stref).
+
+**`diag8`, zawieszenie 3 min po włączeniu dławienia 12 Mbps (watcher podpięty przed startem).** Zrzut 14 wątków:
+- Nikt nie jest w alokatorze, nie było trapa ani wyjątku, nie padła żadna kontrola `dlmalloc:`. Pięć wątków czeka w
+  `malloc` → `pthread_mutex_lock` (główny w `DiagnosticLogBuffer::Drain`, wysyłka wejścia ENet, mysz, odbiór wideo,
+  statystyki strat), szósty w mutexie ENet.
+- Słowo blokady `gm->mutex` to `0x8000000A`, `_m_waiters = 6` przy pięciu widocznych oczekujących (znów jeden
+  „fantomowy"; poprzednio 7 przy sześciu). Wszystkie inne mutexy (także `malloc_global_mutex`) są wolne.
+- **Rekord właściciela z diagnostycznego dlmalloc (`diag_owner`, adres z wasm przez `find_owner.js`) wskazuje główny
+  wątek** (struktura pthread w pamięci statycznej, 0x56DEE0; workery mają adresy ~24 mln). Główny wątek wziął blokadę
+  jako ostatni i nigdy jej nie zwolnił, a w jego stosie nie ma alokatora. Nie padł ani jeden komunikat „thread X got the
+  lock while thread Y is still inside", więc dwa wątki nie weszły do sekcji krytycznej naraz.
+- Sterta ma wolny chunk 216 B (w bin 27, stopka 0x20 zamiast 216) leżący na pamięci, w której są trzy poprawne chunki
+  (120 B komenda ENet, 64 B pakiet ENet, 32 B wolny). Wygląda to na operację alokatora przerwaną w połowie, a nie na
+  wyścig.
+- Wniosek roboczy: główny wątek opuścił `malloc`/`free` przez wyjątek (trap albo błąd JS, np. `memory access out of
+  bounds` przy zepsutej stercie), który złapał kod wywołujący moduł (np. `try/catch` w `pollNative`). To wyjaśnia
+  zgubioną blokadę, uszkodzoną stertę i fantomowego oczekującego (wyjątek przeszedł przez `__pthread_mutex_timedlock`
+  z pominięciem `a_dec(&m->_m_waiters)`, bo główny wątek w pętli czekania wykonuje zakolejkowane wywołania innych
+  wątków). Ostatnie nie jest jeszcze potwierdzone.
+
+**Zawieszenie tuż po starcie streamu.** Użytkownik zgłosił, że aplikacja potrafiła się zawiesić zaraz po starcie także
+wcześniej i bez dławienia (pierwszy test `diag8`: Apollo zakończył sesję po 5 s). Nie udało się wtedy nic odczytać z
+zawieszonego renderera (nie odpowiadał nawet `Debugger.pause`, a sesja strony przechodzi przez renderer).
+
+**Błąd w moich narzędziach.** Pauza głównego wątku na wszystkich wyjątkach (`FORENSICS_MAIN_EXCEPTIONS=1`) zatrzymuje go
+także na odrzuconej obietnicy i w środku `_mediaElementSetSrc`; po niej EMSS zawiesza źródło (`kSourceSuspended`) i
+obraz jest czarny (video/audio appendCalls=0). Pauzowanie wątków w trakcie startu odtwarzacza nie nadaje się do
+pomiaru.
+
+**Dalej (`diag9`, commit `9ff7c2a`).** Zamiast pauzy rejestrator w stronie (`wasm/platform/wasm_exception_recorder.js`)
+owija eksporty modułu na głównym wątku, a przy wyjątku pyta moduł, czy wątek nadal jest zapisanym właścicielem blokady
+(`diag_dlmalloc_owner_is_calling_thread`). Raport trafia do konsoli (`[wasm-exception] ...`), bez zatrzymywania wątku.
