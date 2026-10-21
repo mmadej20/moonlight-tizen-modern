@@ -88,10 +88,13 @@ COPY --chown=moonlight wasm/dispatcher ./moonlight-tizen/wasm/dispatcher/
 ARG OPT_LEVEL=-O2
 # Diagnostic builds only: --build-arg ALLOC_STRESS=ON compiles the allocator stress test into the module
 ARG ALLOC_STRESS=OFF
+# Diagnostic builds only: --build-arg PROFILING_FUNCS=ON keeps the function names, to read the stacks of a freeze
+ARG PROFILING_FUNCS=OFF
 RUN cmake \
 	-DCMAKE_TOOLCHAIN_FILE=/home/moonlight/emscripten-release-bundle/emsdk/fastcomp/emscripten/cmake/Modules/Platform/Emscripten.cmake \
 	-DMOONLIGHT_OPT_LEVEL=${OPT_LEVEL} \
 	-DMOONLIGHT_ALLOC_STRESS=${ALLOC_STRESS} \
+	-DMOONLIGHT_PROFILING_FUNCS=${PROFILING_FUNCS} \
 	-DCMAKE_C_COMPILER_LAUNCHER=ccache \
 	-DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
 	-G Ninja \

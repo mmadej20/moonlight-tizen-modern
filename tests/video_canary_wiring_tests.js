@@ -13,6 +13,7 @@ const videoQueue = read(src + 'RtpVideoQueue.c');
 const depacketizer = read(src + 'VideoDepacketizer.c');
 const canaryHeader = read(src + 'VideoCanary.h');
 const canarySource = read(src + 'VideoCanary.c');
+const platform = read(src + 'Platform.c');
 const cmake = read('CMakeLists.txt');
 
 // The guard exists only in a diagnostic build. The three files that own the packet buffers know nothing but the
@@ -64,6 +65,15 @@ assert(/PACKET_PATH_EVENT\("submit"/.test(videoQueue));
 assert(/#define HEAD_MASK \(~\(uint32_t\)1\)/.test(canarySource));
 assert(/freed a buffer that is not registered \(freed twice\?\)/.test(canarySource));
 assert(/\(char\*\)entry == \(char\*\)allocPtr \+ configuredEntryOffset/.test(canarySource));
+
+// The blocks of ENet go through the tracking allocator in a diagnostic build, and the threads are named for the reports
+assert(/#include "VideoCanary.h"/.test(platform));
+assert(/#ifdef MOONLIGHT_VIDEO_CANARY\s+\{[^}]*ENetCallbacks callbacks = \{ videoCanaryEnetMalloc, videoCanaryEnetFree, abort \};\s+err = enet_initialize_with_callbacks\(ENET_VERSION, &callbacks\);\s+\}\s+#else\s+err = enet_initialize\(\);\s+#endif/.test(platform));
+assert(/PACKET_THREAD_NAME\(ctx->name\);\s+ctx->entry\(ctx->context\);/.test(platform), 'a thread names itself before it runs');
+assert(/#define PACKET_THREAD_NAME\(name\) \(\(void\)0\)/.test(normalBranch));
+assert(/is freed again by %s; it was allocated by %s/.test(canarySource));
+assert(/a block was damaged while it was in use/.test(canarySource));
+assert(/a live block changed/.test(canarySource));
 
 // The macro is defined only by the diagnostic option of CMake, together with the probes; the source is always in the
 // library (the list of sources is written out, there is no glob) and is empty without the macro

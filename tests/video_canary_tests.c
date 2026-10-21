@@ -19,6 +19,7 @@ static unsigned char arena[SLOT_COUNT][SLOT_BYTES];
 static unsigned char inUse[SLOT_COUNT];
 static unsigned int freeCalls;
 static uint64_t fakeNow = 1000;
+static uint32_t fakeThread = 1;
 
 static char logLines[64][1100];
 static int logCount;
@@ -61,6 +62,7 @@ static void arenaFree(void* pointer) {
 #define VIDEO_CANARY_NOW_MS() fakeNow
 #define VIDEO_CANARY_MALLOC(size) arenaMalloc(size)
 #define VIDEO_CANARY_FREE(pointer) arenaFree(pointer)
+#define VIDEO_CANARY_THREAD_ID() fakeThread
 
 #include "moonlight-common-c/src/VideoCanary.c"
 
@@ -182,10 +184,106 @@ int main(void) {
         assert(freeCalls == 4 + REGISTRY_SLOTS + 5);
     }
 
+    // The blocks of ENet: the thread that allocates and the one that frees are named in the report of a double free
+    {
+        void* first;
+        void* second;
+        void* third;
+        void* foreign;
+        const unsigned int freesBefore = freeCalls;
+        const unsigned int foreignBefore = enetForeignFrees;
+        void* tracked[5000];
+
+        // Taken now, while no block of ENet was freed yet, so that no free of ENet has been at its address
+        foreign = arenaMalloc(24);
+
+        fakeThread = 100;
+        videoCanaryThreadName("sender");
+        fakeThread = 200;
+        videoCanaryThreadName("control");
+        assert(strcmp(nameOfThread(100), "sender") == 0);
+        assert(strcmp(nameOfThread(999), "unnamed") == 0);
+
+        fakeThread = 100;
+        first = videoCanaryEnetMalloc(24);
+        assert(first != NULL);
+        fakeNow += 30;
+        fakeThread = 200;
+        videoCanaryEnetFree(first);
+        assert(freeCalls == freesBefore + 1);
+        assert(logCount == 0);
+
+        fakeNow += 5;
+        fakeThread = 100;
+        videoCanaryEnetFree(first);
+        assert(freeCalls == freesBefore + 1);
+        assert(logged("is freed again by sender; it was allocated by sender, lived 30 ms and was freed by control 5 ms ago"));
+        assert(logged("last frees, newest first: [0x"));
+        assert(enetDoubleFrees == 1);
+        clearLog();
+
+        // A live block whose chunk head says "free" is reported and left alone
+        second = videoCanaryEnetMalloc(24);
+        *headOf(second) = 0x21;
+        videoCanaryEnetFree(second);
+        assert(freeCalls == freesBefore + 1);
+        assert(logged("a block was damaged while it was in use: block 0x"));
+        assert(logged("has chunk head 0x00000021, was 0x00000022"));
+        clearLog();
+
+        // A change of the head is found by the sweep, once, and the block can be freed afterwards
+        third = videoCanaryEnetMalloc(24);
+        *headOf(third) = 0x2b;
+        videoCanarySweep("enet");
+        assert(logged("a live block changed"));
+        clearLog();
+        videoCanarySweep("enet again");
+        assert(!logged("a live block changed"));
+        videoCanaryEnetFree(third);
+        assert(freeCalls == freesBefore + 2);
+
+        // The bit for the neighbour in front is not ours
+        third = videoCanaryEnetMalloc(24);
+        *headOf(third) ^= 1u;
+        videoCanarySweep("enet pinuse");
+        assert(!logged("a live block changed"));
+        videoCanaryEnetFree(third);
+        assert(freeCalls == freesBefore + 3);
+
+        // A pointer that ENet did not allocate is passed to the allocator
+        videoCanaryEnetFree(foreign);
+        assert(freeCalls == freesBefore + 4);
+        assert(enetForeignFrees == foreignBefore + 1);
+        videoCanaryEnetFree(NULL);
+
+        // More blocks than the table holds are not tracked, and blocks that come and go do not slow it down
+        for (i = 0; i < 5000; i++) {
+            tracked[i] = videoCanaryEnetMalloc(24);
+            assert(tracked[i] != NULL);
+        }
+        assert(enetLive == ENET_SLOTS);
+        assert(enetUntracked == 5000 - ENET_SLOTS);
+        for (i = 0; i < 5000; i++) {
+            videoCanaryEnetFree(tracked[i]);
+        }
+        assert(enetLive == 0);
+        assert(freeCalls == freesBefore + 4 + 5000);
+        for (i = 0; i < 20000; i++) {
+            void* block = videoCanaryEnetMalloc(24);
+            assert(block != NULL);
+            videoCanaryEnetFree(block);
+        }
+        assert(enetLive == 0);
+        assert(enetTombs <= ENET_SLOTS);
+        assert(freeCalls == freesBefore + 4 + 5000 + 20000);
+        clearLog();
+    }
+
     // A status line now and then shows that the guard is running
     fakeNow += 40000;
     videoCanarySweep("status");
     assert(logged("buffers registered"));
+    assert(logged("ENetTrace: 0 blocks live"));
 
     puts("video canary tests passed");
     return 0;

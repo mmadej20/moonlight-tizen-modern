@@ -300,6 +300,12 @@ set_target_properties(moonlight-wasm
              -s USE_CRYPTO=1 \
              -s USE_SSL=1 \
              -s USE_CURL=1")
+# Diagnostic builds only: keeps the function names in the module, so that the paused stacks of a freeze can be read.
+# The code and the function numbers stay the same.
+option(MOONLIGHT_PROFILING_FUNCS "Keep the function names in the module" OFF)
+if(MOONLIGHT_PROFILING_FUNCS)
+    set_property(TARGET moonlight-wasm APPEND_STRING PROPERTY LINK_FLAGS " --profiling-funcs")
+endif()
 target_link_libraries(moonlight-wasm PUBLIC
     libgamestream
     h264bitstream

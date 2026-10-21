@@ -451,3 +451,56 @@ jest linia stanu `VideoCanary: N buffers registered ...`, której brak oznacza, 
 a po ręcznym zwolnieniu blokady host i tak zrywa sesję po ok. 2 min. (b) Tryb cykliczny dławienia (np. 20 s ciasno, 20 s
 swobodnie) do symulacji zrywów strat. (c) Jeśli strażnik nic nie złapie, następny krok to częstsze przeglądy albo
 strażnik także dla innych małych alokacji w ścieżce wideo (kolejka decode unit, `std::vector` dekodera).
+
+## 15. Zawieszenie z pułapką w `free()` pakietu ENet (2026-10-21)
+
+Test: `opt3-diag3` (strażnik buforów pakietów wideo), dławienie QoS 12 Mbit/s od 08:17:52 lokalnie, stream Desktop,
+watcher podłączony po starcie streama. Start streama działał (wcześniejsze `-9` zniknęły po zwykłym uruchomieniu
+aplikacji). Zawieszenie po 6 minutach, 06:23:41 UTC. Pierwszy raz mamy wątek, który padł w środku alokatora.
+
+**Co się stało.**
+- Wątek kontrolny (`controlReceiveThreadFunc` → `serviceEnetHost` → `enet_host_service` →
+  `enet_protocol_remove_sent_reliable_command` → `enet_packet_destroy` → `free`) rzucił `memory access out of bounds` w
+  `free()` wskaźnika `0x14d93e0`. Trzymał blokadę alokatora, więc wątek główny (w `getStreamHealth`), odbiór wideo,
+  wysyłka wejścia i statystyki strat stanęły na `malloc`. To wyjaśnia sygnaturę „blokada zablokowana, nikogo w środku": jej
+  właściciel to wątek zatrzymany pułapką. Przy zawieszeniach 1-3 nie zarejestrowano pułapki, ale wniosek o uszkodzeniu
+  sterty, po którym jakiś wątek pada w środku alokatora, pasuje do wszystkich.
+- Strażnik buforów pakietów wideo **nie zgłosił nic** (0 raportów do chwili pułapki), więc to nie bufor pakietu wideo.
+- Wskaźnik dany do `free` jest polem `outgoingCommand->packet` komendy ENet (kanał 3, numer 0xB9A0, 37 B, wysłana
+  dwukrotnie), czyli oczekującym na potwierdzenie `ENetPacket`. Pod tym adresem leży jednak nagłówek **wolnego** chunka
+  32 B (`flags` = 0x121 = 0x21 z dodanym przez ENet bitem `SENT`, `data`/`dataLength` = wskaźniki kosza, `referenceCount`
+  zmniejszony z 1 do 0). Pakiet został więc zwolniony, a komenda nadal na niego wskazywała, albo alokator uznał jego
+  pamięć za wolną, gdy pakiet żył.
+- Region wokół ma układ, który tłumaczy wszystko, co zobaczyliśmy: wolny chunk 808 B pod `0x14d90d8` (z nagłówkiem
+  `0x329` i stopką `0x328` w następniku) to suma trzech sąsiadów: bufor `std::string` ze snapshotem zdrowia (392 B), blok
+  embind z jego kopią (384 B) i chunk pakietu ENet (32 B). 392 + 384 + 32 = 808. W treści widać tekst snapshotu
+  (`controllerSkipped=7809 … heap=47MB/128MB`) w dwóch egzemplarzach, a metadane drzewa chunka 808 B leżą na początku
+  pierwszego z nich. Ten sam układ (wolny chunk z resztkami tekstu `getStreamHealth` i następnik z błędnym `PINUSE`)
+  opisuje sekcja 10 dla zawieszenia 3 (chunk 456 B).
+- Sterta przed tym regionem (3923 chunki) i za nim (26 chunków) jest spójna. Uszkodzenie jest lokalne, rozmiaru ok.
+  800 B, i dotyczy trzech obiektów zwalnianych w tym samym czasie przez dwa wątki: wątek główny
+  (`std::string` i blok embind snapshotu) i wątek kontrolny (pakiet ENet).
+
+**Hipotezy.**
+1. Pakiet ENet został zwolniony przed potwierdzeniem (ścieżka ENet, `enet_packet_destroy` wywołane dwa razy albo za
+   wcześnie). Wtedy jego chunk wchodzi w sklejenie z sąsiadami przy zwolnieniu bufora `std::string` i bloku embind, a
+   późne potwierdzenie niszczy go po raz drugi.
+2. Dwa wątki zwalniają sąsiednie chunki w tym samym momencie bez wzajemnego wykluczenia (np. wątek główny w pętli
+   emulowanego `futex_wait`, która obsługuje kolejkę proxy w trakcie czekania na blokadę), a sklejanie na podstawie
+   bitów `PINUSE` rozjeżdża się. Test obciążeniowy z sekcji 10 nie obejmował wątku głównego.
+3. Zapis z zewnątrz w nagłówek chunka (jak w sekcjach 12 i 13). Przy zawieszeniu 4 nic na to nie wskazuje.
+
+**Instrumentacja do sprawdzenia (build `diag4`).** Do `VideoCanary.c` dodane śledzenie alokacji ENet:
+`enet_initialize_with_callbacks` z alokatorem, który wpisuje każdy blok ENet do rejestru (rozmiar, wątek, czas, słowo
+nagłówka chunka), pamięta 512 ostatnich zwolnień z wątkiem, który zwolnił, zgłasza **drugie zwolnienie tego samego bloku**
+razem z pierwszym (nie przekazuje go do `free`) i zgłasza blok żywy, którego nagłówek chunka się zmienił (przy `free` i w
+przeglądzie co 32 pakiety wideo). Wątki Moonlighta mają nazwy w raportach (`PACKET_THREAD_NAME` w `ThreadProc`). Raporty
+mają prefiks `ENetTrace:`, linia stanu co 30 s też. Build z nazwami funkcji: `--build-arg PROFILING_FUNCS=ON`
+(`--profiling-funcs`, ta sama numeracja funkcji, kilka procent różnic w rozmiarach ciał), do czytania stosów.
+Odczyt: „freed again by X; allocated by Y, lived N ms and was freed by Z" rozstrzyga hipotezę 1 (kto i kiedy zwolnił jako
+pierwszy); „a block was damaged while it was in use" przy braku podwójnego zwolnienia wskazuje hipotezę 2 lub 3 (nagłówek
+żywego bloku ENet zmieniony przez alokator lub z zewnątrz).
+
+**Narzędzia.** Stosy z nazwami: `named_stacks.js` (w katalogu roboczym sesji) czyta sekcję nazw z modułu zbudowanego z
+`PROFILING_FUNCS=ON`. Odczyt pamięci zatrzymanego procesu: plik poleceń watchera (`{"thread": "<prefiks workera>",
+"expression": "..."}`) działa na zatrzymanym workerze, także po zawieszeniu.

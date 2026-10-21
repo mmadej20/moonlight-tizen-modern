@@ -26,6 +26,12 @@ void videoCanaryCheck(void* buffer, const char* when, int received, int receiveS
 void videoCanarySweep(const char* when);
 // Remembers what the video path just did, to be printed with the next report
 void videoCanaryEvent(const char* what, unsigned int a, unsigned int b);
+// Names the calling thread in reports (the name must stay valid)
+void videoCanaryThreadName(const char* name);
+// The allocator of ENet: every block is entered, the last frees are remembered with the thread that made them, a block
+// that is freed twice is reported and not freed again, and the chunk head of a live block is checked
+void* videoCanaryEnetMalloc(size_t size);
+void videoCanaryEnetFree(void* pointer);
 
 #define PACKET_BUFFER_CONFIGURE(size, entryOffset) videoCanaryConfigure((size), (entryOffset))
 #define PACKET_BUFFER_MALLOC(size) videoCanaryMalloc(size)
@@ -34,6 +40,7 @@ void videoCanaryEvent(const char* what, unsigned int a, unsigned int b);
 #define PACKET_BUFFER_CHECK(buffer, when, received, receiveSize) videoCanaryCheck((buffer), (when), (received), (receiveSize))
 #define PACKET_BUFFER_SWEEP(when) videoCanarySweep(when)
 #define PACKET_PATH_EVENT(what, a, b) videoCanaryEvent((what), (unsigned int)(a), (unsigned int)(b))
+#define PACKET_THREAD_NAME(name) videoCanaryThreadName(name)
 
 #else
 
@@ -44,5 +51,6 @@ void videoCanaryEvent(const char* what, unsigned int a, unsigned int b);
 #define PACKET_BUFFER_CHECK(buffer, when, received, receiveSize) ((void)0)
 #define PACKET_BUFFER_SWEEP(when) ((void)0)
 #define PACKET_PATH_EVENT(what, a, b) ((void)0)
+#define PACKET_THREAD_NAME(name) ((void)0)
 
 #endif
