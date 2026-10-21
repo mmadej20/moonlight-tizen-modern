@@ -13,6 +13,14 @@ var common = (function() {
         console.log('%c[common.js, createWASMModule]', 'color: gray;', 'WASM runtime initialized.');
         updateStatus('RUNNING');
 
+        // Only the build with the diagnostic allocator has the function that the recorder asks; any other build is left as it is
+        if (typeof WasmExceptionRecorder !== 'undefined') {
+          window.wasmExceptionRecorder = WasmExceptionRecorder.create({
+            log: (line) => { console.error('%c[common.js, wasmExceptionRecorder]', 'color: red;', line); }
+          });
+          window.wasmExceptionRecorder.install(Module);
+        }
+
         if (typeof window.moduleDidLoad !== 'undefined') {
           window.moduleDidLoad();
         }

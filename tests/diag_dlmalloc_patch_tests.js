@@ -45,6 +45,9 @@ assert(/got the lock while thread/.test(PRELUDE));
 assert(/releases the lock that thread/.test(PRELUDE));
 assert(/pthread_mutex_lock\(lk\)/.test(PRELUDE) && /pthread_mutex_unlock\(lk\)/.test(PRELUDE), 'the lock itself is the one of the original');
 
+// The module answers whether the calling thread is the recorded owner, for the recorder of exceptions on the main thread
+assert(/EMSCRIPTEN_KEEPALIVE int diag_dlmalloc_owner_is_calling_thread\(void\) \{\s+return diag_owner == \(int\)\(intptr_t\)pthread_self\(\);/.test(PRELUDE));
+
 // The rest of the source is untouched: the prelude, then the source with the two lines of the lock changed
 const expected = source
   .replace('((use_lock(M))? ACQUIRE_LOCK(&(M)->mutex) : 0)', '((use_lock(M))? diag_acquire(&(M)->mutex) : 0)')

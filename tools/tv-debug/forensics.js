@@ -177,6 +177,25 @@ async function recordTrap(sessionId, where, frames) {
   log('[' + where + '] forensics recorded; waiting for the freeze to be detected', true);
 }
 
+// With FORENSICS_MAIN_EXCEPTIONS=1 the main thread pauses on every exception, caught or not, and the exception and the top
+// of its stack are logged before it goes on. A critical section of the allocator that the main thread leaves without
+// unlocking can only be left by an exception. Each distinct exception is logged in full a few times, then counted.
+const MAIN_EXCEPTIONS = process.env.FORENSICS_MAIN_EXCEPTIONS === '1';
+const mainExceptionCounts = new Map();
+
+function logMainException(description, frames) {
+  const first = String(description).split('\n')[0].slice(0, 200);
+  const top = frames[0] ? (frames[0].functionName || '(anonymous)') + ':' + frames[0].location.lineNumber : '?';
+  const key = first + ' @ ' + top;
+  const seen = (mainExceptionCounts.get(key) || 0) + 1;
+  mainExceptionCounts.set(key, seen);
+  if (seen <= 5) {
+    log('[main] EXCEPTION PAUSE #' + seen + ' ' + first + '\n' + describeFrames(frames.slice(0, 12)), true);
+  } else if (seen % 100 === 0) {
+    log('[main] EXCEPTION PAUSE seen ' + seen + ' times: ' + key, true);
+  }
+}
+
 function onEvent(message) {
   const sessionId = message.sessionId || null;
   const where = sessionId ? (sessions.get(sessionId) || sessionId) : 'main';
@@ -233,6 +252,11 @@ function onEvent(message) {
       } else if (p.reason === 'exception') {
         // Not the trap we are after (the Emscripten glue throws and catches by design), or the same trap re-thrown: go on
         if (isWasmTrap) log('[' + where + '] same trap seen again while the first one is held; resuming this pause');
+        if (MAIN_EXCEPTIONS && !sessionId) logMainException(description, frames);
+        send('Debugger.resume', {}, sessionId, 4000);
+      } else if (p.reason === 'promiseRejection' && !frozen) {
+        // Pausing on all exceptions also stops the thread at a rejected promise; that is not a freeze, go on
+        if (MAIN_EXCEPTIONS && !sessionId) logMainException('promise rejection: ' + description, frames);
         send('Debugger.resume', {}, sessionId, 4000);
       } else {
         pausedFrames.set(sessionId || 'main', frames);
@@ -301,6 +325,7 @@ function start() {
     await send('Runtime.enable');
     await send('Log.enable');
     await send('Debugger.enable');
+    if (MAIN_EXCEPTIONS) await send('Debugger.setPauseOnExceptions', { state: 'all' });
     await send('Runtime.evaluate', { expression: 'globalThis.__heapWalk = ' + walkerSource + '; 0' });
     const attach = await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
     log('setAutoAttach -> ' + JSON.stringify(attach).slice(0, 200), true);

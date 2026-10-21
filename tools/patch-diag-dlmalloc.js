@@ -50,6 +50,11 @@ var PRELUDE = [
   '  }',
   '  return pthread_mutex_unlock(lk);',
   '}',
+  '// Asked by wasm/platform/wasm_exception_recorder.js when an exported function throws on the main thread: the thread that',
+  '// asks holds the lock of the allocator only if the exception cut a critical section of the allocator short',
+  'EMSCRIPTEN_KEEPALIVE int diag_dlmalloc_owner_is_calling_thread(void) {',
+  '  return diag_owner == (int)(intptr_t)pthread_self();',
+  '}',
   ''
 ].join('\n');
 
