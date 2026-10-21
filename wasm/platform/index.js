@@ -494,7 +494,7 @@ function showHostsMode() {
   $('#supportBtn').show();
   $('#main-content').children().not('#listener, #loadingSpinner, #wasmSpinner').show();
   $('#settings-list').hide();
-  $('#game-grid').hide();
+  $('#apps-screen').hide();
   $('#goBackBtn').hide();
   $('#restoreDefaultsBtn').hide();
   $('#quitRunningAppBtn').hide();
@@ -524,8 +524,7 @@ function showHosts() {
 
   // Hide the main header and content before showing a loading screen
   $('#main-header').children().hide();
-  $('#main-header').css({'backgroundColor': 'transparent', 'boxShadow': 'none'});
-  $('#settings-list, #game-grid').hide();
+  $('#settings-list, #apps-screen').hide();
 
   // Show a spinner while the host list loads
   $('#wasmSpinner').css('display', 'inline-block');
@@ -538,7 +537,6 @@ function showHosts() {
 
     // Show the main header after the loading screen is complete
     $('#main-header').children().show();
-    $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
 
     // Navigate to the Hosts view
     showHostsMode();
@@ -546,7 +544,8 @@ function showHosts() {
 
   setTimeout(() => {
     var lastOpenedHost = localStorage.getItem('lastOpenedHost');
-    if (lastOpenedHost && window.Views && Views.Hosts && Views.Hosts.view) {
+    // `Views` is a constant of the page, not a property of window: the check used to be `window.Views` and never passed
+    if (lastOpenedHost && typeof Views !== 'undefined' && Views.Hosts && Views.Hosts.view) {
       var children = Views.Hosts.view.func();
       for (var i = 0; i < children.length; i++) {
         if (children[i].id === 'host-' + lastOpenedHost) {
@@ -564,7 +563,7 @@ function restoreUiAfterWasmLoad() {
   Navigation.stop();
 
   $('#main-header').children().not('#goBackBtn, #restoreDefaultsBtn, #quitRunningAppBtn').show();
-  $('#main-content').children().not('#listener, #wasmSpinner, #settings-list, #game-grid').show();
+  $('#main-content').children().not('#listener, #wasmSpinner, #settings-list, #apps-screen').show();
   $('#wasmSpinner').hide();
   $('#loadingSpinner').css('display', 'none');
 
@@ -1754,7 +1753,7 @@ function showSettingsMode() {
   $('#restoreDefaultsBtn').show();
   $('#main-content').children().not('#listener, #loadingSpinner, #wasmSpinner').show();
   $('#hosts-screen').hide();
-  $('#game-grid').hide();
+  $('#apps-screen').hide();
   $('.nav-menu-parent').hide();
   $('#updateAppBtn').hide();
   $('#settingsBtn').hide();
@@ -1780,8 +1779,7 @@ function showSettings() {
 
   // Hide the main header and content before showing a loading screen
   $('#main-header').children().hide();
-  $('#main-header').css({'backgroundColor': 'transparent', 'boxShadow': 'none'});
-  $('#hosts-screen, #game-grid').hide();
+  $('#hosts-screen, #apps-screen').hide();
 
   // Show a spinner while the setting list loads
   $('#wasmSpinner').css('display', 'inline-block');
@@ -1794,7 +1792,6 @@ function showSettings() {
 
     // Show the main header after the loading screen is complete
     $('#main-header').children().show();
-    $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
 
     // Show the settings list section
     $('#settings-list').removeClass('hide-container');
@@ -2535,7 +2532,7 @@ function showAppsMode() {
   $('#main-content').removeClass('fullscreen');
   $('#listener').removeClass('fullscreen');
   $('#loadingSpinner').css('display', 'none');
-  $('body').css('backgroundColor', '#282C38');
+  $('body').css('background', '');
   $('#wasm_module').css('display', 'none');
 
   var streamWasShown = isInGame;
@@ -2584,7 +2581,6 @@ function showApps(host) {
 
     // Hide the main header before showing a loading screen
     $('#main-header').children().hide();
-    $('#main-header').css({'backgroundColor': 'transparent', 'boxShadow': 'none'});
     $('#hosts-screen, #settings-list').hide();
 
     // Show a spinner while the app list loads
@@ -2611,17 +2607,17 @@ function showApps(host) {
 
         // Show the main header after the loading screen is complete
         $('#main-header').children().show();
-        $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
 
-        // Show the game grid section
-        $('#game-grid').show();
+        // Show the apps screen
+        $('#apps-screen').show();
 
         if (appList.length == 0) {
           console.warn('%c[index.js, showApps]', 'Warning: Your app list is empty. Please add some apps to your list!');
-          var emptyAppListImg = new Image();
-          emptyAppListImg.src = 'static/res/applist_empty.svg';
-          $('#game-grid').html(emptyAppListImg);
-          snackbarLogLong('Your list is currently empty. Please add your favorite apps to the list.');
+          $('#apps-count').text('');
+          $('#game-grid').append($('<div>', {
+            class: 'ui-empty',
+            text: t('Your list is currently empty. Please add your favorite apps to the list.')
+          }));
           Views.Apps.view.reset();
           showAppsMode();
           resolve([]);
@@ -2634,6 +2630,7 @@ function showApps(host) {
         const sortOrder = sortAppsListSwitch.checked ? 'DESC' : 'ASC';
         // If game grid is populated, sort the app list
         const sortedAppList = sortTitles(appList, sortOrder);
+        $('#apps-count').text(t('Apps: %1$d', sortedAppList.length));
 
         if (_isSmartHubSupported) {
           var oldApps = (_previewApps[host.serverUid] && _previewApps[host.serverUid].apps) || [];
@@ -2684,49 +2681,36 @@ function showApps(host) {
           // To mitigate this, we ensure that we don't add a duplicate box art.
           // This isn't perfect: there's lots of RTTs before the logic prevents anything.
           if ($('#game-container-' + app.id).length === 0) {
-            // Create the game container with the appropriate attributes for the game card
+            // A tile: the box art with the title under it
             var gameContainer = $('<div>', {
               id: 'game-container-' + app.id,
-              class: 'game-container mdl-card mdl-shadow--4dp',
+              class: 'game-container ui-tile',
               role: 'link',
               tabindex: 0,
               'aria-label': app.title
             });
 
-            // Create the game cell to serve as a holder for the game box
-            var gameCell = $('<div>', {
+            // The box art holds the placeholder, the picture once it is loaded, and the badge of the running app
+            var gameArt = $('<div>', {
               id: 'game-' + app.id,
-              class: 'mdl-card__title mdl-card--expand'
+              class: 'ui-tile__art'
             });
+            gameArt.append($('<span>', {
+              class: 'ui-pill ui-pill--ok ui-tile__badge',
+              text: t('Running')
+            }));
 
-            // Create the game title wrapper to hold the game title text
+            // The title is under the box art, on two lines at most
             var gameTitle = $('<div>', {
-              class: 'game-title mdl-card__title-text'
+              class: 'game-title ui-tile__cap'
             });
-
-            // Create the game text placeholder that will contain the game name
-            var gameText = $('<span>', {
+            gameTitle.append($('<span>', {
               class: 'game-text',
               text: app.title
-            });
+            }));
 
-            // Append the game text to the game title wrapper
-            gameTitle.append(gameText);
-
-            // Handle animation state based on game title text length
-            if (app.title.length <= 20) {
-              // For game title text of 20 characters or less, disable scrolling text animation
-              gameText.addClass('disable-animation');
-            } else {
-              // For game title text longer than 20 characters, enable scrolling text animation
-              gameText.removeClass('disable-animation');
-            }
-
-            // Append the game title to the game cell
-            gameCell.append(gameTitle);
-
-            // Append the game cell to the game container
-            gameContainer.append(gameCell);
+            gameContainer.append(gameArt);
+            gameContainer.append(gameTitle);
 
             // Attach the click event listener to the game container
             gameContainer.off('click');
@@ -2820,7 +2804,7 @@ function showApps(host) {
               boxArtPlaceholderImg.classList.add('fade-in');
             }
           };
-          $(gameContainer).append(boxArtPlaceholderImg);
+          $('#game-' + app.id).append(boxArtPlaceholderImg);
           boxArtPromises.push(boxArtPromise);
         });
 
@@ -2838,8 +2822,11 @@ function showApps(host) {
           });
         });
 
+        // The list starts on the first app, unless an app runs or was the last one opened. Both the reset that came after this
+        // choice and the check of `window.Views` (see showHosts) made it void, so the list always started on the first app
+        Views.Apps.view.reset();
         var appToSelect = (host.currentGame != 0) ? host.currentGame : localStorage.getItem('lastOpenedApp_' + host.serverUid);
-        if (appToSelect && window.Views && Views.Apps && Views.Apps.view) {
+        if (appToSelect && typeof Views !== 'undefined' && Views.Apps && Views.Apps.view && typeof Views.Apps.view.func === 'function') {
           var children = Views.Apps.view.func();
           for (var i = 0; i < children.length; i++) {
             if (children[i].id === 'game-container-' + appToSelect) {
@@ -2850,7 +2837,6 @@ function showApps(host) {
         }
 
         // Navigate to the Apps view
-        Views.Apps.view.reset();
         showAppsMode();
         resolve(sortedAppList);
 
@@ -2882,13 +2868,13 @@ function showApps(host) {
 
         // Show the main header after the loading screen is complete
         $('#main-header').children().show();
-        $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
 
         console.error('%c[index.js, showApps]', 'color: green;', 'Error: Failed to get app list from ' + host.hostname + '. Host object: ', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-        var errorAppListImg = new Image();
-        errorAppListImg.src = 'static/res/applist_error.svg';
-        $('#game-grid').html(errorAppListImg);
-        snackbarLogLong('Unable to retrieve your list of apps at this time. Please refresh the list of apps or try again later!');
+        $('#apps-count').text('');
+        $('#game-grid').append($('<div>', {
+          class: 'ui-empty',
+          text: t('Unable to retrieve your list of apps at this time. Please refresh the list of apps or try again later!')
+        }));
 
         // Navigate to the Apps view
         Views.Apps.view.reset();

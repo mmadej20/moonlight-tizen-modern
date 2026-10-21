@@ -157,6 +157,27 @@ function focusElement(target) {
   }
 }
 
+// Bring an element of a row to the middle of the row. Only the row moves, the page does not
+function centerInRow(target, behavior) {
+  if (target === undefined || target === null) return;
+  const element = resolveElement(target);
+  if (!element || typeof element.scrollIntoView !== 'function') return;
+  element.scrollIntoView({ behavior: behavior, block: 'nearest', inline: 'center' });
+}
+
+// Focus a tile of a row and bring it to the middle. The focus is given without the scroll of the browser, which would only
+// make the tile visible and then fight with the move to the middle
+function focusTile(target, behavior) {
+  if (target === undefined || target === null) return;
+  const element = resolveElement(target);
+  if (!element) return;
+  blurElement(document.activeElement);
+  if (typeof element.focus === 'function') {
+    element.focus({ preventScroll: true });
+  }
+  centerInRow(element, behavior);
+}
+
 // Safely remove focus from an element
 function blurElement(target) {
   if (target === undefined || target === null) return;
@@ -1666,29 +1687,19 @@ const Views = {
   Apps: {
     view: new ListView(() => document.getElementById('game-grid').children),
     up: function() {
-      // If there are more rows behind, then go to the previous row
-      if (this.view.prevCardRow(6)) {
-        focusElement(this.view.current());
-      } else {
-        // If there are no more rows, navigate to the AppsNav view
-        Navigation.change(Views.AppsNav);
-        // Set focus on the first navigation item in AppsNav view when transitioning from Apps view
-        focusElement(Views.AppsNav.view.current());
-      }
+      // Nothing is above the row of tiles but the header
+      Navigation.change(Views.AppsNav);
+      // Set focus on the first navigation item in AppsNav view when transitioning from Apps view
+      focusElement(Views.AppsNav.view.current());
     },
-    down: function() {
-      // If there are more rows after, then go to the next row
-      if (this.view.nextCardRow(6)) {
-        focusElement(this.view.current());
-      }
-    },
+    down: function() {},
     left: function() {
-      this.view.prevCard(6);
-      focusElement(this.view.current());
+      this.view.prev();
+      focusTile(this.view.current(), 'smooth');
     },
     right: function() {
-      this.view.nextCard(6);
-      focusElement(this.view.current());
+      this.view.next();
+      focusTile(this.view.current(), 'smooth');
     },
     accept: function() {
       clickElement(this.view.current());
@@ -1698,10 +1709,13 @@ const Views = {
     },
     press: function() {},
     switch: function() {
-      this.view.currentCardRow(6);
+      // Bring the current tile to the middle of the row, for example when coming back from the stream
+      centerInRow(this.view.current(), 'auto');
     },
     enter: function() {
       mark(this.view.current());
+      // The list opens on the tile that is current, for example the app that runs
+      centerInRow(this.view.current(), 'auto');
     },
     leave: function() {
       unmark(this.view.current());
@@ -1716,8 +1730,8 @@ const Views = {
     down: function() {
       // Navigate to the Apps view
       Navigation.change(Views.Apps);
-      // Set focus on the first navigation item in Apps view when transitioning from AppsNav view
-      focusElement(Views.Apps.view.current());
+      // Set focus on the current tile in Apps view when transitioning from AppsNav view
+      focusTile(Views.Apps.view.current(), 'smooth');
     },
     left: function() {
       this.view.prev();

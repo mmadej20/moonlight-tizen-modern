@@ -664,6 +664,35 @@ async function testListStylingSurvivesFailuresAndMissingBoxes() {
   assert.strictEqual(cards.B.classAdds, 1, 'a missing box (A) does not stop the others');
 }
 
+// The list used to open on its first app whatever was running: the choice of the app came before a reset, and it was guarded by
+// `window.Views`, which does not exist because `Views` is a constant of the page and not a property of window.
+async function testListOpensOnTheRunningApp() {
+  const harness = createAsyncRenderingContext();
+  const tiles = ['A', 'B', 'C'].map((id) => ({ id: 'game-container-' + id }));
+  const view = { index: 0, func: () => tiles, reset() { this.index = 0; } };
+  harness.context.Views.Apps.view = view;
+  const lastOpened = {};
+  harness.context.localStorage = { getItem: (key) => lastOpened[key] || null };
+  const functions = loadFunctions(['stylizeBoxArts', 'showApps'], harness.context);
+  const apps = tiles.map((tile) => ({ id: tile.id.replace('game-container-', ''), title: tile.id }));
+  const open = async (currentGame) => {
+    const boxArt = { A: deferred(), B: deferred(), C: deferred() };
+    const host = asyncRenderingHost('host', apps, boxArt, deferred());
+    host.serverUid = 'uid';
+    host.currentGame = currentGame;
+    view.index = 2;
+    const result = await outcomeWithin(functions.showApps(host), 100);
+    assert.strictEqual(result.status, 'resolved', result.error && result.error.stack);
+    return view.index;
+  };
+
+  assert.strictEqual(await open('B'), 1, 'the list opens on the app that runs');
+  lastOpened.lastOpenedApp_uid = 'C';
+  assert.strictEqual(await open(0), 2, 'with nothing running it opens on the app that was opened last');
+  lastOpened.lastOpenedApp_uid = 'gone';
+  assert.strictEqual(await open(0), 0, 'an app that is not in the list leaves it on the first one');
+}
+
 function createTrackedCard(title) {
   const card = {
     title,
@@ -895,6 +924,7 @@ const cases = {
   'apps-async-generation': testAsyncAppRenderingHonorsGeneration,
   'apps-style-once': testListRefreshesServerInfoOnceForAllApps,
   'apps-style-failures': testListStylingSurvivesFailuresAndMissingBoxes,
+  'apps-opens-on-running': testListOpensOnTheRunningApp,
   indexeddb: testIndexedDbTotality,
   'saved-identity-reload': testSavedCertificateAndHostStateSurviveReload,
   'add-host-cleanup': testAddHostTerminalCleanup,

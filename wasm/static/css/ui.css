@@ -437,6 +437,170 @@ body {
     color: var(--ui-mute);
 }
 
-#hosts-hints {
+#hosts-hints, #apps-hints {
     padding: 8px 96px 56px;
+}
+
+/* A row that scrolls has no bar: the tile that has the focus is brought to the middle */
+#host-grid::-webkit-scrollbar, #game-grid::-webkit-scrollbar {
+    display: none;
+}
+
+/* =============================
+   Library: the apps of a host in one row
+============================= */
+#apps-screen {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 128px);
+    box-sizing: border-box;
+}
+
+#apps-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+    margin: 72px 96px 0;
+}
+
+/* The room above and below the tiles is for the tile that grows and for its outline: the row clips what leaves it */
+#game-grid {
+    display: flex;
+    flex: 1;
+    gap: 40px;
+    margin: 0;
+    padding: 56px 96px 64px;
+    align-items: center;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+/* A tile does not change its size when it has the focus (that would lay out the row): it grows with a transform around the
+   middle of its box art, and the outline is a layer that only changes opacity and transform, as everywhere else */
+.ui-tile {
+    position: relative;
+    flex: none;
+    width: 260px;
+    cursor: pointer;
+    transform-origin: 50% 195px;
+    transition: transform 0.2s var(--ui-ease);
+    contain: layout style;
+}
+
+.ui-tile::after {
+    content: "";
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    left: -8px;
+    height: 406px;
+    box-sizing: border-box;
+    border: 6px solid var(--ui-ring);
+    border-radius: 36px;
+    opacity: 0;
+    transform: scale(0.97);
+    transition: opacity 0.2s var(--ui-ease), transform 0.2s var(--ui-ease);
+    pointer-events: none;
+}
+
+.ui-tile:hover::after, .ui-tile:focus::after, .ui-tile.hovered::after {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* The old stylesheet gives every highlighted element a grey wash: a tile has its own outline instead */
+.ui-tile:hover, .ui-tile:focus, .ui-tile.hovered {
+    transform: scale(1.12);
+    outline: none;
+    background: none;
+}
+
+.ui-tile__art {
+    position: relative;
+    width: 260px;
+    height: 390px;
+    box-sizing: border-box;
+    border-radius: 28px;
+    border: 2px solid var(--ui-line);
+    overflow: hidden;
+    background: url('../res/placeholder_game.svg') center / cover no-repeat var(--ui-surface);
+}
+
+.ui-tile__art img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.ui-tile__art img.fade-in {
+    opacity: 1;
+}
+
+.ui-tile:hover .ui-tile__art, .ui-tile:focus .ui-tile__art, .ui-tile.hovered .ui-tile__art {
+    border-color: var(--ui-moon);
+}
+
+/* The title keeps the room of two lines whatever it is, so that no tile is taller than the others */
+.ui-tile__cap {
+    height: 60px;
+    margin-top: 18px;
+    font: 600 26px/1.15 var(--ui-font);
+    color: var(--ui-mute);
+    overflow: hidden;
+}
+
+.ui-tile__cap .game-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    word-break: break-word;
+}
+
+.ui-tile:hover .ui-tile__cap, .ui-tile:focus .ui-tile__cap, .ui-tile.hovered .ui-tile__cap {
+    color: var(--ui-text);
+}
+
+/* The app that runs on the host: a green frame and a badge on the box art */
+.ui-tile__badge {
+    display: none;
+    position: absolute;
+    z-index: 1;
+    top: 16px;
+    left: 16px;
+}
+
+.ui-tile__badge::before {
+    content: "";
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.ui-tile.current-game-active .ui-tile__art {
+    border-color: var(--ui-ok);
+}
+
+.ui-tile.current-game-active .ui-tile__badge {
+    display: inline-flex;
+}
+
+/* The list is empty, or could not be fetched: the words stay on the screen, so there is no message that fades away.
+   The message is a child of the row like a tile is, so the navigation may mark it, and it must not get the grey wash. */
+.ui-empty, .ui-empty.hovered {
+    background: none;
+}
+
+.ui-empty {
+    max-width: 960px;
+    margin: auto;
+    text-align: center;
+    font: 500 32px/1.4 var(--ui-font);
+    color: var(--ui-mute);
 }
