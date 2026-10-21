@@ -6,7 +6,7 @@ const path = require('path');
 
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
-const { patch, PRELUDE } = require('../tools/patch-diag-dlmalloc.js');
+const { patch, PRELUDE, APPENDIX } = require('../tools/patch-diag-dlmalloc.js');
 
 // The lines of the dlmalloc of the toolchain that the patch looks at (Emscripten fastcomp, dlmalloc 2.8.6)
 const source = [
@@ -38,7 +38,7 @@ assert(/__builtin_trap\(\);/.test(PRELUDE));
 assert(/a check failed at line/.test(PRELUDE));
 
 // The lock of the main state goes through the functions that record the owner
-assert(/#define PREACTION\(M\)  \(\(use_lock\(M\)\)\? diag_acquire\(&\(M\)->mutex\) : 0\)/.test(patched));
+assert(/#define PREACTION\(M\)  \(\(use_lock\(M\)\)\? diag_acquire\(&\(M\)->mutex, __LINE__\) : 0\)/.test(patched));
 assert(/#define POSTACTION\(M\) \{ if \(use_lock\(M\)\) diag_release\(&\(M\)->mutex\); \}/.test(patched));
 assert(!/ACQUIRE_LOCK\(&\(M\)->mutex\)/.test(patched));
 assert(/got the lock while thread/.test(PRELUDE));
@@ -50,9 +50,22 @@ assert(/EMSCRIPTEN_KEEPALIVE int diag_dlmalloc_owner_is_calling_thread\(void\) \
 
 // The rest of the source is untouched: the prelude, then the source with the two lines of the lock changed
 const expected = source
-  .replace('((use_lock(M))? ACQUIRE_LOCK(&(M)->mutex) : 0)', '((use_lock(M))? diag_acquire(&(M)->mutex) : 0)')
+  .replace('((use_lock(M))? ACQUIRE_LOCK(&(M)->mutex) : 0)', '((use_lock(M))? diag_acquire(&(M)->mutex, __LINE__) : 0)')
   .replace('{ if (use_lock(M)) RELEASE_LOCK(&(M)->mutex); }', '{ if (use_lock(M)) diag_release(&(M)->mutex); }');
-assert.strictEqual(patched, PRELUDE + expected);
+assert.strictEqual(patched, PRELUDE + expected + APPENDIX);
+
+// The checks of dlmalloc for DEBUG builds are on, and every 64th entry validates the whole state under the lock
+assert(/#define DEBUG 1/.test(PRELUDE));
+assert(/#define DIAG_CHECK_EVERY 64/.test(PRELUDE));
+assert(/if \(number % DIAG_CHECK_EVERY == 0\) \{\s+diag_periodic_check\(\);/.test(PRELUDE));
+assert(/static void diag_periodic_check\(void\);/.test(PRELUDE), 'declared before the original, which does not call it but the entry does');
+assert(/static void diag_periodic_check\(void\) \{\s+do_check_malloc_state\(gm\);/.test(APPENDIX), 'defined after the original, which has the state');
+assert(patched.endsWith(APPENDIX));
+
+// The entries are told when a check fails; the JavaScript of that dump has no bare comma, which would split the arguments of EM_ASM_
+assert(/last entries into the allocator/.test(PRELUDE));
+const dump = PRELUDE.slice(PRELUDE.indexOf('EM_ASM_({\n    var base'), PRELUDE.indexOf('}, (int)(intptr_t)diag_ring'));
+assert(dump.length > 0 && !/^\s*var [^;(]*,/m.test(dump), 'one variable per statement');
 
 // A source that is not the expected one is refused, so that a toolchain update cannot produce a copy without the checks
 assert.throws(() => patch(source.replace('#define ABORT __builtin_unreachable()', '#define ABORT abort()')), /ABORT/);

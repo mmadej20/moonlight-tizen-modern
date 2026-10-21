@@ -16,7 +16,8 @@
   // whether it still holds the lock of the allocator. This is only for the build with the diagnostic dlmalloc: without
   // the question function nothing is wrapped.
 
-  var OWNER_QUESTION = 'diag_dlmalloc_owner_is_calling_thread';
+  // The exports of the module carry the underscore that the C names get (_malloc, _free, ...)
+  var OWNER_QUESTION = '_diag_dlmalloc_owner_is_calling_thread';
   var MAX_STACK_LINES = 14;
   var MAX_QUIET_REPORTS = 40;
 

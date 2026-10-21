@@ -24,7 +24,7 @@ const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8')
   let holds = 0;
   const boom = new RangeError('Maximum call stack size exceeded');
   const exportsObject = {
-    diag_dlmalloc_owner_is_calling_thread() { return holds; },
+    _diag_dlmalloc_owner_is_calling_thread() { return holds; },
     fine(a, b) { return a + b; },
     bad() { throw boom; },
     memory: { buffer: 1 }
@@ -60,7 +60,7 @@ const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8')
 {
   const lines = [];
   const exportsObject = {
-    diag_dlmalloc_owner_is_calling_thread() { throw new Error('cannot ask'); },
+    _diag_dlmalloc_owner_is_calling_thread() { throw new Error('cannot ask'); },
     odd() { throw 'Atomics.notify returned an unexpected value -1'; }
   };
   const recorder = WasmExceptionRecorder.create({ log: (line) => lines.push(line) });
@@ -76,7 +76,7 @@ const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8')
   const lines = [];
   let holds = 0;
   const exportsObject = {
-    diag_dlmalloc_owner_is_calling_thread() { return holds; },
+    _diag_dlmalloc_owner_is_calling_thread() { return holds; },
     bad() { throw new Error('x'); }
   };
   const recorder = WasmExceptionRecorder.create({ log: (line) => lines.push(line) });
@@ -95,7 +95,7 @@ const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8')
 // A failing log does not change what the caller sees
 {
   const exportsObject = {
-    diag_dlmalloc_owner_is_calling_thread() { return 0; },
+    _diag_dlmalloc_owner_is_calling_thread() { return 0; },
     bad() { throw new Error('original'); }
   };
   const recorder = WasmExceptionRecorder.create({ log() { throw new Error('log failed'); } });
@@ -111,6 +111,7 @@ const recorderPosition = html.indexOf('src="platform/wasm_exception_recorder.js"
 assert(recorderPosition > 0 && recorderPosition < html.indexOf('src="platform/common.js"'));
 assert(/WasmExceptionRecorder\.create\(\{/.test(common) && /window\.wasmExceptionRecorder\.install\(Module\);/.test(common));
 assert(common.indexOf('wasmExceptionRecorder.install(Module)') < common.indexOf('window.moduleDidLoad();'), 'before the application calls the module');
-assert(new RegExp(WasmExceptionRecorder.OWNER_QUESTION).test(patcher), 'the diagnostic allocator exports the function that the recorder asks');
+assert.strictEqual(WasmExceptionRecorder.OWNER_QUESTION, '_diag_dlmalloc_owner_is_calling_thread', 'the exports of the module carry the underscore of the C names');
+assert(patcher.indexOf(WasmExceptionRecorder.OWNER_QUESTION.slice(1) + '(void)') > 0, 'the diagnostic allocator exports the function that the recorder asks');
 
 console.log('wasm_exception_recorder_tests: PASS');
