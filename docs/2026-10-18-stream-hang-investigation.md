@@ -617,3 +617,36 @@ pomiaru.
 **Dalej (`diag9`, commit `9ff7c2a`).** Zamiast pauzy rejestrator w stronie (`wasm/platform/wasm_exception_recorder.js`)
 owija eksporty modułu na głównym wątku, a przy wyjątku pyta moduł, czy wątek nadal jest zapisanym właścicielem blokady
 (`diag_dlmalloc_owner_is_calling_thread`). Raport trafia do konsoli (`[wasm-exception] ...`), bez zatrzymywania wątku.
+
+## 19. `diag9`: alokator zwraca pamięć nachodzącą na żywe bloki, rozjazd o 8 bajtów (2026-10-21)
+
+Test: `diag9` w debugu, watcher bez pauzowania wątków (obraz działa), dławienie 12 Mbps. Zawieszenie ok. 2 min po
+włączeniu dławienia, po raz pierwszy z pełnym zapisem kolejności zdarzeń (czasy UTC, 11:04:55):
+
+1. `.291` tracker: żywy blok ENet 36 B (`0x32aa710`, wątek LossStats, 451 ms wcześniej) ma nadpisaną **czerwoną strefę
+   przed sobą**; potem jeszcze kilka razy (raporty 2-4).
+2. `.487` tracker: **`overlapping allocation`**: alokator zwrócił blok 84 B (`0x32aa668`, InputSend) nachodzący na żywy
+   blok 84 B (`0x32aa698`, InputSend, 668 ms wcześniej).
+3. `.525` wątek `ControlRecv` (`controlReceiveThreadFunc` → `serviceEnetHost` → `enet_protocol_send_outgoing_commands`
+   → `enet_socket_send` → `free`) rzuca `memory access out of bounds`: w `free` kolejny chunk ma „nagłówek"
+   `0xa5a5a5a5`, czyli wzorzec czerwonej strefy trackera. Wątek trzyma blokadę, reszta staje.
+
+**Układ pamięci** (zrzut 0x32aa600-0x32aa800 z wątku po trapie): chunk `0x32aa650` (120 B, blok 84 B z drugiego
+zdarzenia) i chunk `0x32aa6c8` (56 B, tymczasowy bufor 52 B z `enet_socket_send`) zajmują pamięć, którą tracker przypisuje
+żywemu blokowi 120 B w `0x32aa680` i blokowi 72 B w `0x32aa6f8`. Wolny chunk, z którego alokator wydał te dwa chunki,
+miał zapisany rozmiar 176 B, a jego koniec wypadał o 8 B za rzeczywistym początkiem następnego chunka (`0x32aa700`
+zamiast `0x32aa6f8`). To jest „+8 / nagłówek wolnego chunka rozjechany" z poprzednich zawieszeń; wyścigu dwóch wątków
+w alokatorze nadal nie widać (żadnego „got the lock while thread X is still inside").
+
+**Wniosek.** Awaria zaczyna się od wolnego chunka z błędnym rozmiarem; reszta (strefy, nachodzące bloki, trap w `free`)
+to skutki. Poprzednia kopia dlmalloc tego nie wykrywała, bo `DEBUG` był wyłączony i `check_*` były pustymi makrami
+(włączone było tylko `ABORT` dla `RTCHECK`).
+
+**Rejestrator wyjątków (`9ff7c2a`).** W `diag9` nie zadziałał: eksporty modułu mają podkreślnik (`_malloc`,
+`_diag_dlmalloc_owner_is_calling_thread`), a rejestrator szukał nazwy bez niego, więc nic nie owinął. Naprawione w
+`a631628`; zawieszenie `diag9` było i tak typu „trap w `free` na wątku roboczym", więc główny wątek nie był winny.
+
+**Dalej (`diag10`, `a631628`).** `DEBUG 1` w kopii dlmalloc i co 64. wejście pod blokadą `do_check_malloc_state(gm)`
+(wszystkie chunki, biny, drzewa) z zapisem ostatnich 256 wejść (numer, wątek, linia w dlmalloc). Pierwszy rozjazd
+metadanych zatrzyma wątek i wypisze 64 ostatnie wejścia. Test na hoście (`dl_harness.c`: 4 wątki, 2,4 mln wejść) bez
+fałszywych alarmów; celowo zwiększony o 8 nagłówek wolnego chunka jest wykrywany.
