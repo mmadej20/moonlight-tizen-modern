@@ -9,9 +9,9 @@
 //     tells the line of the check on the console;
 //   - the lock of the main allocator state records its owner, and a thread that gets the lock while another one is
 //     recorded as inside, or releases a lock that another one is recorded to own, says so on the console;
-//   - the checks of dlmalloc for DEBUG builds are on, and every 64th entry into the allocator, under its lock, validates
+//   - the checks of dlmalloc for DEBUG builds are on, and every 16th entry into the allocator, under its lock, validates
 //     the whole state (every chunk of the heap, the bins, the trees). The first entry that finds the state damaged stops
-//     the thread and tells the last 64 entries (number, thread, line of the entry in dlmalloc), so that the operation that
+//     the thread and tells the last 64 entries (number, thread, line of the entry in dlmalloc, and for malloc and free the size or pointer), so that the operation that
 //     damaged the heap is among them.
 //
 // Usage: node patch-diag-dlmalloc.js <dlmalloc.c of the toolchain> <output file>
@@ -29,8 +29,8 @@ var PRELUDE = [
   '#include <pthread.h>',
   '#include <stdint.h>',
   '#define DIAG_RING 256',
-  '#define DIAG_CHECK_EVERY 64',
-  'typedef struct { unsigned int seq; int thread; int line; } diag_entry;',
+  '#define DIAG_CHECK_EVERY 16',
+  'typedef struct { unsigned int seq; int thread; int line; int kind; unsigned int arg; } diag_entry;',
   'static diag_entry diag_ring[DIAG_RING];',
   'static unsigned int diag_seq;',
   'static void diag_periodic_check(void);',
@@ -43,9 +43,11 @@ var PRELUDE = [
   '    var n = $2;',
   '    var out = [];',
   '    for (var s = seq; s > 0 && s > seq - 64; s--) {',
-  '      var e = base + (s % n) * 3;',
+  '      var e = base + (s % n) * 5;',
   '      if (HEAPU32[e] !== s) break;',
-  '      out.push(s + ":" + (HEAP32[e + 1] >>> 0).toString(16) + "@" + HEAP32[e + 2]);',
+  '      var kind = HEAP32[e + 3];',
+  '      var what = kind == 1 ? " malloc(" + HEAPU32[e + 4] + ")" : (kind == 2 ? " free(0x" + HEAPU32[e + 4].toString(16) + ")" : "");',
+  '      out.push(s + ":" + (HEAP32[e + 1] >>> 0).toString(16) + "@" + HEAP32[e + 2] + what);',
   '    }',
   '    console.error("dlmalloc: last entries into the allocator, newest first (number:thread@line): " + out.join(" "));',
   '  }, (int)(intptr_t)diag_ring, diag_seq, DIAG_RING);',
@@ -53,7 +55,7 @@ var PRELUDE = [
   '}',
   '#define ABORT diag_dlmalloc_abort(__LINE__)',
   'static volatile int diag_owner;',
-  'static int diag_acquire(pthread_mutex_t* lk, int line) {',
+  'static int diag_acquire(pthread_mutex_t* lk, int line, int kind, unsigned int arg) {',
   '  int r = pthread_mutex_lock(lk);',
   '  if (r == 0) {',
   '    int me = (int)(intptr_t)pthread_self();',
@@ -67,6 +69,8 @@ var PRELUDE = [
   '      diag_ring[number % DIAG_RING].seq = number;',
   '      diag_ring[number % DIAG_RING].thread = me;',
   '      diag_ring[number % DIAG_RING].line = line;',
+  '      diag_ring[number % DIAG_RING].kind = kind;',
+  '      diag_ring[number % DIAG_RING].arg = arg;',
   '      if (number % DIAG_CHECK_EVERY == 0) {',
   '        diag_periodic_check();',
   '      }',
@@ -94,12 +98,19 @@ var PRELUDE = [
 var REPLACEMENTS = [
   [
     '#define PREACTION(M)  ((use_lock(M))? ACQUIRE_LOCK(&(M)->mutex) : 0)',
-    '#define PREACTION(M)  ((use_lock(M))? diag_acquire(&(M)->mutex, __LINE__) : 0)'
+    '#define PREACTION(M)  ((use_lock(M))? diag_acquire(&(M)->mutex, __LINE__, 0, 0) : 0)\n' +
+    '#define PREACTION_OP(M, KIND, ARG)  ((use_lock(M))? diag_acquire(&(M)->mutex, __LINE__, (KIND), (ARG)) : 0)'
   ],
   [
     '#define POSTACTION(M) { if (use_lock(M)) RELEASE_LOCK(&(M)->mutex); }',
     '#define POSTACTION(M) { if (use_lock(M)) diag_release(&(M)->mutex); }'
   ]
+];
+
+// The first entry of these two functions says which operation it is and on what: malloc of so many bytes, free of that pointer
+var OPERATIONS = [
+  ['void* dlmalloc(size_t bytes) {', 'PREACTION(gm)', 'PREACTION_OP(gm, 1, (unsigned int)bytes)'],
+  ['void dlfree(void* mem) {', 'PREACTION(fm)', 'PREACTION_OP(fm, 2, (unsigned int)(uintptr_t)mem)']
 ];
 
 // Appended after the original: the validation of the whole state needs the types and the global state defined there
@@ -127,6 +138,18 @@ function patch(source) {
       throw new Error('expected exactly one: ' + REPLACEMENTS[i][0]);
     }
     text = pieces.join(REPLACEMENTS[i][1]);
+  }
+  for (i = 0; i < OPERATIONS.length; i++) {
+    var start = text.split(OPERATIONS[i][0]);
+    if (start.length !== 2) {
+      throw new Error('expected exactly one: ' + OPERATIONS[i][0]);
+    }
+    var after = start[1];
+    var at = after.indexOf(OPERATIONS[i][1]);
+    if (at < 0) {
+      throw new Error('no ' + OPERATIONS[i][1] + ' after: ' + OPERATIONS[i][0]);
+    }
+    text = start[0] + OPERATIONS[i][0] + after.slice(0, at) + OPERATIONS[i][2] + after.slice(at + OPERATIONS[i][1].length);
   }
   return PRELUDE + text + APPENDIX;
 }

@@ -26,6 +26,10 @@ const source = [
   '#define PREACTION(M)  ((use_lock(M))? ACQUIRE_LOCK(&(M)->mutex) : 0)',
   '#define POSTACTION(M) { if (use_lock(M)) RELEASE_LOCK(&(M)->mutex); }',
   '#endif',
+  'void* dlmalloc(size_t bytes) {',
+  '  if (!PREACTION(gm)) {',
+  'void dlfree(void* mem) {',
+  '  if (!PREACTION(fm)) {',
   ''
 ].join('\n');
 
@@ -38,7 +42,7 @@ assert(/__builtin_trap\(\);/.test(PRELUDE));
 assert(/a check failed at line/.test(PRELUDE));
 
 // The lock of the main state goes through the functions that record the owner
-assert(/#define PREACTION\(M\)  \(\(use_lock\(M\)\)\? diag_acquire\(&\(M\)->mutex, __LINE__\) : 0\)/.test(patched));
+assert(/#define PREACTION\(M\)  \(\(use_lock\(M\)\)\? diag_acquire\(&\(M\)->mutex, __LINE__, 0, 0\) : 0\)/.test(patched));
 assert(/#define POSTACTION\(M\) \{ if \(use_lock\(M\)\) diag_release\(&\(M\)->mutex\); \}/.test(patched));
 assert(!/ACQUIRE_LOCK\(&\(M\)->mutex\)/.test(patched));
 assert(/got the lock while thread/.test(PRELUDE));
@@ -50,13 +54,19 @@ assert(/EMSCRIPTEN_KEEPALIVE int diag_dlmalloc_owner_is_calling_thread\(void\) \
 
 // The rest of the source is untouched: the prelude, then the source with the two lines of the lock changed
 const expected = source
-  .replace('((use_lock(M))? ACQUIRE_LOCK(&(M)->mutex) : 0)', '((use_lock(M))? diag_acquire(&(M)->mutex, __LINE__) : 0)')
+  .replace('((use_lock(M))? ACQUIRE_LOCK(&(M)->mutex) : 0)', '((use_lock(M))? diag_acquire(&(M)->mutex, __LINE__, 0, 0) : 0)\n' +
+    '#define PREACTION_OP(M, KIND, ARG)  ((use_lock(M))? diag_acquire(&(M)->mutex, __LINE__, (KIND), (ARG)) : 0)')
+  .replace('if (!PREACTION(gm)) {', 'if (!PREACTION_OP(gm, 1, (unsigned int)bytes)) {')
+  .replace('if (!PREACTION(fm)) {', 'if (!PREACTION_OP(fm, 2, (unsigned int)(uintptr_t)mem)) {')
   .replace('{ if (use_lock(M)) RELEASE_LOCK(&(M)->mutex); }', '{ if (use_lock(M)) diag_release(&(M)->mutex); }');
 assert.strictEqual(patched, PRELUDE + expected + APPENDIX);
 
-// The checks of dlmalloc for DEBUG builds are on, and every 64th entry validates the whole state under the lock
+// The checks of dlmalloc for DEBUG builds are on, and every 16th entry validates the whole state under the lock
 assert(/#define DEBUG 1/.test(PRELUDE));
-assert(/#define DIAG_CHECK_EVERY 64/.test(PRELUDE));
+assert(/#define DIAG_CHECK_EVERY 16/.test(PRELUDE));
+// A malloc and a free say what they were asked for: the ring keeps the kind and the argument of the entry
+assert(/int kind; unsigned int arg;/.test(PRELUDE));
+assert.throws(() => patch(source.replace('void dlfree(void* mem) {', 'void dlfree2(void* mem) {')), /exactly one/);
 assert(/if \(number % DIAG_CHECK_EVERY == 0\) \{\s+diag_periodic_check\(\);/.test(PRELUDE));
 assert(/static void diag_periodic_check\(void\);/.test(PRELUDE), 'declared before the original, which does not call it but the entry does');
 assert(/static void diag_periodic_check\(void\) \{\s+do_check_malloc_state\(gm\);/.test(APPENDIX), 'defined after the original, which has the state');
