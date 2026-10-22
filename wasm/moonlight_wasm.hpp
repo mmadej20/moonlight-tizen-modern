@@ -26,6 +26,7 @@
 #include "owned_pthread.hpp"
 #include "request_registry.hpp"
 #include "rumble_dedupe.hpp"
+#include "stream_menu_gate.hpp"
 #include "stop_sequence.hpp"
 
 #include "samsung/wasm/elementary_media_stream_source.h"

@@ -13,6 +13,7 @@
 #include <string>
 #include <algorithm>
 #include <vector>
+#include <atomic>
 
 #include <Limelight.h>
 #include <emscripten/emscripten.h>
@@ -29,9 +30,12 @@ const short PERF_STATS_BUTTONS = BACK_FLAG | LB_FLAG | RB_FLAG | X_FLAG;
 // Flag for gamepad to track controller rumble state
 bool rumbleFeedbackSwitch = false;
 
-// Flags for gamepad to track mouse emulation state
-bool mouseEmulationSwitch = false;
-bool mouseEmulationActive = false;
+// Flags for gamepad to track mouse emulation state. The page reads and flips them from the stream menu, so they are atomic
+std::atomic<bool> mouseEmulationSwitch{false};
+std::atomic<bool> mouseEmulationActive{false};
+
+// Holding Select is the Select flag of the stream menu gate: it has to be the Select (Back) flag of the protocol
+static_assert(StreamMenuGate::kSelectFlag == BACK_FLAG, "The stream menu gate holds the Select button");
 
 // Flags for gamepad to track face buttons state
 bool flipABfaceButtonsSwitch = false;
@@ -257,6 +261,9 @@ void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback, bool mouseE
   s_ControllerSendFilter.ResetAll();
   s_RumbleDedupe.Reset();
 
+  // A new stream starts with the stream menu closed, whatever happened to the last one
+  MenuGate().SetCaptured(false);
+
   // Store the new settings for use during polling
   rumbleFeedbackSwitch = rumbleFeedback;
   mouseEmulationSwitch = mouseEmulation;
@@ -447,6 +454,12 @@ bool MoonlightInstance::PollGamepads() {
     const auto rightStickY = -gamepad.axis[GamepadAxis::RightY]
       * std::numeric_limits<short>::max();
 
+    // Holding Select alone for a second opens the stream menu. The gate takes the input from the host at once, and the page is
+    // told (without making this thread wait for it) to show the menu
+    if (MenuGate().UpdateHold(gamepadID, MonotonicNowMs(), static_cast<uint16_t>(buttonFlags))) {
+      PostToJsAsync(std::string("streamMenuOpen"));
+    }
+
     // Check if the current button flags match the defined button combination on the gamepad
     if (buttonFlags == STOP_STREAM_BUTTONS) {
       // Terminate the connection
@@ -464,11 +477,14 @@ bool MoonlightInstance::PollGamepads() {
       comboTriggered[gamepadID] = false;
     }
 
+    // While the stream menu is open the buttons belong to it, and Start does not toggle the mouse emulation
+    const bool menuCaptured = MenuGate().IsCaptured();
+
     // Check if the mouse emulation switch is checked
     if (mouseEmulationSwitch) {
       static std::map<int, std::chrono::time_point<std::chrono::steady_clock>> activatePressTimes;
       // Toggle mouse emulation on and off based on how long the PLAY/START button is pressed
-      if (buttonFlags & PLAY_FLAG) {
+      if (!menuCaptured && (buttonFlags & PLAY_FLAG)) {
         if (activatePressTimes.find(gamepadID) == activatePressTimes.end()) {
           activatePressTimes[gamepadID] = std::chrono::steady_clock::now();
         }
@@ -497,6 +513,21 @@ bool MoonlightInstance::PollGamepads() {
     } else {
       // Deactivate mouse emulation if the mouse emulation switch is unchecked
       mouseEmulationActive = false;
+    }
+
+    // While the stream menu is open the host gets one neutral state and then nothing, and after it nothing until the buttons that
+    // were down are up (see stream_menu_gate.hpp)
+    const auto decision = MenuGate().Decide(gamepadID, static_cast<uint16_t>(buttonFlags));
+    if (decision != StreamMenuGate::SendDecision::Send) {
+      if (decision == StreamMenuGate::SendDecision::SendNeutral) {
+        LiSendMultiControllerEvent(gamepadID, activeGamepadMask, 0, 0, 0, 0, 0, 0, 0);
+        LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+        LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_MIDDLE);
+        LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
+        // What the host holds is not what the filter remembers: the next state goes out at once
+        s_ControllerSendFilter.Reset(gamepadID);
+      }
+      continue;
     }
 
     // If mouse emulation is active, then send mouse input to the desired handler (acts as a mouse)
@@ -583,4 +614,29 @@ void MoonlightInstance::ClControllerRumble(unsigned short controllerNumber, unsi
       }
     }, controllerNumber, lowFreqMotor, highFreqMotor);
   }
+}
+
+// The stream menu of the page: it takes the input from the host while it is open, and shows the state of the mouse emulation
+static void setInputCaptured(bool captured) {
+  MenuGate().SetCaptured(captured);
+}
+
+static bool isMouseEmulationActive() {
+  return mouseEmulationActive.load();
+}
+
+// The same switch as the Start button held for a second, for the menu. It does nothing when the setting is off
+static void toggleMouseEmulation() {
+  if (!mouseEmulationSwitch.load()) {
+    return;
+  }
+  const bool active = !mouseEmulationActive.load();
+  mouseEmulationActive = active;
+  PostToJs(std::string(active ? "mouseEmulationOn" : "mouseEmulationOff"));
+}
+
+EMSCRIPTEN_BINDINGS(stream_menu) {
+  emscripten::function("setInputCaptured", &setInputCaptured);
+  emscripten::function("isMouseEmulationActive", &isMouseEmulationActive);
+  emscripten::function("toggleMouseEmulation", &toggleMouseEmulation);
 }
