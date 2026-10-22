@@ -24,9 +24,9 @@ function createFixture(options) {
       adjust(steps, source) { calls.push('volume ' + steps + ' ' + source); state.volume += steps; return { volume: state.volume, muted: state.muted }; },
       read() { return { volume: state.volume, muted: state.muted }; }
     },
-    enter() { calls.push('enter'); },
-    leave() { calls.push('leave'); },
-    render(model) { renders.push(model); },
+    enter() { calls.push('enter'); if (options.enterThrows) throw new Error('enter failed'); },
+    leave() { calls.push('leave'); if (options.leaveThrows) throw new Error('leave failed'); },
+    render(model) { if (options.renderThrows) throw new Error('render failed'); renders.push(model); },
     statsOn: () => state.stats,
     mouseEnabled: () => state.mouseSetting,
     disconnect() { calls.push('disconnect'); },
@@ -56,6 +56,28 @@ const ids = (model) => model.items.map((item) => item.id);
   assert.strictEqual(menu.isOpen(), true);
   menu.toggle();
   assert.strictEqual(menu.isOpen(), false);
+}
+
+// A menu that cannot open must not leave the controller dead: the host gets its input back, and the next try is possible
+{
+  for (const failing of ['enterThrows', 'renderThrows']) {
+    const options = {};
+    options[failing] = true;
+    const { menu, calls } = createFixture(options);
+    assert.doesNotThrow(() => menu.open(), failing);
+    assert.strictEqual(menu.isOpen(), false, failing + ': a menu that failed to open is not open');
+    assert.strictEqual(calls[calls.length - 1], 'captured false', failing + ': the input goes back to the game last');
+    assert(calls.some((call) => /^log Stream menu: could not open: /.test(call)), failing + ': the reason is logged');
+    assert(calls.includes('leave'), failing + ': what the page took is given back');
+    assert.strictEqual(menu.open(), false, failing + ': it fails the same way again, and again lets go');
+  }
+  // The page that fails to give its controls back still gives the host its input
+  const { menu, calls } = createFixture({ leaveThrows: true });
+  menu.open();
+  calls.length = 0;
+  assert.doesNotThrow(() => menu.close());
+  assert.strictEqual(menu.isOpen(), false);
+  assert.deepStrictEqual(calls.filter((call) => !/^log /.test(call)), ['leave', 'captured false']);
 }
 
 // The items, in the order of the board

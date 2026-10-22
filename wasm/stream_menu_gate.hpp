@@ -12,6 +12,9 @@ class StreamMenuGate {
  public:
   static constexpr int kMaxSlots = 16;
   static constexpr int64_t kHoldMs = 1000;
+  // The pad takes the input at once and tells the page, and the page confirms by taking it too. A page that does not within this
+  // time (the message was lost, the menu could not open) must not leave the controller dead: the input goes back to the game
+  static constexpr int64_t kConfirmMs = 2000;
   static constexpr uint16_t kSelectFlag = 0x0020;  // BACK_FLAG of Limelight.h (gamepad.cpp asserts that it is the same)
 
   enum class SendDecision {
@@ -33,7 +36,7 @@ class StreamMenuGate {
       hold.since = kNone;
       return false;
     }
-    if (m_Captured.load()) {
+    if (IsCaptured()) {
       hold.armed = false;
       hold.since = kNone;
       return false;
@@ -50,15 +53,33 @@ class StreamMenuGate {
     if (nowMs - hold.since >= kHoldMs) {
       hold.since = kNone;
       hold.armed = false;
-      m_Captured.store(true);
+      // The page has not taken the input yet: the hold is pending until it does, or until ReleaseIfNotTaken gives up on it
+      m_FiredAt.store(static_cast<uint32_t>(nowMs));
+      int expected = kFree;
+      if (!m_State.compare_exchange_strong(expected, kPending)) {
+        return false;
+      }
       return true;
     }
     return false;
   }
 
-  // Called from the thread of the page; the polling thread reads it
-  void SetCaptured(bool captured) { m_Captured.store(captured); }
-  bool IsCaptured() const { return m_Captured.load(); }
+  // Called from the thread of the page (the polling thread reads it): the page takes the input, or gives it back
+  void SetCaptured(bool captured) { m_State.store(captured ? kTaken : kFree); }
+  bool IsCaptured() const { return m_State.load() != kFree; }
+
+  // A hold that the page has not answered within kConfirmMs is released. Returns true once, when it did that. The polling thread
+  // calls it on every round. A menu that the page opened itself (the remote) has no pending hold, so it never expires.
+  bool ReleaseIfNotTaken(int64_t nowMs) {
+    // Times that several threads share are 32 bits wide (the toolchain has no working 64-bit atomics): the low 32 bits of the
+    // millisecond clock, which compare exactly for spans shorter than 24 days
+    const int32_t elapsed = static_cast<int32_t>(static_cast<uint32_t>(nowMs) - m_FiredAt.load());
+    if (m_State.load() != kPending || elapsed < static_cast<int32_t>(kConfirmMs)) {
+      return false;
+    }
+    int expected = kPending;
+    return m_State.compare_exchange_strong(expected, kFree);
+  }
 
   // What to do with the state of one controller. While the menu is open the host gets one neutral state and then nothing. After
   // it nothing goes either, until the controller had no button down once: the button that closed the menu is still down, and
@@ -68,7 +89,7 @@ class StreamMenuGate {
       return SendDecision::Send;
     }
     Phase& phase = m_Phases[slot];
-    const bool captured = m_Captured.load();
+    const bool captured = IsCaptured();
     switch (phase) {
       case Phase::Normal:
         if (captured) {
@@ -112,7 +133,12 @@ class StreamMenuGate {
 
   static bool InRange(int slot) { return slot >= 0 && slot < kMaxSlots; }
 
-  std::atomic<bool> m_Captured{false};
+  static constexpr int kFree = 0;     // the input goes to the game
+  static constexpr int kPending = 1;  // the pad opened the menu, the page has not answered yet
+  static constexpr int kTaken = 2;    // the page has the input
+
+  std::atomic<int> m_State{kFree};
+  std::atomic<uint32_t> m_FiredAt{0};
   Hold m_Holds[kMaxSlots];
   Phase m_Phases[kMaxSlots] = {};
 };

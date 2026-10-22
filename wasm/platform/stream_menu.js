@@ -52,6 +52,12 @@
       }
     }
 
+    function log(text) {
+      if (typeof env.log === 'function') {
+        env.log(text);
+      }
+    }
+
     function statsOn() {
       return pendingStats !== null ? pendingStats : !!env.statsOn();
     }
@@ -84,8 +90,21 @@
       pendingStats = null;
       // The host stops getting input first (the native side did it already when the pad opened the menu), then the page changes
       callNative('setInputCaptured', true);
-      env.enter();
-      render();
+      try {
+        env.enter();
+        render();
+      } catch (error) {
+        // A menu that cannot open must not leave the controller dead: what the page took is given back, and so is the input
+        opened = false;
+        log('Stream menu: could not open: ' + error.message);
+        try {
+          env.leave();
+        } catch (leaveError) {
+          log('Stream menu: could not give the controls back: ' + leaveError.message);
+        }
+        callNative('setInputCaptured', false);
+        return false;
+      }
       return true;
     }
 
@@ -95,8 +114,13 @@
       }
       opened = false;
       pendingStats = null;
-      // The page gives its controls back first, so that nothing it still reads reaches the host; then the host gets the input
-      env.leave();
+      // The page gives its controls back first, so that nothing it still reads reaches the host; then the host gets the input,
+      // whatever became of the controls
+      try {
+        env.leave();
+      } catch (error) {
+        log('Stream menu: could not give the controls back: ' + error.message);
+      }
       callNative('setInputCaptured', false);
       return true;
     }

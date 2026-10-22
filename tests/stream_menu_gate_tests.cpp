@@ -165,6 +165,65 @@ int main() {
     assert(gate.Decide(1, 0) == Decision::Skip);
   }
 
+  // The pad takes the input at once, and the page confirms by taking it too. A page that never does (the message was lost, the
+  // page failed to open the menu) must not leave the controller dead: after kConfirmMs the input goes back to the game
+  {
+    StreamMenuGate gate;
+    assert(!gate.UpdateHold(0, 100, kBack));
+    assert(gate.UpdateHold(0, 1100, kBack));
+    assert(gate.IsCaptured());
+    // The polling thread goes on: the host got its neutral state, and nothing after it
+    assert(gate.Decide(0, kBack) == Decision::SendNeutral);
+    assert(gate.Decide(0, kBack) == Decision::Skip);
+    assert(!gate.ReleaseIfNotTaken(1100));
+    assert(!gate.ReleaseIfNotTaken(1100 + StreamMenuGate::kConfirmMs - 1));
+    assert(gate.IsCaptured());
+    assert(gate.ReleaseIfNotTaken(1100 + StreamMenuGate::kConfirmMs));
+    assert(!gate.IsCaptured());
+    assert(!gate.ReleaseIfNotTaken(1100 + 10 * StreamMenuGate::kConfirmMs));
+    // The controller still waits for its buttons to be up before the game sees them again
+    assert(gate.Decide(0, kBack) == Decision::Skip);
+    assert(gate.Decide(0, 0) == Decision::Send);
+    // And the Select that is still down does not open the menu again until it was released
+    assert(!gate.UpdateHold(0, 4000, kBack));
+    assert(!gate.UpdateHold(0, 9000, kBack));
+    assert(!gate.UpdateHold(0, 9100, 0));
+    assert(!gate.UpdateHold(0, 9200, kBack));
+    assert(gate.UpdateHold(0, 10200, kBack));
+  }
+  {
+    // The page took the input (it opened the menu): it is the page that gives it back, however long that takes
+    StreamMenuGate gate;
+    assert(!gate.UpdateHold(0, 0, kBack));
+    assert(gate.UpdateHold(0, 1000, kBack));
+    gate.SetCaptured(true);
+    assert(!gate.ReleaseIfNotTaken(1000 + 100 * StreamMenuGate::kConfirmMs));
+    assert(gate.IsCaptured());
+    gate.SetCaptured(false);
+    assert(!gate.IsCaptured());
+  }
+  {
+    // A menu that the remote opened has no pending hold to expire
+    StreamMenuGate gate;
+    gate.SetCaptured(true);
+    assert(!gate.ReleaseIfNotTaken(1000000));
+    assert(gate.IsCaptured());
+  }
+  {
+    // The page released the input before the time was up: nothing is left to expire, and a new hold works
+    StreamMenuGate gate;
+    assert(!gate.UpdateHold(0, 0, kBack));
+    assert(gate.UpdateHold(0, 1000, kBack));
+    gate.SetCaptured(false);
+    assert(!gate.ReleaseIfNotTaken(1000 + StreamMenuGate::kConfirmMs));
+    assert(!gate.UpdateHold(0, 1500, 0));
+    assert(!gate.UpdateHold(0, 2000, kBack));
+    assert(gate.UpdateHold(0, 3000, kBack));
+    // The pending hold of the second fire expires on its own clock, not on the first
+    assert(!gate.ReleaseIfNotTaken(3000 + StreamMenuGate::kConfirmMs - 1));
+    assert(gate.ReleaseIfNotTaken(3000 + StreamMenuGate::kConfirmMs));
+  }
+
   std::puts("stream_menu_gate_tests: PASS");
   return 0;
 }

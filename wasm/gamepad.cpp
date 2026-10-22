@@ -430,6 +430,12 @@ bool MoonlightInstance::PollGamepads() {
     }
   }
 
+  // A stream menu that the pad opened and the page did not take over (the message was lost, the page failed to open it) gives the
+  // input back to the game instead of leaving the controller dead until the next stream
+  if (MenuGate().ReleaseIfNotTaken(MonotonicNowMs())) {
+    ClLogMessage("The page did not open the stream menu in time, so the controllers go back to the game\n");
+  }
+
   // Process live input for every real, already-announced controller
   for (int gamepadID = 0; gamepadID < limit; ++gamepadID) {
     // Skip slots that are inactive or still waiting for a successful arrival

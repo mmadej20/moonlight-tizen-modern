@@ -346,6 +346,9 @@ function handleMessage(msg) {
     // The pad held Select for a second: the native side has taken the input already, the menu takes the controls
     if (isInGame === true) {
       StreamMenu.open();
+    } else if (typeof Module !== 'undefined') {
+      // Not in a stream (it ended meanwhile): the native side must not keep the input from anyone
+      Module.setInputCaptured(false);
     }
   } else if (msg === 'displayVideo') {
     // Show the video stream now

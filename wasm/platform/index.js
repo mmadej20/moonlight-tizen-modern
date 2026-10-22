@@ -3028,6 +3028,9 @@ const StreamMenu = StreamMenuSupport.createMenu({
   log: logDiagnostic
 });
 
+// Whether the view of the menu is on the stack of the navigation: only a view that was pushed is popped
+var streamMenuPushed = false;
+
 // The menu takes the controls: the loop that reads the pads for the interface (paused for the stream) runs again, from fresh
 // snapshots because the Select that opened the menu is still down, and the navigation works on the menu
 function enterStreamMenu() {
@@ -3051,6 +3054,7 @@ function enterStreamMenu() {
   Navigation.start();
   Views.StreamMenu.view.reset();
   Navigation.push(Views.StreamMenu);
+  streamMenuPushed = true;
   Navigation.focus();
   hideVolumeBar();
   menu.classList.add('is-open');
@@ -3068,7 +3072,10 @@ function leaveStreamMenu() {
     isDialogOpen = false;
     Navigation.pop();
   }
-  Navigation.pop();
+  if (streamMenuPushed) {
+    streamMenuPushed = false;
+    Navigation.pop();
+  }
   if (typeof Controller !== 'undefined' && Controller) {
     Controller.stopWatching();
     isUiGamepadPaused = true;

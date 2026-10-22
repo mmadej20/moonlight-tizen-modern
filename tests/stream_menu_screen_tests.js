@@ -167,7 +167,7 @@ function createPage(options) {
     Navigation: {
       start: () => calls.push('Navigation.start'),
       stop: () => calls.push('Navigation.stop'),
-      push: (view) => calls.push('push ' + view.name),
+      push: (view) => { if (options.pushThrows) throw new Error('push failed'); calls.push('push ' + view.name); },
       pop: () => calls.push('pop'),
       focus: () => calls.push('Navigation.focus')
     },
@@ -184,7 +184,8 @@ function createPage(options) {
   vm.createContext(context);
   const code = ['enterStreamMenu', 'leaveStreamMenu', 'renderStreamMenu', 'quitFromStreamMenu'].map((name) => extractFunction(index, name)).join('\n');
   const creation = extractBlock(index, 'const StreamMenu = StreamMenuSupport.createMenu(') + ');';
-  vm.runInContext(code + '\n' + creation, context);
+  assert(/^var streamMenuPushed = false;/m.test(index), 'the page declares what the menu pushed');
+  vm.runInContext('var streamMenuPushed = false;\n' + code + '\n' + creation, context);
   return { context, calls, state, element, cells, menu: vm.runInContext('StreamMenu', context), hooks: () => hooks };
 }
 
@@ -203,6 +204,19 @@ function createPage(options) {
   assert.deepStrictEqual(page.element('stream-menu-chips').children.map((chip) => chip.textContent), ['1440p · 60 FPS', 'HEVC · HDR', '60 Mbps']);
   assert.strictEqual(page.element('stream-menu-volume').textContent, '70%');
   assert.strictEqual(page.cells.filter((cell) => cell.classList.contains('is-on')).length, 7, 'seventy percent is seven cells of ten');
+}
+
+// An opening that fails half way (the view could not be pushed) leaves nothing behind: the views are not popped, the loop of the
+// pads is paused again, and the host gets its input back
+{
+  const page = createPage({ pushThrows: true });
+  assert.strictEqual(page.menu.open(), false);
+  assert.strictEqual(page.menu.isOpen(), false);
+  assert(!page.calls.includes('pop'), 'a view that was never pushed is not popped (that would pop the library)');
+  assert.strictEqual(page.calls[page.calls.length - 1], 'captured false');
+  assert.strictEqual(page.context.isUiGamepadPaused, true);
+  assert(page.calls.includes('Navigation.stop'));
+  assert(!page.element('stream-menu').classList.contains('is-open'));
 }
 
 // Closing gives everything back, in the reverse order, and the host gets the input last
@@ -357,7 +371,26 @@ assert((messages.match(/StreamMenu\.refresh\(\);/g) || []).length === 2, 'the st
 }
 assert(/'ColorF1Green',/.test(index) && /'Info',\s*\/\/ Opens the stream menu/.test(index), 'the green and the Info key are registered with the platform');
 
+// The message of the pad: when the page is not in a stream, or cannot open the menu, the input goes back to the game
+assert(/msg === 'streamMenuOpen'\) \{[\s\S]*?StreamMenu\.open\(\);\s*\} else if \(typeof Module !== 'undefined'\) \{[\s\S]*?Module\.setInputCaptured\(false\);/.test(messages),
+  'a menu that is not opened gives the input back');
+assert(/streamMenuPushed = true;/.test(extractFunction(index, 'enterStreamMenu')) && /if \(streamMenuPushed\) \{\s*streamMenuPushed = false;\s*Navigation\.pop\(\);/.test(extractFunction(index, 'leaveStreamMenu')),
+  'only a view that was pushed is popped');
+
 // ------------------------------------------------------------------------------------------------ the native side
+// A message to the page that is sent without waiting must not point into a string that is gone when the page reads it: the
+// copy is made first and freed by the one who reads it
+{
+  const mainCpp = read('wasm/main.cpp');
+  const postAsync = extractBlock(mainCpp, 'void PostToJsAsync(');
+  assert(!/MAIN_THREAD_ASYNC_EM_ASM/.test(postAsync), 'no pointer to a string of this function goes to a call that runs later');
+  assert(/strdup\(msg\.c_str\(\)\)/.test(postAsync) && /emscripten_async_run_in_main_runtime_thread\(\s*EM_FUNC_SIG_VI,\s*DeliverMessageToJs/.test(postAsync));
+  const deliver = extractBlock(mainCpp, 'static void DeliverMessageToJs(');
+  assert(/handleMessage\(UTF8ToString\(\$0\)\)/.test(deliver) && /free\(message\);/.test(deliver), 'the reader frees the copy');
+  assert(/^static void DeliverMessageToJs/m.test(mainCpp.slice(0, mainCpp.indexOf('void PostToJsAsync('))), 'the reader is defined before it is used');
+}
+assert(/ReleaseIfNotTaken\(MonotonicNowMs\(\)\)\) \{\s*ClLogMessage\(/.test(gamepadCpp), 'a menu that the page did not take gives the input back, and says so');
+assert(gamepadCpp.indexOf('ReleaseIfNotTaken(MonotonicNowMs())') < gamepadCpp.indexOf('MenuGate().UpdateHold('), 'it is checked on every round of the polling, before the holds');
 assert(/#include "stream_menu_gate\.hpp"/.test(header));
 assert(/static_assert\(StreamMenuGate::kSelectFlag == BACK_FLAG/.test(gamepadCpp), 'the gate holds the Select button of the protocol');
 assert(/MenuGate\(\)\.UpdateHold\(gamepadID, MonotonicNowMs\(\), static_cast<uint16_t>\(buttonFlags\)\)\) \{\s*PostToJsAsync\(std::string\("streamMenuOpen"\)\);/.test(gamepadCpp),
