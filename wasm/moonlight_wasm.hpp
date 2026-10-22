@@ -85,6 +85,7 @@ typedef struct _VIDEO_STATS {
   uint64_t maxPacerTimeUs;
   uint64_t maxSubmitTimeUs;
   uint32_t maxFrameGapMs;
+  uint32_t maxPlayoutBufferUs;
   uint32_t lastRtt;
   uint32_t lastRttVariance;
   float totalFps;

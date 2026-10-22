@@ -23,6 +23,7 @@ const expectedJavaScriptSuites = [
   'tests/diagnostic_logs_js_tests.js',
   'tests/dialogs_screen_tests.js',
   'tests/embind_string_patch_tests.js',
+  'tests/frame_pacing_wiring_tests.js',
   'tests/gamepad_polling_tests.js',
   'tests/gamepad_sampling_wiring_tests.js',
   'tests/hosts_screen_tests.js',

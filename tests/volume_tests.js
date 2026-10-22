@@ -253,7 +253,7 @@ assert(/\.ui-volume__fill \{[^}]*transform: scaleX\(0\);[^}]*transform-origin: l
 assert(/uint64_t maxPacerTimeUs;\s*uint64_t maxSubmitTimeUs;\s*uint32_t maxFrameGapMs;/.test(header));
 assert(/"VideoPipelineStats windowMs=%llu received=%u submitted=%u networkDropped=%u "/.test(player));
 assert(/"avgQueueUs=%llu avgAssemblyUs=%llu avgPacerUs=%llu maxPacerUs=%llu avgSubmitUs=%llu maxSubmitUs=%llu "/.test(player));
-assert(/"maxFrameGapMs=%u bitrateMbps=%\.1f\\n"/.test(player));
+assert(/"maxFrameGapMs=%u playoutBufferMs=%\.1f bitrateMbps=%\.1f\\n"/.test(player));
 assert(/ClLogMessage\("%s", windowLine\);/.test(player), 'written whether or not the overlay of the statistics is on');
 assert(/m_ActiveWndVideoStats\.maxFrameGapMs = MAX\(/.test(player) && /s_LastFrameCallbackMs = 0;/.test(player), 'the gap is measured from the last frame, and starts again with the stream');
 assert(/dst\.maxPacerTimeUs = MAX\(dst\.maxPacerTimeUs, src\.maxPacerTimeUs\);/.test(player));
