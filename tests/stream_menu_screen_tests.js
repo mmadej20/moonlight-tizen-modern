@@ -56,12 +56,12 @@ for (const id of Object.values(navButtons)) assert(menuHtml.includes('id="' + id
 for (const locale of ['en-US', 'pt-BR', 'pl-PL']) {
   const strings = JSON.parse(read('wasm/static/locales/' + locale + '.json'));
   const keys = [...menuHtml.matchAll(/data-i18n="([^"]+)"/g)].map((match) => match[1]);
-  for (const key of keys.concat(['On', 'Off', 'Off in settings', 'GREEN', 'F2', 'SELECT (HOLD)',
+  for (const key of keys.concat(['On', 'Off', 'Off in settings', 'INFO', 'GREEN', 'F2', 'SELECT (HOLD)',
     '— Open the stream menu: volume, statistics, mouse emulation, disconnect, and quit the game.'])) {
     assert(key in strings, locale + ' has "' + key + '"');
   }
 }
-assert(/data-i18n="GREEN">GREEN<\/span> \/ <span class="navGuideKeyboardText" data-i18n="F2">F2<\/span> \/ <span class="navGuideGamepadText" data-i18n="SELECT \(HOLD\)">/.test(html),
+assert(/data-i18n="INFO">INFO<\/span> \/ <span class="navGuideRemoteText" data-i18n="GREEN">GREEN<\/span> \/ <span class="navGuideKeyboardText" data-i18n="F2">F2<\/span> \/ <span class="navGuideGamepadText" data-i18n="SELECT \(HOLD\)">/.test(html),
   'the navigation guide tells how to open the menu');
 
 // ------------------------------------------------------------------------------------------------ the look
@@ -331,7 +331,7 @@ assert((messages.match(/StreamMenu\.refresh\(\);/g) || []).length === 2, 'the st
     isGamepadActive: false,
     isInGame: true,
     tvKey: { KEY_UP: 38, KEY_DOWN: 40, KEY_LEFT: 37, KEY_RIGHT: 39, KEY_ENTER: 13, KEY_REMOTE_ENTER: 29443, KEY_RETURN: 10009,
-      KEY_VOLUME_UP: 447, KEY_VOLUME_DOWN: 448, KEY_VOLUME_MUTE: 449, KEY_CHANNEL_UP: 427, KEY_CHANNEL_DOWN: 428, KEY_RED: 403, KEY_GREEN: 404, KEY_YELLOW: 405 },
+      KEY_VOLUME_UP: 447, KEY_VOLUME_DOWN: 448, KEY_VOLUME_MUTE: 449, KEY_CHANNEL_UP: 427, KEY_CHANNEL_DOWN: 428, KEY_RED: 403, KEY_GREEN: 404, KEY_YELLOW: 405, KEY_INFO: 457 },
     Navigation: new Proxy({}, { get: (_, name) => () => calls.push('Navigation.' + String(name)) }),
     VolumeControl: { up() {}, down() {}, toggleMute() {} },
     Module: { stopStream: () => calls.push('stopStream'), toggleStats: () => calls.push('toggleStats') },
@@ -342,15 +342,20 @@ assert((messages.match(/StreamMenu\.refresh\(\);/g) || []).length === 2, 'the st
   context.remoteControllerHandler({ keyCode: 404, preventDefault() {} });
   assert.deepStrictEqual(calls, ['toggle']);
   calls.length = 0;
+  calls.length = 0;
+  context.remoteControllerHandler({ keyCode: 457, preventDefault() {} });
+  assert.deepStrictEqual(calls, ['toggle'], 'the Info key opens and closes the menu too');
+  calls.length = 0;
   context.isInGame = false;
   context.remoteControllerHandler({ keyCode: 404, preventDefault() {} });
-  assert.deepStrictEqual(calls, [], 'outside a stream the green key does nothing');
+  context.remoteControllerHandler({ keyCode: 457, preventDefault() {} });
+  assert.deepStrictEqual(calls, [], 'outside a stream the green and the Info key do nothing');
   context.isInGame = true;
   context.remoteControllerHandler({ keyCode: 403, preventDefault() {} });
   context.remoteControllerHandler({ keyCode: 405, preventDefault() {} });
   assert.deepStrictEqual(calls, ['stopStream', 'toggleStats'], 'red and yellow are as they were');
 }
-assert(/'ColorF1Green',/.test(index), 'the green key is registered with the platform');
+assert(/'ColorF1Green',/.test(index) && /'Info',\s*\/\/ Opens the stream menu/.test(index), 'the green and the Info key are registered with the platform');
 
 // ------------------------------------------------------------------------------------------------ the native side
 assert(/#include "stream_menu_gate\.hpp"/.test(header));

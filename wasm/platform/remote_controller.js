@@ -64,6 +64,7 @@ function remoteControllerHandler(e) {
       }
       break;
     case tvKey.KEY_GREEN:
+    case tvKey.KEY_INFO:
       // Open or close the stream menu
       if (isInGame === true) {
         StreamMenu.toggle();

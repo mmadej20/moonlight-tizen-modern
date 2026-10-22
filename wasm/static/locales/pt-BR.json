@@ -233,6 +233,7 @@
   "SELECT + LB + RB + X": "SELETO + LB + RB + X",
   "— Toggle the performance statistics overlay.": "— Alternar a sobreposição de estatísticas de desempenho.",
   "GREEN": "VERDE",
+  "INFO": "INFO",
   "F2": "F2",
   "SELECT (HOLD)": "SELETO (SEGURAR)",
   "— Open the stream menu: volume, statistics, mouse emulation, disconnect, and quit the game.": "— Abre o menu da transmissão: volume, estatísticas, emulação de mouse, desconectar e encerrar o jogo.",

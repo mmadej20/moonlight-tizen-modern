@@ -4476,6 +4476,7 @@ function initSamsungKeys() {
       //'SmartHub',      // F5
       'Source',          // F6
       'ChannelList',     // F7
+      'Info',            // Opens the stream menu (the green key does too)
       //'VolumeMute',    // F8
       //'VolumeDown',    // F9
       //'VolumeUp',      // F10
