@@ -173,9 +173,16 @@ function createGamepadController(environment) {
     }
   }
 
+  // Forgets what the pads looked like, so that the next poll takes them as they are and reports no change. The loop is paused for a
+  // stream, and what the old snapshots would report when it resumes (a button that went down meanwhile) is not input
+  function resync() {
+    snapshots = Object.create(null);
+  }
+
   return {
     startWatching: startWatching,
     stopWatching: stopWatching,
+    resync: resync,
     getStats: function() {
       return { polls: stats.polls, events: stats.events };
     },

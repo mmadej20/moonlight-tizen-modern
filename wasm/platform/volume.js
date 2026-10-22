@@ -152,6 +152,22 @@
     return this.report('key down');
   };
 
+  // The stream menu changes the volume by steps of the TV (a step is one press of a key): one report for all of them
+  VolumeControl.prototype.adjust = function(steps, source) {
+    var audio = this.audio();
+    if (audio) {
+      var count = Math.abs(Math.round(steps) || 0);
+      for (var i = 0; i < count; i++) {
+        if (steps > 0) {
+          audio.setVolumeUp();
+        } else {
+          audio.setVolumeDown();
+        }
+      }
+    }
+    return this.report(source || 'menu');
+  };
+
   // The API sets the mute state to the value that it is given: asking for the opposite of what it is toggles it
   VolumeControl.prototype.toggleMute = function() {
     var audio = this.audio();

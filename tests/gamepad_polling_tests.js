@@ -145,6 +145,39 @@ function run() {
   controller.stopWatching();
   assert.strictEqual(fake.pendingFrameCount(), 0, 'a restarted controller stops cleanly');
 
+  // The stream menu watches the pads again in the middle of a stream, with a button of the pad still down (the Select that opened
+  // it). The snapshots taken before the stream would report that as a press: after resync() the pads are looked at afresh
+  const staleFake = createFakeBrowser();
+  const staleEvents = [];
+  staleFake.addEventListener('gamepadinputchanged', (event) => staleEvents.push(event));
+  const staleController = createGamepadController(staleFake);
+  staleController.startWatching();
+  staleFake.runFrame();
+  staleController.stopWatching();
+  staleFake.gamepads[0].buttons[0] = { pressed: true, value: 1 };
+  staleController.startWatching();
+  staleFake.runFrame();
+  assert.strictEqual(staleEvents.length, 1, 'without resync the old snapshot reports a button that went down in the meantime');
+  staleController.stopWatching();
+
+  const resyncFake = createFakeBrowser();
+  const resyncEvents = [];
+  resyncFake.addEventListener('gamepadinputchanged', (event) => resyncEvents.push(event));
+  const resyncController = createGamepadController(resyncFake);
+  resyncController.startWatching();
+  resyncFake.runFrame();
+  resyncController.stopWatching();
+  resyncFake.gamepads[0].buttons[0] = { pressed: true, value: 1 };
+  resyncController.resync();
+  resyncController.startWatching();
+  resyncFake.runFrame();
+  assert.strictEqual(resyncEvents.length, 0, 'after resync a button that is down is not a change');
+  resyncFake.gamepads[0].buttons[0] = { pressed: false, value: 0 };
+  resyncFake.runFrame();
+  assert.strictEqual(resyncEvents.length, 1, 'its release is a change');
+  assert.deepStrictEqual(resyncEvents[0].detail.changes, [{ type: 'button', index: 0, pressed: false }]);
+  resyncController.stopWatching();
+
   const hiddenFake = createFakeBrowser();
   hiddenFake.hidden = true;
   createGamepadController(hiddenFake).startWatching();

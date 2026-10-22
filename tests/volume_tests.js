@@ -93,6 +93,30 @@ function createTv(options) {
   assert.strictEqual(tv.state.unset, 1, 'stopping twice does nothing');
 }
 
+// The stream menu changes the volume by steps of the TV: one report and one line of the log for all of them
+{
+  const tv = createTv();
+  const logs = [];
+  const changes = [];
+  const control = volume.createControl({ tizen: tv.platform, log: (text) => logs.push(text), onChange: (change) => changes.push(change) });
+  control.start(true);
+  logs.length = 0;
+  const state = control.adjust(5, 'menu');
+  assert.strictEqual(tv.state.volume, 45);
+  assert.deepStrictEqual(changes.map((change) => [change.volume, change.source]), [[45, 'menu']]);
+  assert.strictEqual(state.volume, 45);
+  assert.deepStrictEqual(logs, ['Volume: 45 by menu']);
+  control.adjust(-3, 'menu');
+  assert.strictEqual(tv.state.volume, 42);
+  control.adjust(0, 'menu');
+  assert.strictEqual(tv.state.volume, 42, 'no step changes nothing');
+  control.adjust(-100, 'menu');
+  assert.strictEqual(tv.state.volume, 0, 'the TV stops at its limits');
+  control.stop();
+  const bare = volume.createControl({ tizen: null, log() {}, onChange() { assert.fail('nothing to show'); } });
+  assert.strictEqual(bare.adjust(5, 'menu'), null, 'a platform without the API changes nothing');
+}
+
 // With the bar off the keys stay with the system (so does its bar), and the changes are still written to the log
 {
   const tv = createTv();
