@@ -169,6 +169,10 @@ function attachListeners() {
     changes.forEach((change) => {
       const { type, index, pressed, value } = change;
       if (type === 'button') {
+        // The Select button closes the stream menu (the menu keeps the press that opened it from closing it at once)
+        if (index === 8) {
+          StreamMenu.onSelect(pressed);
+        }
         // Handle button mapping
         const buttonMapping = {
           0: () => throttledNavigation(() => Navigation.accept()),
@@ -2039,6 +2043,11 @@ function formatUpdateTimestamp(ms) {
 // The bar of the volume: a speaker, a track and a number, for a moment. It changes opacity and the scale of its fill only
 var volumeBarTimer = null;
 function showVolumeBar(state) {
+  // The menu has a volume row of its own
+  if (StreamMenu.isOpen()) {
+    StreamMenu.refresh();
+    return;
+  }
   const bar = document.getElementById('volume-bar');
   if (!bar || !isInGame || !VolumeControl.handlesKeys()) {
     return;
@@ -2929,13 +2938,16 @@ function showApps(host) {
 }
 
 // Show a confirmation with the Quit App dialog before stopping the running app
-function quitAppDialog() {
-  if (api.currentGame === 0) {
+// The stream menu asks it with hooks: {title, onCancel(), onConfirm()}. It knows which app it streams, while the data of the host may
+// not have caught up with the launch yet. A click on the button of the library passes the event, which is not such an object.
+function quitAppDialog(options) {
+  var hooks = options && typeof options.onConfirm === 'function' ? options : null;
+  if (!hooks && api.currentGame === 0) {
     // If no app is running, show snackbar message
     snackbarLog('No app is currently running.');
     return;
   } else {
-    api.getAppById(api.currentGame).then(function(currentGame) {
+    (hooks ? Promise.resolve({ title: hooks.title }) : api.getAppById(api.currentGame)).then(function(currentGame) {
       // Find the existing overlay and dialog elements
       var quitAppOverlay = document.querySelector('#quitAppDialogOverlay');
       var quitAppDialog = document.querySelector('#quitAppDialog');
@@ -2958,6 +2970,9 @@ function quitAppDialog() {
         isDialogOpen = false;
         Navigation.pop();
         Navigation.switch();
+        if (hooks && typeof hooks.onCancel === 'function') {
+          hooks.onCancel();
+        }
       });
 
       // Quit the running app if the Continue button is pressed
@@ -2968,6 +2983,9 @@ function quitAppDialog() {
         quitAppDialog.close();
         isDialogOpen = false;
         Navigation.pop();
+        if (hooks) {
+          hooks.onConfirm();
+        }
         stopGame(api).then(function() {
           Navigation.switch();
         }).catch(function(error) {
@@ -2987,6 +3005,121 @@ function logDiagnostic(line) {
   } catch (error) {
     // The log is an aid. A problem with it must never get in the way of the application.
   }
+}
+
+// What the stream menu says about the stream that runs: the app, the computer, and the settings of the stream
+var currentStream = null;
+
+// The stream menu: hold Select on the pad, or press the green key of the remote. What is in it and what the items do is in
+// stream_menu.js; this is the page around it (the panel, the controls that it takes, the quit dialog)
+const StreamMenu = StreamMenuSupport.createMenu({
+  module: function() { return typeof Module !== 'undefined' ? Module : null; },
+  volume: VolumeControl,
+  enter: enterStreamMenu,
+  leave: leaveStreamMenu,
+  render: renderStreamMenu,
+  statsOn: function() { return $('#performanceStatsSwitch').prop('checked'); },
+  mouseEnabled: function() { return $('#mouseEmulationSwitch').prop('checked'); },
+  disconnect: function() {
+    StreamMenu.close();
+    Module.stopStream();
+  },
+  quit: quitFromStreamMenu,
+  log: logDiagnostic
+});
+
+// The menu takes the controls: the loop that reads the pads for the interface (paused for the stream) runs again, from fresh
+// snapshots because the Select that opened the menu is still down, and the navigation works on the menu
+function enterStreamMenu() {
+  const menu = document.getElementById('stream-menu');
+  if (!menu) return;
+  const stream = currentStream || { title: '', host: '', summary: [] };
+  document.getElementById('stream-menu-sub').textContent = [stream.title, stream.host].filter(Boolean).join(' · ');
+  const chips = document.getElementById('stream-menu-chips');
+  chips.textContent = '';
+  stream.summary.forEach(function(text) {
+    const chip = document.createElement('span');
+    chip.className = 'ui-streammenu__chip';
+    chip.textContent = text;
+    chips.appendChild(chip);
+  });
+  if (typeof Controller !== 'undefined' && Controller) {
+    Controller.resync();
+    Controller.startWatching();
+    isUiGamepadPaused = false;
+  }
+  Navigation.start();
+  Views.StreamMenu.view.reset();
+  Navigation.push(Views.StreamMenu);
+  Navigation.focus();
+  hideVolumeBar();
+  menu.classList.add('is-open');
+  menu.setAttribute('aria-hidden', 'false');
+  logDiagnostic('Stream menu opened');
+}
+
+// The controls go back to what they were during a stream: the loop of the pads is paused, the navigation is stopped
+function leaveStreamMenu() {
+  // The stream may have ended while the quit dialog asked: it goes away with the menu that it was over
+  const quitDialog = document.querySelector('#quitAppDialog');
+  if (quitDialog && quitDialog.open) {
+    document.querySelector('#quitAppDialogOverlay').style.display = 'none';
+    quitDialog.close();
+    isDialogOpen = false;
+    Navigation.pop();
+  }
+  Navigation.pop();
+  if (typeof Controller !== 'undefined' && Controller) {
+    Controller.stopWatching();
+    isUiGamepadPaused = true;
+  }
+  Navigation.stop();
+  const menu = document.getElementById('stream-menu');
+  if (menu) {
+    menu.classList.remove('is-open');
+    menu.setAttribute('aria-hidden', 'true');
+  }
+  logDiagnostic('Stream menu closed');
+}
+
+// Draws what changes in the menu: the volume row and the two toggles
+function renderStreamMenu(model) {
+  const cells = document.querySelectorAll('#stream-menu-cells .ui-streammenu__cell');
+  model.items.forEach(function(item) {
+    if (item.id === 'volume') {
+      const level = item.muted ? 0 : Math.max(0, Math.min(100, Number(item.volume) || 0));
+      cells.forEach(function(cell, index) {
+        cell.classList.toggle('is-on', index < Math.round(level / 10));
+      });
+      document.getElementById('stream-menu-volume').textContent = level + '%';
+    } else if (item.id === 'stats' || item.id === 'mouse') {
+      const prefix = item.id === 'stats' ? 'stats' : 'mouse';
+      document.getElementById('stream-menu-' + prefix + '-toggle').classList.toggle('is-on', !!item.on);
+      document.getElementById('stream-menu-' + prefix + '-text').textContent = t(item.on ? 'On' : 'Off');
+      // A switch that the setting keeps off says so under its name
+      if (item.id === 'mouse') {
+        document.getElementById('stream-menu-mouse-note').textContent = item.enabled ? '' : t('Off in settings');
+      }
+      document.getElementById(item.id === 'stats' ? 'streamMenuStats' : 'streamMenuMouse').classList.toggle('is-disabled', !item.enabled);
+    }
+  });
+}
+
+// Quit the game and disconnect: the dialog of the library asks first, over the video (the panel steps aside), and a cancel
+// brings the panel back
+function quitFromStreamMenu() {
+  const menu = document.getElementById('stream-menu');
+  menu.classList.remove('is-open');
+  quitAppDialog({
+    title: currentStream ? currentStream.title : '',
+    onCancel: function() {
+      menu.classList.add('is-open');
+    },
+    onConfirm: function() {
+      StreamMenu.close();
+      Module.stopStream();
+    }
+  });
 }
 
 // Times the stages between pressing an app and the connection being up
@@ -3235,6 +3368,20 @@ function startGame(host, appID) {
 
       // Hide on-screen overlays until the streaming session begins
       $('#connection-warnings, #performance-stats').css('background', 'transparent').text('');
+
+      // What the stream menu says about this stream
+      currentStream = {
+        title: appToStart.title,
+        host: host.hostname,
+        summary: StreamMenuSupport.describeStream({
+          width: parseInt(streamWidth, 10),
+          height: parseInt(streamHeight, 10),
+          fps: parseInt(frameRate, 10),
+          codec: videoCodec,
+          hdr: !!hdrMode,
+          bitrateMbps: bitrate / 1000
+        })
+      };
 
       // Shows a loading message to launch the application and start stream mode
       $('#loadingSpinnerMessage').text(t('Starting %1$s...', appToStart.title));
@@ -4351,7 +4498,7 @@ function initSpecialKeys() {
   // Listen for keydown events on the video element
   videoElement.addEventListener('keydown', function(e) {
     // Check if the 'Back' key has been pressed and the streaming is currently active
-    if (e.key === 'XF86Back' && isInGame === true) {
+    if (e.key === 'XF86Back' && isInGame === true && !StreamMenu.isOpen()) {
       // Send the Escape key (ESC) to the host while streaming
       sendEscapeKeyToHost();
       // Simulate mouse to move focus back to the streaming session

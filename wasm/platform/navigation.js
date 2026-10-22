@@ -1770,6 +1770,37 @@ const Views = {
       setTimeout(() => blurElement(this.view.current()), 100);
     },
   },
+  StreamMenu: {
+    // The items that can be used, in the order of the panel. The first press of down from "Back to game" goes one item down and no
+    // further than the last one, which ends the game: the list does not wrap
+    view: new ListView(() => StreamMenu.model().items.filter((item) => item.enabled).map((item) => streamMenuButtons[item.id])),
+    up: function() {
+      this.view.prev();
+    },
+    down: function() {
+      this.view.next();
+    },
+    left: function() {
+      StreamMenu.adjust(streamMenuItemOf(this.view.current()), -1);
+    },
+    right: function() {
+      StreamMenu.adjust(streamMenuItemOf(this.view.current()), 1);
+    },
+    accept: function() {
+      StreamMenu.activate(streamMenuItemOf(this.view.current()));
+    },
+    back: function() {
+      StreamMenu.close();
+    },
+    press: function() {},
+    switch: function() {},
+    enter: function() {
+      mark(this.view.current());
+    },
+    leave: function() {
+      unmark(this.view.current());
+    },
+  },
   Apps: {
     view: new ListView(() => document.getElementById('game-grid').children),
     up: function() {
@@ -1996,6 +2027,20 @@ const Views = {
   },
 };
 
+// The buttons of the stream menu by the id of their item
+const streamMenuButtons = {
+  resume: 'streamMenuResume',
+  volume: 'streamMenuVolume',
+  stats: 'streamMenuStats',
+  mouse: 'streamMenuMouse',
+  disconnect: 'streamMenuDisconnect',
+  quit: 'streamMenuQuit',
+};
+
+function streamMenuItemOf(buttonId) {
+  return Object.keys(streamMenuButtons).find((item) => streamMenuButtons[item] === buttonId);
+}
+
 const Navigation = (function() {
   let hasFocus = false;
 
@@ -2114,5 +2159,7 @@ const Navigation = (function() {
     pop: Stack.pop,
     start: State.start,
     stop: State.stop,
+    // Makes sure that the next key is not spent on giving the focus back: for a view that opens in the middle of something else
+    focus: focus,
   };
 })();

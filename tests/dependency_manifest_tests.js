@@ -41,6 +41,8 @@ const expectedJavaScriptSuites = [
   'tests/start_responsiveness_wiring_tests.js',
   'tests/start_timeline_tests.js',
   'tests/stream_diagnostics_wiring_tests.js',
+  'tests/stream_menu_screen_tests.js',
+  'tests/stream_menu_tests.js',
   'tests/style_tokens_tests.js',
   'tests/subnet_scan_policy_tests.js',
   'tests/subnet_scanner_tests.js',

@@ -675,6 +675,7 @@
   <script type="text/javascript" src="platform/diagnostic_logs.js"></script>
   <script type="text/javascript" src="platform/volume.js"></script>
   <script type="text/javascript" src="platform/lag_watch.js"></script>
+  <script type="text/javascript" src="platform/stream_menu.js"></script>
   <script type="text/javascript" src="platform/start_timeline.js"></script>
   <script type="text/javascript" src="platform/rumble.js"></script>
   <script type="text/javascript" src="platform/operation_guard.js"></script>
@@ -888,6 +889,10 @@
             <span class="navGuideRemoteText" data-i18n="YELLOW">YELLOW</span> / <span class="navGuideKeyboardText" data-i18n="F3">F3</span> / <span class="navGuideKeyboardText" data-i18n="CTRL + ALT + SHIFT + S">CTRL + ALT + SHIFT + S</span> / <span class="navGuideGamepadText" data-i18n="SELECT + LB + RB + X">SELECT + LB + RB + X</span>
             <span data-i18n="— Toggle the performance statistics overlay.">— Toggle the performance statistics overlay.</span>
           </li>
+          <li class="navGuideDialogControls">
+            <span class="navGuideRemoteText" data-i18n="GREEN">GREEN</span> / <span class="navGuideKeyboardText" data-i18n="F2">F2</span> / <span class="navGuideGamepadText" data-i18n="SELECT (HOLD)">SELECT (HOLD)</span>
+            <span data-i18n="— Open the stream menu: volume, statistics, mouse emulation, disconnect, and quit the game.">— Open the stream menu: volume, statistics, mouse emulation, disconnect, and quit the game.</span>
+          </li>
         </ul>
       </div>
       <div class="mdl-dialog__actions">
@@ -957,6 +962,59 @@
     <svg id="volume-bar-icon" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path id="volume-bar-waves" d="M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"/><path id="volume-bar-cross" d="M16 9l5 6M21 9l-5 6"/></svg>
     <div class="ui-volume__track"><div id="volume-bar-fill" class="ui-volume__fill"></div></div>
     <span id="volume-bar-value" class="ui-volume__value"></span>
+  </div>
+  <div id="stream-menu" class="ui-streammenu" aria-hidden="true">
+    <div class="ui-streammenu__stats">
+      <div class="ui-streammenu__statstitle" data-i18n="Statistics">Statistics</div>
+      <div id="stream-menu-chips" class="ui-streammenu__chips"></div>
+    </div>
+    <div class="ui-streammenu__hints ui-hints">
+      <span class="ui-hint"><span class="ui-glyph" aria-hidden="true">A</span><span data-i18n="Select">Select</span></span>
+      <span class="ui-hint"><span class="ui-glyph ui-glyph--wide" aria-hidden="true"><svg width="26" height="18" viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L4 9l6 6M16 3l6 6-6 6"/></svg></span><span data-i18n="Change value">Change value</span></span>
+      <span class="ui-hint"><span class="ui-glyph ui-glyph--wide" aria-hidden="true" data-i18n="SELECT">SELECT</span><span data-i18n="Close menu">Close menu</span></span>
+    </div>
+    <aside class="ui-streammenu__panel">
+      <div class="ui-streammenu__head">
+        <svg width="36" height="36" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="#F5DE87"/></svg>
+        <span data-i18n="Menu">Menu</span>
+      </div>
+      <div id="stream-menu-sub" class="ui-streammenu__sub"></div>
+      <div class="ui-streammenu__list">
+        <button type="button" id="streamMenuResume" class="ui-streammenu__item ui-fx">
+          <svg class="ui-streammenu__icon" width="34" height="34" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5l11 7-11 7z"/></svg>
+          <span class="ui-streammenu__label" data-i18n="Back to game">Back to game</span>
+          <span class="ui-glyph ui-streammenu__key" aria-hidden="true">B</span>
+        </button>
+        <button type="button" id="streamMenuVolume" class="ui-streammenu__item ui-fx">
+          <svg class="ui-streammenu__icon" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9zM16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"/></svg>
+          <span class="ui-streammenu__label" data-i18n="Volume">Volume</span>
+          <span id="stream-menu-cells" class="ui-streammenu__cells"><span class="ui-streammenu__cell"></span><span class="ui-streammenu__cell"></span><span class="ui-streammenu__cell"></span><span class="ui-streammenu__cell"></span><span class="ui-streammenu__cell"></span><span class="ui-streammenu__cell"></span><span class="ui-streammenu__cell"></span><span class="ui-streammenu__cell"></span><span class="ui-streammenu__cell"></span><span class="ui-streammenu__cell"></span></span>
+          <span id="stream-menu-volume" class="ui-streammenu__percent"></span>
+        </button>
+        <button type="button" id="streamMenuStats" class="ui-streammenu__item ui-fx">
+          <svg class="ui-streammenu__icon" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+          <span class="ui-streammenu__label" data-i18n="Statistics">Statistics</span>
+          <span id="stream-menu-stats-text" class="ui-streammenu__state"></span>
+          <span id="stream-menu-stats-toggle" class="ui-streammenu__toggle"></span>
+        </button>
+        <button type="button" id="streamMenuMouse" class="ui-streammenu__item ui-fx">
+          <svg class="ui-streammenu__icon" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l12 9-5.5 1 3 6-2.5 1-3-6L6 18z"/></svg>
+          <span class="ui-streammenu__label"><span class="ui-streammenu__title" data-i18n="Mouse from the controller">Mouse from the controller</span><span id="stream-menu-mouse-note" class="ui-streammenu__note"></span></span>
+          <span id="stream-menu-mouse-text" class="ui-streammenu__state"></span>
+          <span id="stream-menu-mouse-toggle" class="ui-streammenu__toggle"></span>
+        </button>
+      </div>
+      <div class="ui-streammenu__list ui-streammenu__list--end">
+        <button type="button" id="streamMenuDisconnect" class="ui-streammenu__item ui-fx">
+          <svg class="ui-streammenu__icon" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 8l-4 4 4 4M6 12h10"/></svg>
+          <span class="ui-streammenu__label"><span class="ui-streammenu__title" data-i18n="Disconnect">Disconnect</span><span class="ui-streammenu__note" data-i18n="The game stays on the computer">The game stays on the computer</span></span>
+        </button>
+        <button type="button" id="streamMenuQuit" class="ui-streammenu__item ui-streammenu__item--danger ui-fx">
+          <svg class="ui-streammenu__icon" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v9M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>
+          <span class="ui-streammenu__label"><span class="ui-streammenu__title" data-i18n="Quit the game and disconnect">Quit the game and disconnect</span><span class="ui-streammenu__note" data-i18n="Unsaved progress may be lost">Unsaved progress may be lost</span></span>
+        </button>
+      </div>
+    </aside>
   </div>
   <video id="wasm_module" autoplay tabindex="-1"></video>
 </body>

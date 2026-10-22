@@ -152,6 +152,19 @@
     return this.report('key down');
   };
 
+  // The state of the TV, without a line in the log and without showing it: for a panel that draws the volume itself
+  VolumeControl.prototype.read = function() {
+    var audio = this.audio();
+    if (!audio) {
+      return null;
+    }
+    try {
+      return {volume: audio.getVolume(), muted: !!audio.isMute()};
+    } catch (error) {
+      return null;
+    }
+  };
+
   // The stream menu changes the volume by steps of the TV (a step is one press of a key): one report for all of them
   VolumeControl.prototype.adjust = function(steps, source) {
     var audio = this.audio();

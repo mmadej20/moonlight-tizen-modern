@@ -206,9 +206,11 @@ assert(/const defaultVolumeBar = true;/.test(index), 'restoring the defaults tur
   const fill = { style: {} };
   const value = { textContent: '' };
   const timers = [];
+  const menu = { open: false, refreshes: 0 };
   const context = {
     isInGame: true,
     VolumeControl: { handlesKeys: () => true },
+    StreamMenu: { isOpen: () => menu.open, refresh: () => { menu.refreshes += 1; } },
     document: { getElementById: (id) => ({ 'volume-bar': bar, 'volume-bar-fill': fill, 'volume-bar-value': value }[id] || null) },
     setTimeout: (callback, delay) => { timers.push({ callback, delay }); return timers.length; },
     clearTimeout() {},
@@ -234,6 +236,12 @@ assert(/const defaultVolumeBar = true;/.test(index), 'restoring the defaults tur
   context.isInGame = false;
   context.showVolumeBar({ volume: 70, muted: false });
   assert(!bar.classes.has('is-visible'), 'and none outside of a stream');
+  // The stream menu has a volume row of its own: the bar stays away, and the row is told that the volume changed
+  context.isInGame = true;
+  menu.open = true;
+  context.showVolumeBar({ volume: 70, muted: false });
+  assert(!bar.classes.has('is-visible'), 'no bar over the stream menu');
+  assert.strictEqual(menu.refreshes, 1, 'the row of the menu follows the keys');
 }
 
 // The bar moves only opacity and the scale of its fill

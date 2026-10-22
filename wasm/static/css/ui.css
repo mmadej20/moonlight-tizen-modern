@@ -12,6 +12,7 @@
     --ui-bg: #080C15;
     --ui-surface: #131823;
     --ui-surface-raised: #1F2733;
+    --ui-panel: #0E141E;
     --ui-line: #3A4353;
     --ui-text: #EFF2F7;
     --ui-mute: #B4BBC8;
@@ -1825,4 +1826,232 @@ dialog[id^="hostMenuDialog-"] .mdl-dialog__content button.mdl-button.mdl-button-
 
 .ui-volume.is-muted #volume-bar-waves {
     display: none;
+}
+
+/* =============================
+   The stream menu. It opens over the stream (Select held on the pad, or the green key) and takes the controls until it closes.
+   The panel is opaque, so that the video does not mix with it. Opening changes opacity and a transform only.
+============================= */
+.ui-streammenu {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 6;
+    background: rgba(1, 3, 9, 0.62);
+    color: var(--ui-text);
+    font-family: var(--ui-font);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s var(--ui-ease), visibility 0s linear 0.2s;
+}
+
+.ui-streammenu.is-open {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.2s var(--ui-ease);
+}
+
+/* The overlay of the statistics is in the upper left corner, so the state of the stream waits above the hints */
+.ui-streammenu__stats {
+    position: absolute;
+    bottom: 128px;
+    left: 96px;
+    padding: 20px 28px;
+    border-radius: 22px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-scrim);
+}
+
+.ui-streammenu__statstitle {
+    font: 600 24px/1 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+.ui-streammenu__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.ui-streammenu__chip {
+    display: inline-flex;
+    align-items: center;
+    height: 40px;
+    padding: 0 16px;
+    border-radius: 12px;
+    background: var(--ui-surface-raised);
+    font: 600 22px/1 var(--ui-font);
+}
+
+.ui-streammenu__hints {
+    position: absolute;
+    bottom: 56px;
+    left: 96px;
+    color: var(--ui-text);
+}
+
+.ui-streammenu__panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    width: 680px;
+    padding: 64px 48px 56px;
+    box-sizing: border-box;
+    border-left: 2px solid var(--ui-line);
+    background: var(--ui-panel);
+    transform: translateX(48px);
+    transition: transform 0.24s var(--ui-ease);
+}
+
+.ui-streammenu.is-open .ui-streammenu__panel {
+    transform: none;
+}
+
+.ui-streammenu__head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font: 700 48px/1 var(--ui-font-display);
+    letter-spacing: -0.01em;
+}
+
+.ui-streammenu__sub {
+    margin: 12px 0 0 50px;
+    font: 500 24px/1.2 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+.ui-streammenu__list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 36px;
+}
+
+.ui-streammenu__list--end {
+    margin-top: auto;
+    padding-top: 24px;
+    border-top: 2px solid var(--ui-line);
+}
+
+.ui-streammenu__item {
+    --ui-r: 22px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    width: 100%;
+    min-height: 84px;
+    margin: 0;
+    padding: 12px 24px;
+    box-sizing: border-box;
+    border-radius: var(--ui-r);
+    border: 2px solid transparent;
+    background: transparent;
+    color: var(--ui-text);
+    font: 600 28px/1.15 var(--ui-font);
+    text-align: left;
+    cursor: pointer;
+}
+
+.ui-streammenu__item:hover, .ui-streammenu__item:focus, .ui-streammenu__item.hovered {
+    background: var(--ui-surface-raised);
+    border-color: var(--ui-moon);
+    outline: none;
+}
+
+.ui-streammenu__item.is-disabled {
+    opacity: 0.45;
+}
+
+.ui-streammenu__item--danger {
+    color: var(--ui-bad);
+}
+
+.ui-streammenu__icon {
+    flex: none;
+}
+
+.ui-streammenu__label {
+    flex: 1;
+    min-width: 0;
+}
+
+.ui-streammenu__title, .ui-streammenu__note {
+    display: block;
+}
+
+.ui-streammenu__note:empty {
+    display: none;
+}
+
+.ui-streammenu__note {
+    margin-top: 4px;
+    font: 500 22px/1.2 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+.ui-streammenu__key {
+    color: var(--ui-mute);
+}
+
+.ui-streammenu__cells {
+    display: flex;
+    gap: 4px;
+}
+
+.ui-streammenu__cell {
+    width: 12px;
+    height: 30px;
+    border-radius: 5px;
+    background: var(--ui-line);
+}
+
+.ui-streammenu__cell.is-on {
+    background: var(--ui-moon);
+}
+
+.ui-streammenu__percent {
+    min-width: 64px;
+    text-align: right;
+}
+
+.ui-streammenu__state {
+    font: 600 24px/1 var(--ui-font);
+}
+
+.ui-streammenu__toggle {
+    position: relative;
+    flex: none;
+    width: 84px;
+    height: 48px;
+    border-radius: 24px;
+    background: var(--ui-line);
+    transition: background-color 0.2s var(--ui-ease);
+}
+
+.ui-streammenu__toggle::after {
+    content: "";
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--ui-text);
+    transition: transform 0.2s var(--ui-ease), background-color 0.2s var(--ui-ease);
+}
+
+.ui-streammenu__toggle.is-on {
+    background: var(--ui-moon);
+}
+
+.ui-streammenu__toggle.is-on::after {
+    transform: translateX(36px);
+    background: var(--ui-ink);
 }

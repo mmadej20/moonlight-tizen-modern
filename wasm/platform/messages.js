@@ -268,6 +268,8 @@ function handleMessage(msg) {
   console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Message data: ', msg);
   // If it's a recognized event, notify the appropriate function
   if (msg.indexOf('streamTerminated: ') === 0) {
+    // A menu that is open goes first: it gives the controls back and leaves the views as they were before the stream
+    StreamMenu.close();
     // Release the audio scheduler of the Web Audio backend, which is a no-op for the EMSS backend
     stopAudioScheduler();
     // The stream is over: the volume keys go back to the system, and the watch of the main thread stops
@@ -340,6 +342,11 @@ function handleMessage(msg) {
   } else if (msg.indexOf('DialogMsg: ') === 0) {
     // Show dialog message using the warning dialog
     warningDialog(t('Connection Error'), translateBackendMessage(msg.replace('DialogMsg: ', '')));
+  } else if (msg === 'streamMenuOpen') {
+    // The pad held Select for a second: the native side has taken the input already, the menu takes the controls
+    if (isInGame === true) {
+      StreamMenu.open();
+    }
   } else if (msg === 'displayVideo') {
     // Show the video stream now
     $('#listener').addClass('fullscreen');
@@ -361,6 +368,7 @@ function handleMessage(msg) {
     // Hide the performance statistics overlay
     $('#performance-stats').css('background', 'transparent');
     $('#performance-stats').text('');
+    StreamMenu.refresh();
   } else if (msg.indexOf('StatMsg: ') === 0) {
     // Toggle the performance stats switch and save the state
     if (!$('#performanceStatsSwitch').prop('checked')) {
@@ -371,6 +379,7 @@ function handleMessage(msg) {
     // Show the performance statistics overlay
     $('#performance-stats').css('background', 'rgba(0, 0, 0, 0.5)');
     $('#performance-stats').text(translateBackendMessage(msg.replace('StatMsg: ', '')));
+    StreamMenu.refresh();
   } else if (msg.indexOf('controllerRumble: ') === 0) {
     const eventData = msg.split(' ')[1].split(',');
     const gamepadIdx = parseInt(eventData[0]);
