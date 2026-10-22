@@ -50,6 +50,7 @@ const expectedJavaScriptSuites = [
   'tests/ui_reliability_wiring_tests.js',
   'tests/upstream_ui_integration_tests.js',
   'tests/upstream_v118_integration_tests.js',
+  'tests/volume_tests.js',
   'tests/wasm_atomics_guard_tests.js',
 ];
 

@@ -80,6 +80,10 @@ typedef struct _VIDEO_STATS {
   uint64_t totalAssemblyTimeUs;
   uint64_t totalPacerTimeUs;
   uint64_t totalSubmitTimeUs;
+  // The worst of the window, for the diagnostic log: a stutter shows in these and not in the averages
+  uint64_t maxPacerTimeUs;
+  uint64_t maxSubmitTimeUs;
+  uint32_t maxFrameGapMs;
   uint32_t lastRtt;
   uint32_t lastRttVariance;
   float totalFps;

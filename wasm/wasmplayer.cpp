@@ -2,7 +2,9 @@
 #include "media_track_diagnostics.hpp"
 #include "video_timing.hpp"
 
+#include <algorithm>
 #include <condition_variable>
+#include <cstdio>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -106,6 +108,8 @@ static bool s_HasLastFrameNumber = false;
 
 static std::string s_StatString = "";
 
+// When the last frame of the stream arrived, to measure the gap to the next one (0 before the first)
+static uint64_t s_LastFrameCallbackMs = 0;
 static VIDEO_STATS m_ActiveWndVideoStats;
 static VIDEO_STATS m_LastWndVideoStats;
 static VIDEO_STATS m_GlobalVideoStats;
@@ -514,6 +518,7 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   s_hasFirstFrame = false;
   s_HasSubmittedVideoConfig = false;
   s_HasLastFrameNumber = false;
+  s_LastFrameCallbackMs = 0;
   m_LastFrameNumber = 0;
   total_bytes = 0;
 
@@ -654,10 +659,19 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   std::unique_lock<std::mutex> statsLock(s_VideoStatsMutex);
   bool postStats = false;
   std::string statMessage;
+  char windowLine[400];
+  windowLine[0] = 0;
 
   if (m_ActiveWndVideoStats.measurementStartTimestamp == 0) {
     m_ActiveWndVideoStats.measurementStartTimestamp = callbackTimeMs;
   }
+  if (s_LastFrameCallbackMs != 0 && callbackTimeMs > s_LastFrameCallbackMs) {
+    m_ActiveWndVideoStats.maxFrameGapMs = MAX(
+      m_ActiveWndVideoStats.maxFrameGapMs,
+      static_cast<uint32_t>(callbackTimeMs - s_LastFrameCallbackMs)
+    );
+  }
+  s_LastFrameCallbackMs = callbackTimeMs;
   if (s_HasLastFrameNumber && decodeUnit->frameNumber > m_LastFrameNumber + 1) {
     const uint32_t droppedFrames = decodeUnit->frameNumber - (m_LastFrameNumber + 1);
     m_ActiveWndVideoStats.networkDroppedFrames += droppedFrames;
@@ -690,9 +704,11 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   m_ActiveWndVideoStats.totalAssemblyTimeUs += std::chrono::duration_cast<std::chrono::microseconds>(
     assemblyEnd - assemblyStart
   ).count();
-  m_ActiveWndVideoStats.totalPacerTimeUs += std::chrono::duration_cast<std::chrono::microseconds>(
+  const uint64_t pacerTimeUs = std::chrono::duration_cast<std::chrono::microseconds>(
     pacingEnd - pacingStart
   ).count();
+  m_ActiveWndVideoStats.totalPacerTimeUs += pacerTimeUs;
+  m_ActiveWndVideoStats.maxPacerTimeUs = MAX(m_ActiveWndVideoStats.maxPacerTimeUs, pacerTimeUs);
   total_bytes += decodeUnit->fullLength;
 
   const bool includeVideoConfig = !s_HasSubmittedVideoConfig
@@ -754,9 +770,11 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
         s_HasSubmittedVideoConfig = true;
       }
       m_ActiveWndVideoStats.submittedFrames++;
-      m_ActiveWndVideoStats.totalSubmitTimeUs += std::chrono::duration_cast<std::chrono::microseconds>(
+      const uint64_t submitTimeUs = std::chrono::duration_cast<std::chrono::microseconds>(
         submitEnd - submitStart
       ).count();
+      m_ActiveWndVideoStats.totalSubmitTimeUs += submitTimeUs;
+      m_ActiveWndVideoStats.maxSubmitTimeUs = MAX(m_ActiveWndVideoStats.maxSubmitTimeUs, submitTimeUs);
     }
   );
   if (pacingCommitOutcome == PacingCommitOutcome::AppendFailed) {
@@ -780,6 +798,29 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       postStats = true;
       std::fill(s_StatString.begin(), s_StatString.end(), 0);
     }
+    {
+      // The record of the window, for the diagnostic log. Its fields are key=value so that it can be parsed, like the audio one
+      const uint64_t received = std::max<uint64_t>(1, m_ActiveWndVideoStats.receivedFrames);
+      const uint64_t submitted = std::max<uint64_t>(1, m_ActiveWndVideoStats.submittedFrames);
+      snprintf(
+        windowLine, sizeof(windowLine),
+        "VideoPipelineStats windowMs=%llu received=%u submitted=%u networkDropped=%u "
+        "avgQueueUs=%llu avgAssemblyUs=%llu avgPacerUs=%llu maxPacerUs=%llu avgSubmitUs=%llu maxSubmitUs=%llu "
+        "maxFrameGapMs=%u bitrateMbps=%.1f\n",
+        static_cast<unsigned long long>(windowDurationMs),
+        m_ActiveWndVideoStats.receivedFrames,
+        m_ActiveWndVideoStats.submittedFrames,
+        m_ActiveWndVideoStats.networkDroppedFrames,
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.totalQueueTimeUs / received),
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.totalAssemblyTimeUs / received),
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.totalPacerTimeUs / received),
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.maxPacerTimeUs),
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.totalSubmitTimeUs / submitted),
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.maxSubmitTimeUs),
+        m_ActiveWndVideoStats.maxFrameGapMs,
+        static_cast<double>(bitrateMbps)
+      );
+    }
     AddVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);
     memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(m_ActiveWndVideoStats));
     memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
@@ -788,6 +829,9 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   }
 
   statsLock.unlock();
+  if (windowLine[0] != 0) {
+    ClLogMessage("%s", windowLine);
+  }
   if (postStats) {
     PostToJs(statMessage);
   }
@@ -805,6 +849,9 @@ void MoonlightInstance::AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
   dst.totalAssemblyTimeUs += src.totalAssemblyTimeUs;
   dst.totalPacerTimeUs += src.totalPacerTimeUs;
   dst.totalSubmitTimeUs += src.totalSubmitTimeUs;
+  dst.maxPacerTimeUs = MAX(dst.maxPacerTimeUs, src.maxPacerTimeUs);
+  dst.maxSubmitTimeUs = MAX(dst.maxSubmitTimeUs, src.maxSubmitTimeUs);
+  dst.maxFrameGapMs = MAX(dst.maxFrameGapMs, src.maxFrameGapMs);
 
   // Update minimum host processing latency if it's not set or if the source has a valid smaller value
   if (dst.minHostProcessingLatency == 0) {

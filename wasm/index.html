@@ -377,6 +377,18 @@
                 </label>
               </div>
             </div>
+            <div id="volumeBarOption" class="setting-option">
+              <label data-i18n="Volume bar in the stream">Volume bar in the stream</label>
+              <span class="mdl-list__item-text-body" data-i18n="- The volume keys of the remote change the volume of the TV with a bar of Moonlight, instead of the bar of the TV that is drawn over the stream.">
+                - The volume keys of the remote change the volume of the TV with a bar of Moonlight, instead of the bar of the TV that is drawn over the stream.
+              </span>
+              <div id="volumeBarMenu">
+                <label id="volumeBarBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="volumeBarSwitch">
+                  <input type="checkbox" id="volumeBarSwitch" class="mdl-switch__input" checked>
+                  <span class="mdl-switch__label" data-i18n="Show the volume bar of Moonlight while streaming">Show the volume bar of Moonlight while streaming</span>
+                </label>
+              </div>
+            </div>
           </div>
           <div id="videoSettings" class="settings-options">
             <div class="setting-option">
@@ -659,6 +671,8 @@
   <script type="text/javascript" src="platform/common.js"></script>
   <script type="text/javascript" src="platform/gamepad.js"></script>
   <script type="text/javascript" src="platform/diagnostic_logs.js"></script>
+  <script type="text/javascript" src="platform/volume.js"></script>
+  <script type="text/javascript" src="platform/lag_watch.js"></script>
   <script type="text/javascript" src="platform/start_timeline.js"></script>
   <script type="text/javascript" src="platform/rumble.js"></script>
   <script type="text/javascript" src="platform/operation_guard.js"></script>
@@ -936,6 +950,11 @@
     <div class="mdl-snackbar__text"></div>
     <button type="button" id="snackButton" class="mdl-snackbar__action"></button>
     <!-- This button exists to suppress the snackbar warning, we're really using a toast -->
+  </div>
+  <div id="volume-bar" class="ui-volume" role="status" aria-live="polite">
+    <svg id="volume-bar-icon" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path id="volume-bar-waves" d="M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"/><path id="volume-bar-cross" d="M16 9l5 6M21 9l-5 6"/></svg>
+    <div class="ui-volume__track"><div id="volume-bar-fill" class="ui-volume__fill"></div></div>
+    <span id="volume-bar-value" class="ui-volume__value"></span>
   </div>
   <video id="wasm_module" autoplay tabindex="-1"></video>
 </body>

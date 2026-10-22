@@ -270,6 +270,10 @@ function handleMessage(msg) {
   if (msg.indexOf('streamTerminated: ') === 0) {
     // Release the audio scheduler of the Web Audio backend, which is a no-op for the EMSS backend
     stopAudioScheduler();
+    // The stream is over: the volume keys go back to the system, and the watch of the main thread stops
+    VolumeControl.stop();
+    LagWatch.stop();
+    hideVolumeBar();
     // Remove the on-screen overlays
     $('#connection-warnings, #performance-stats').css('display', 'none');
     // Remove the video stream now

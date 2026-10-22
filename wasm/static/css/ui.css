@@ -1745,3 +1745,71 @@ dialog[id^="hostMenuDialog-"] .mdl-dialog__content button.mdl-button.mdl-button-
 #autoWolCheckboxContainer .mdl-switch.hovered .mdl-switch__track {
     outline: 6px solid var(--ui-ring);
 }
+
+/* =============================
+   The volume bar of Moonlight, over the stream. The system draws its own bar over the stream when it handles the volume keys, so
+   while streaming the application takes them and shows this one. It changes opacity and the scale of its fill only: no blur,
+   no shadow, nothing that the picture under it would have to be mixed with again and again.
+============================= */
+.ui-volume {
+    position: fixed;
+    bottom: 72px;
+    left: 50%;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 16px 32px;
+    border: 2px solid var(--ui-line);
+    border-radius: 40px;
+    background: var(--ui-surface-raised);
+    color: var(--ui-text);
+    transform: translateX(-50%);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s var(--ui-ease), visibility 0s linear 0.2s;
+}
+
+.ui-volume.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.2s var(--ui-ease);
+}
+
+.ui-volume__track {
+    width: 420px;
+    height: 12px;
+    border-radius: 6px;
+    background: var(--ui-line);
+    overflow: hidden;
+}
+
+.ui-volume__fill {
+    width: 100%;
+    height: 100%;
+    background: var(--ui-moon);
+    transform: scaleX(0);
+    transform-origin: left;
+}
+
+.ui-volume__value {
+    min-width: 64px;
+    font: 700 32px/1 var(--ui-font);
+    text-align: right;
+}
+
+.ui-volume.is-muted .ui-volume__fill {
+    background: var(--ui-mute);
+}
+
+#volume-bar-cross {
+    display: none;
+}
+
+.ui-volume.is-muted #volume-bar-cross {
+    display: inline;
+}
+
+.ui-volume.is-muted #volume-bar-waves {
+    display: none;
+}

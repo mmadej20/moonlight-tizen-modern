@@ -126,6 +126,7 @@ function attachListeners() {
   $('#jitterSlider').on('input', saveAudioJitter);
   $('#playHostAudioSwitch').on('click', savePlayHostAudio);
   $('#decryptHostAudioSwitch').on('click', saveDecryptHostAudio);
+  $('#volumeBarSwitch').on('click', saveVolumeBar);
   $('.videoCodecMenu li').on('click', saveVideoCodec);
   $('#hdrModeSwitch').on('click', saveHdrMode);
   $('#fullRangeSwitch').on('click', saveFullRange);
@@ -2035,6 +2036,31 @@ function formatUpdateTimestamp(ms) {
   return `${day}/${month}/${year} ${hour}:${minute}`;
 }
 
+// The bar of the volume: a speaker, a track and a number, for a moment. It changes opacity and the scale of its fill only
+var volumeBarTimer = null;
+function showVolumeBar(state) {
+  const bar = document.getElementById('volume-bar');
+  if (!bar || !isInGame || !VolumeControl.handlesKeys()) {
+    return;
+  }
+  const volume = Math.max(0, Math.min(100, Number(state.volume) || 0));
+  document.getElementById('volume-bar-fill').style.transform = 'scaleX(' + (state.muted ? 0 : volume / 100) + ')';
+  document.getElementById('volume-bar-value').textContent = state.muted ? '0' : String(volume);
+  bar.classList.toggle('is-muted', !!state.muted);
+  bar.classList.add('is-visible');
+  clearTimeout(volumeBarTimer);
+  volumeBarTimer = setTimeout(hideVolumeBar, 1800);
+}
+
+function hideVolumeBar() {
+  clearTimeout(volumeBarTimer);
+  volumeBarTimer = null;
+  const bar = document.getElementById('volume-bar');
+  if (bar) {
+    bar.classList.remove('is-visible');
+  }
+}
+
 // Show the Update App button when a new update is found
 function updateAppButton(latestVersion) {
   // Prevent adding duplicate buttons if one already exists
@@ -2550,6 +2576,9 @@ function showAppsMode() {
 
   var streamWasShown = isInGame;
   isInGame = false;
+  VolumeControl.stop();
+  LagWatch.stop();
+  hideVolumeBar();
   if (streamWasShown) {
     // The stream is over: silence the controllers and write what the rumble throttle did
     rumbleThrottle.stopAll();
@@ -3024,6 +3053,11 @@ function showStreamMode() {
   }
 
   isInGame = true;
+
+  // The volume of the TV is written to the diagnostic log while streaming; with the bar of Moonlight on, its keys are taken from
+  // the system too, so that the bar of the system does not show over the stream. The main thread is watched for late timers
+  VolumeControl.start(isVolumeBarEnabled());
+  LagWatch.start();
 
   // The native input thread reads the controllers during the stream, so the loop that polls them for menu
   // navigation only costs the main thread work. It resumes together with the app list.
@@ -4118,6 +4152,19 @@ function saveOptimizeBitrate() {
   }, 100);
 }
 
+function saveVolumeBar() {
+  setTimeout(() => {
+    const chosenVolumeBar = $('#volumeBarSwitch').parent().hasClass('is-checked');
+    console.log('%c[index.js, saveVolumeBar]', 'color: green;', 'Saving volume bar state: ' + chosenVolumeBar);
+    storeData('volumeBar', chosenVolumeBar, null);
+  }, 100);
+}
+
+// The volume bar of Moonlight takes the volume keys from the system while streaming: on by default
+function isVolumeBarEnabled() {
+  return $('#volumeBarSwitch').parent().hasClass('is-checked');
+}
+
 function saveDisableWarnings() {
   setTimeout(() => {
     const chosenDisableWarnings = $('#disableWarningsSwitch').parent().hasClass('is-checked');
@@ -4250,6 +4297,10 @@ function restoreDefaultsSettingsValues() {
   const defaultOptimizeBitrate = false;
   document.querySelector('#optimizeBitrateBtn').MaterialSwitch.off();
   storeData('optimizeBitrate', defaultOptimizeBitrate, null);
+
+  const defaultVolumeBar = true;
+  document.querySelector('#volumeBarBtn').MaterialSwitch.on();
+  storeData('volumeBar', defaultVolumeBar, null);
 
   const defaultDisableWarnings = false;
   document.querySelector('#disableWarningsBtn').MaterialSwitch.off();
@@ -4606,6 +4657,15 @@ function loadUserDataCb() {
       document.querySelector('#optimizeBitrateBtn').MaterialSwitch.off();
     } else {
       document.querySelector('#optimizeBitrateBtn').MaterialSwitch.on();
+    }
+  });
+
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored volumeBar preferences.');
+  getData('volumeBar', function(previousValue) {
+    if (previousValue.volumeBar == null || previousValue.volumeBar == true) {
+      document.querySelector('#volumeBarBtn').MaterialSwitch.on(); // On by default
+    } else {
+      document.querySelector('#volumeBarBtn').MaterialSwitch.off();
     }
   });
 

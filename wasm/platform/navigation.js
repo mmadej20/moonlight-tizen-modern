@@ -1260,7 +1260,8 @@ const Views = {
       // and neither is shown when the audio output is disabled
       isAudioOutputDisabled() ? null : isWebAudioBackendSelected() ? 'selectAudioJitter' : 'audioSyncBtn',
       'playHostAudioBtn',
-      isAudioOutputDisabled() ? null : 'decryptHostAudioBtn'
+      isAudioOutputDisabled() ? null : 'decryptHostAudioBtn',
+      'volumeBarBtn'
     ].filter(Boolean)),
     up: function() {
       this.view.prevOption();
