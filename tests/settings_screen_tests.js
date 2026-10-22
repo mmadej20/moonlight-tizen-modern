@@ -42,7 +42,7 @@ assert((settings.match(/mdl-menu--bottom-right/g) || []).length === menus.length
 // A switch row has a hint: the rows that had none show the sentence of the switch as their hint
 const rows = settings.split('<div class="setting-option').slice(1);
 const emptyHints = rows.filter((row) => /<span class="mdl-list__item-text-body"><\/span>/.test(row.split('<div id=')[0]));
-assert.strictEqual(emptyHints.length, 2, 'only the removal of the hosts and the system information have no hint');
+assert.strictEqual(emptyHints.length, 6, 'only the removal of the hosts, the system information and four rows of the logs (host, port, clear, session) have no hint');
 for (const id of ['rumbleFeedbackMenu', 'mouseEmulationMenu', 'flipABfaceButtonsMenu', 'flipXYfaceButtonsMenu', 'playHostAudioMenu',
   'connectionWarningsMenu', 'performanceStatsMenu']) {
   const row = rows.find((candidate) => candidate.includes('<div id="' + id + '">'));
@@ -101,5 +101,36 @@ assert(/\.settings-options \.mdl-switch\.hovered/.test(uiCss), 'the switch does 
 assert(/\.setting-option \.mdl-menu__container \{[^}]*right: 28px !important;[^}]*left: auto !important;[^}]*width: 520px !important;/.test(uiCss));
 assert(/\.setting-option \.mdl-menu__container:has\(\.mdl-slider\) \{\s*width: 760px !important;/.test(uiCss), 'the menu of a slider is wider');
 assert(/\.setting-option \.mdl-menu__item\.hovered/.test(uiCss));
+
+// The diagnostic logs: the switch is the first row and the only one while it is off, the fields of the receiver type only after A,
+// and the two buttons of the session are one control
+const navigation = read('wasm/platform/navigation.js');
+const diagnostic = navigation.slice(navigation.indexOf('  DiagnosticSettings: {'), navigation.indexOf('  AboutSettings: {'));
+assert(/options && options\.classList\.contains\('hide-container'\)\) \{\s*return \['diagnosticLogsEnabledBtn'\];/.test(diagnostic), 'switched off, the switch is all there is');
+assert(/return \[\s*'diagnosticLogsEnabledBtn',\s*'diagnosticHost',\s*'diagnosticPort',\s*'sendDiagnosticLogsBtn',\s*'clearDiagnosticLogsBtn',\s*'diagnosticCurrentSessionBtn',\s*'diagnosticLogViewport'\s*\];/.test(diagnostic));
+assert(!/diagnosticFilter/.test(diagnostic + index));
+assert(/current === 'diagnosticHost' \|\| current === 'diagnosticPort'\) \{\s*handleDiagnosticFieldState\(current, true\);/.test(diagnostic), 'A makes a field typeable');
+assert(/typing\.id === 'diagnosticHost' \|\| typing\.id === 'diagnosticPort'\) && !typing\.readOnly\) \{\s*handleDiagnosticFieldState\(typing, false\);/.test(diagnostic), 'B ends the typing before it leaves the page');
+assert(/left: function\(\) \{\s*if \(this\.view\.current\(\) === 'diagnosticCurrentSessionBtn'\) \{\s*clickElement\('diagnosticCurrentSessionBtn'\);/.test(diagnostic));
+assert(/right: function\(\) \{\s*if \(this\.view\.current\(\) === 'diagnosticCurrentSessionBtn'\) \{\s*clickElement\('diagnosticPreviousSessionBtn'\);/.test(diagnostic));
+{
+  const calls = [];
+  const field = { readOnly: true, focus: () => calls.push('focus'), click: () => calls.push('click'), blur: () => calls.push('blur') };
+  const context = { resolveElement: () => field };
+  vm.createContext(context);
+  vm.runInContext(extractFunction(navigation, 'handleDiagnosticFieldState'), context);
+  context.handleDiagnosticFieldState('diagnosticHost', true);
+  assert.strictEqual(field.readOnly, false);
+  assert.deepStrictEqual(calls, ['focus', 'click'], 'the keyboard opens when A makes the field typeable');
+  calls.length = 0;
+  context.handleDiagnosticFieldState('diagnosticHost', false);
+  assert.strictEqual(field.readOnly, true);
+  assert.deepStrictEqual(calls, ['blur']);
+}
+const manager = read('wasm/platform/diagnostic_logs.js');
+assert(/field\.addEventListener\('blur', function\(\) \{ field\.readOnly = true; \}\)/.test(manager), 'a field is read-only again when the keyboard closes');
+assert(/id="diagnosticSettings"[\s\S]*?<input id="diagnosticPort"[^>]* readonly>/.test(html));
+assert(/\.diagnostic-input:not\(\[readonly\]\) \{\s*outline: 6px solid var\(--ui-ring\);/.test(uiCss), 'a field that is open shows it');
+assert(/\.setting-option > label:has\(\+ \.mdl-list__item-text-body:empty\) \{\s*grid-row: 1 \/ span 2;/.test(uiCss), 'a row without a hint centers its title');
 
 console.log('settings_screen_tests: PASS');

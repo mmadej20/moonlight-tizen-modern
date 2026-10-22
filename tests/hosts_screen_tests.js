@@ -158,4 +158,9 @@ assert(/\.ui-fx::after \{[^}]*transition: opacity 0\.2s var\(--ui-ease\), transf
 assert(!/transition:\s*all/.test(uiCss), 'no transition of everything');
 assert(!/transition[^;]*(box-shadow|width|height|margin|padding)/.test(uiCss));
 
+// The outline lies 8 px outside of its element, so its corners are the corners of the element plus 8 px, from one property
+assert(/\.ui-fx::after \{[^}]*border-radius: calc\(var\(--ui-r, 32px\) \+ 8px\);/.test(uiCss), 'the outline is concentric with its element');
+assert(/\.ui-btn \{[^}]*--ui-r: 32px;[^}]*border-radius: var\(--ui-r\);/.test(uiCss));
+assert(/\.ui-card \{[^}]*--ui-r: 32px;[^}]*border-radius: var\(--ui-r\);/.test(uiCss));
+
 console.log('hosts_screen_tests: PASS');

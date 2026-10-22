@@ -232,7 +232,14 @@
     }
     this.applyNativeEnabled();
     this.updateEnabledSwitch();
-    this.setStatus(this.enabled ? 'Saving of diagnostic logs is on.' : 'Saving of diagnostic logs is off.', false);
+    if (!this.enabled) {
+      // The page says so next to the switch: a log that is not kept is not left behind either
+      var self = this;
+      return this.clearStored().then(function() {
+        self.setStatus('Saving of diagnostic logs is off. All saved logs were deleted.', false);
+      });
+    }
+    this.setStatus('Saving of diagnostic logs is on.', false);
     return typeof document !== 'undefined' ? this.refreshView() : Promise.resolve();
   };
 
@@ -389,13 +396,8 @@
     }
     self.lastViewRefreshMs = Date.now();
     return self.storage.read(self.selectedPath()).then(function(text) {
-      var filter = document.getElementById('diagnosticFilter');
-      var query = filter ? filter.value.toLowerCase() : '';
-      var visible = query ? text.split('\n').filter(function(line) {
-        return line.toLowerCase().indexOf(query) !== -1;
-      }).join('\n') : text;
       // A log of 2 MB with tens of thousands of lines hung the page, so only the end of it is shown
-      var shown = tailOfLog(visible, VIEW_TAIL_BYTES);
+      var shown = tailOfLog(text, VIEW_TAIL_BYTES);
       var viewport = document.getElementById('diagnosticLogViewport');
       if (viewport) {
         viewport.textContent = shown.text || (self.enabled
@@ -471,10 +473,15 @@
   };
 
   DiagnosticLogManager.prototype.clearAll = function() {
-    var self = this;
     if (typeof window !== 'undefined' && !window.confirm('Clear all diagnostic logs?')) {
       return Promise.resolve(false);
     }
+    return this.clearStored();
+  };
+
+  // Deletes the log of the current session and of the previous one, and what the native side still holds
+  DiagnosticLogManager.prototype.clearStored = function() {
+    var self = this;
     self.pending = '';
     // What the native side still holds is cleared too
     try {
@@ -507,6 +514,11 @@
     var enabledSwitch = document.getElementById('diagnosticLogsEnabledSwitch');
     if (!enabledSwitch) return;
     enabledSwitch.checked = this.enabled;
+    var options = document.getElementById('diagnosticOptions');
+    if (options) {
+      if (this.enabled) options.classList.remove('hide-container');
+      else options.classList.add('hide-container');
+    }
     var wrapper = enabledSwitch.parentElement;
     if (wrapper && wrapper.MaterialSwitch) {
       if (this.enabled) wrapper.MaterialSwitch.on();
@@ -519,12 +531,10 @@
     var self = this;
     var current = document.getElementById('diagnosticCurrentSessionBtn');
     var previous = document.getElementById('diagnosticPreviousSessionBtn');
-    var filter = document.getElementById('diagnosticFilter');
     var send = document.getElementById('sendDiagnosticLogsBtn');
     var clear = document.getElementById('clearDiagnosticLogsBtn');
     if (current) current.addEventListener('click', function() { self.selectSession('current'); });
     if (previous) previous.addEventListener('click', function() { self.selectSession('previous'); });
-    if (filter) filter.addEventListener('input', function() { self.refreshView(); });
     if (send) send.addEventListener('click', function() { self.exportSelected(); });
     if (clear) clear.addEventListener('click', function() { self.clearAll(); });
     var enabledSwitch = document.getElementById('diagnosticLogsEnabledSwitch');
@@ -534,6 +544,15 @@
     self.updateEnabledSwitch();
     var port = document.getElementById('diagnosticPort');
     if (port && !port.value) port.value = '48150';
+    ['diagnosticHost', 'diagnosticPort'].forEach(function(id) {
+      var field = document.getElementById(id);
+      if (!field) return;
+      // The keyboard closing, or Enter, ends the typing
+      field.addEventListener('blur', function() { field.readOnly = true; });
+      field.addEventListener('keydown', function(event) {
+        if (event.key === 'Enter') field.blur();
+      });
+    });
     self.updateSessionButtons();
   };
 

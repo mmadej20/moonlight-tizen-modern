@@ -141,6 +141,70 @@ function createRequestLimiter(maxConcurrent) {
 
 var boxArtDownloads = createRequestLimiter(2);
 
+// The pictures of the list are drawn at about 260 x 390 px, but a box art from the host is often 600 x 900 or more, and decoded
+// it takes about 2 MB: a list of tens of them made moving through it heavy on the TV. So the list gets a smaller copy, made
+// once and kept next to the original (which stays for the preview of the Smart Hub, and for the check of the default art).
+var BOX_ART_THUMBNAIL_WIDTH = 360;
+var BOX_ART_THUMBNAIL_QUALITY = 0.85;
+// One copy is made at a time: decoding a big picture takes room, and tens of them at once take a lot
+var boxArtShrinks = createRequestLimiter(1);
+
+// Resolves with {dataUrl, bytes}: the copy as a JPEG, as the text that the page shows and as the bytes that are stored
+function shrinkBoxArt(blob) {
+  return boxArtShrinks.run(function() {
+    var draw = function(source, sourceWidth, sourceHeight) {
+      if (!(sourceWidth > 0 && sourceHeight > 0)) {
+        throw new Error('The box art has no size');
+      }
+      var scale = Math.min(1, BOX_ART_THUMBNAIL_WIDTH / sourceWidth);
+      var canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+      canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+      var context = canvas.getContext('2d');
+      // A picture with transparency would turn black in a JPEG
+      context.fillStyle = '#131823';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.imageSmoothingQuality = 'high';
+      context.drawImage(source, 0, 0, canvas.width, canvas.height);
+      var dataUrl = canvas.toDataURL('image/jpeg', BOX_ART_THUMBNAIL_QUALITY);
+      var binary = atob(dataUrl.slice(dataUrl.indexOf(',') + 1));
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return {dataUrl: dataUrl, bytes: bytes};
+    };
+    if (typeof createImageBitmap === 'function') {
+      // The picture is decoded off the main thread
+      return createImageBitmap(blob).then(function(bitmap) {
+        try {
+          return draw(bitmap, bitmap.width, bitmap.height);
+        } finally {
+          if (typeof bitmap.close === 'function') bitmap.close();
+        }
+      });
+    }
+    return new Promise(function(resolve, reject) {
+      var url = URL.createObjectURL(blob);
+      var image = new Image();
+      image.onload = function() {
+        try {
+          resolve(draw(image, image.naturalWidth, image.naturalHeight));
+        } catch (error) {
+          reject(error);
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      };
+      image.onerror = function() {
+        URL.revokeObjectURL(url);
+        reject(new Error('Failed to decode box art'));
+      };
+      image.src = url;
+    });
+  });
+}
+
 // Telemetry of one app list: where the pictures came from and how long the downloads took, so that a slow list can
 // be told apart from a slow host or a full queue. The list resets it when it starts and writes the summary to the
 // diagnostic log when every picture has settled.
@@ -684,6 +748,7 @@ NvHTTP.prototype = {
       var boxArtFileName = 'boxart-' + appId + '.png';
       var self = this;
       var previewFileName = this.getPreviewImageFileName(appId);
+      var thumbnailFileName = 'boxart-' + appId + '-thumb.jpg';
 
       var queuePreview = function(dataUrl, source) {
         var previewPromise = self.generatePreviewImage(dataUrl, appId).then(function(previewDataUrl) {
@@ -695,6 +760,47 @@ NvHTTP.prototype = {
         });
         if (!window.previewPromises) window.previewPromises = [];
         window.previewPromises.push(previewPromise);
+      };
+
+      // The smaller copy that the list shows: read from the storage if it is there
+      var readThumbnail = function() {
+        try {
+          var handle = tizen.filesystem.openFile(boxArtDir + '/' + thumbnailFileName, 'r');
+          var thumbnailBlob = handle.readBlob();
+          handle.close();
+          return thumbnailBlob && thumbnailBlob.size > 0 ? thumbnailBlob : null;
+        } catch (error) {
+          return null;
+        }
+      };
+
+      var hasPreview = function() {
+        try {
+          tizen.filesystem.openFile('documents/' + previewFileName, 'r').close();
+          return true;
+        } catch (error) {
+          return false;
+        }
+      };
+
+      // Hands the list the smaller copy of a box art. The copy is stored only when it was made from an original that was checked
+      // (read from the storage, past the test of the default art): a default art that was just fetched is fetched again later
+      var deliver = function(originalBlob, originalDataUrl, storeThumbnail) {
+        shrinkBoxArt(originalBlob).then(function(thumbnail) {
+          if (storeThumbnail) {
+            try {
+              var thumbnailHandle = tizen.filesystem.openFile(boxArtDir + '/' + thumbnailFileName, 'w');
+              thumbnailHandle.writeData(thumbnail.bytes);
+              thumbnailHandle.close();
+            } catch (error) {
+              console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to store the smaller box art for app ID ' + appId + ': ' + error.message);
+            }
+          }
+          resolve(thumbnail.dataUrl);
+        }, function(error) {
+          console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to make a smaller box art for app ID ' + appId + ', using the original: ' + (error && error.message));
+          resolve(originalDataUrl);
+        });
       };
 
       var fetchBoxArt = function() {
@@ -730,7 +836,7 @@ NvHTTP.prototype = {
               console.error('%c[utils.js, getBoxArt]', 'color: gray;', 'Error: Failed to cache original box art in ' + boxArtDir + ' for app ID ' + appId + ': ' + error.message);
             }
             if (isSmartHubSupported) queuePreview(dataUrl, 'network');
-            resolve(dataUrl);
+            deliver(blob, dataUrl, false);
           };
           reader.onerror = function() {
             reject(reader.error || new Error('Failed to decode network box art'));
@@ -754,7 +860,7 @@ NvHTTP.prototype = {
           boxArtStats.cached += 1;
           console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Returning storage-cached box art: ', appId);
           if (!isSmartHubSupported) {
-            resolve(dataUrl);
+            deliver(fileContentInBlob, dataUrl, true);
             return;
           }
 
@@ -765,7 +871,7 @@ NvHTTP.prototype = {
           } catch (previewReadError) {
             queuePreview(dataUrl, 'storage');
           }
-          resolve(dataUrl);
+          deliver(fileContentInBlob, dataUrl, true);
         };
         reader.onerror = function() {
           console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to decode cached box art. Fetching it again.');
@@ -774,55 +880,74 @@ NvHTTP.prototype = {
         reader.readAsDataURL(new Blob([fileContentInBlob], { type: 'image/png' }));
       };
 
-      try {
-        var fileHandleRead = tizen.filesystem.openFile(boxArtDir + '/' + boxArtFileName, 'r');
-        var fileContentInBlob = fileHandleRead.readBlob();
-        fileHandleRead.close();
-        if (!fileContentInBlob || fileContentInBlob.size === 0) {
-          throw new Error('Cached box art is empty');
-        }
+      var readOriginal = function() {
+        try {
+          var fileHandleRead = tizen.filesystem.openFile(boxArtDir + '/' + boxArtFileName, 'r');
+          var fileContentInBlob = fileHandleRead.readBlob();
+          fileHandleRead.close();
+          if (!fileContentInBlob || fileContentInBlob.size === 0) {
+            throw new Error('Cached box art is empty');
+          }
 
-        var sunshineDefaultBoxArtHash = 'd9164ebd069b5f735eb8efc557801778498da37f572ef70e3d35604739e6c613';
-        if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) {
-          var hashReader = new FileReader();
-          hashReader.onload = function() {
-            window.crypto.subtle.digest('SHA-256', hashReader.result).then(function(hashBuffer) {
-              var hashHex = Array.from(new Uint8Array(hashBuffer)).map(function(byte) {
-                return byte.toString(16).padStart(2, '0');
-              }).join('');
-              if (hashHex !== sunshineDefaultBoxArtHash) {
+          var sunshineDefaultBoxArtHash = 'd9164ebd069b5f735eb8efc557801778498da37f572ef70e3d35604739e6c613';
+          if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) {
+            var hashReader = new FileReader();
+            hashReader.onload = function() {
+              window.crypto.subtle.digest('SHA-256', hashReader.result).then(function(hashBuffer) {
+                var hashHex = Array.from(new Uint8Array(hashBuffer)).map(function(byte) {
+                  return byte.toString(16).padStart(2, '0');
+                }).join('');
+                if (hashHex !== sunshineDefaultBoxArtHash) {
+                  processCachedBoxArt(fileContentInBlob);
+                  return;
+                }
+
+                console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Detected Sunshine default box art. Fetching it again for app ID ' + appId);
+                try {
+                  tizen.filesystem.deleteFile(boxArtDir + '/' + boxArtFileName);
+                } catch (deleteError) {
+                  console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to delete cached default box art: ' + deleteError.message);
+                }
+                try {
+                  tizen.filesystem.deleteFile('documents/' + previewFileName);
+                } catch (deletePreviewError) {
+                  console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to delete cached preview box art: ' + deletePreviewError.message);
+                }
+                fetchBoxArt();
+              }, function(error) {
+                console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to hash cached box art: ' + error.message);
                 processCachedBoxArt(fileContentInBlob);
-                return;
-              }
-
-              console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Detected Sunshine default box art. Fetching it again for app ID ' + appId);
-              try {
-                tizen.filesystem.deleteFile(boxArtDir + '/' + boxArtFileName);
-              } catch (deleteError) {
-                console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to delete cached default box art: ' + deleteError.message);
-              }
-              try {
-                tizen.filesystem.deleteFile('documents/' + previewFileName);
-              } catch (deletePreviewError) {
-                console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to delete cached preview box art: ' + deletePreviewError.message);
-              }
-              fetchBoxArt();
-            }, function(error) {
-              console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Failed to hash cached box art: ' + error.message);
+              });
+            };
+            hashReader.onerror = function() {
               processCachedBoxArt(fileContentInBlob);
-            });
-          };
-          hashReader.onerror = function() {
+            };
+            hashReader.readAsArrayBuffer(fileContentInBlob);
+          } else {
             processCachedBoxArt(fileContentInBlob);
-          };
-          hashReader.readAsArrayBuffer(fileContentInBlob);
-        } else {
-          processCachedBoxArt(fileContentInBlob);
+          }
+        } catch (readError) {
+          console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Could not read cached box art from internal storage!', readError.message);
+          fetchBoxArt();
         }
-      } catch (readError) {
-        console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Could not read cached box art from internal storage!', readError.message);
-        fetchBoxArt();
+      };
+
+      // The smaller copy is enough, unless the preview of the Smart Hub is missing and has to be made from the original
+      var thumbnailBlob = readThumbnail();
+      if (thumbnailBlob && (!isSmartHubSupported || hasPreview())) {
+        var thumbnailReader = new FileReader();
+        thumbnailReader.onload = function() {
+          boxArtStats.cached += 1;
+          console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Returning storage-cached smaller box art: ', appId);
+          resolve(thumbnailReader.result);
+        };
+        thumbnailReader.onerror = function() {
+          readOriginal();
+        };
+        thumbnailReader.readAsDataURL(new Blob([thumbnailBlob], { type: 'image/jpeg' }));
+        return;
       }
+      readOriginal();
     }.bind(this));
   },
 

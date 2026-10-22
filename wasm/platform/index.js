@@ -2747,6 +2747,8 @@ function showApps(host) {
           }
           // Load box art
           var boxArtPlaceholderImg = new Image();
+          // The picture is decoded off the main thread, so that moving through the list does not wait for it
+          boxArtPlaceholderImg.decoding = 'async';
           var appEntry = (_isSmartHubSupported && _previewApps[host.serverUid]) ? _previewApps[host.serverUid].apps.find(function(a) {
             return a.id === app.id;
           }) : null;

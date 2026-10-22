@@ -505,47 +505,67 @@
             </div>
           </div>
           <div id="diagnosticSettings" class="settings-options">
-            <div class="setting-option diagnostic-panel">
-              <label data-i18n="Send logs to PC">Send logs to PC</label>
-              <span class="mdl-list__item-text-body" data-i18n="- Start Receive-MoonlightLogs.ps1 on the streaming PC before sending.">
-                - Start Receive-MoonlightLogs.ps1 on the streaming PC before sending.
+            <div class="setting-option">
+              <label data-i18n="Save diagnostic logs on this device">Save diagnostic logs on this device</label>
+              <span class="mdl-list__item-text-body" data-i18n="- Turning this off stops saving logs and deletes all the logs that are saved on this device.">
+                - Turning this off stops saving logs and deletes all the logs that are saved on this device.
               </span>
-              <div class="diagnostic-destination">
-                <label for="diagnosticHost" data-i18n="Host">Host</label>
-                <input id="diagnosticHost" class="diagnostic-input" type="text" placeholder="192.168.1.10" aria-label="Diagnostic receiver host">
-                <label for="diagnosticPort" data-i18n="Port">Port</label>
-                <input id="diagnosticPort" class="diagnostic-input" type="text" inputmode="numeric" pattern="[0-9]*" value="48150" aria-label="Diagnostic receiver port">
-              </div>
-              <div class="diagnostic-toggle">
+              <div id="diagnosticLogsEnabledMenu">
                 <label id="diagnosticLogsEnabledBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="diagnosticLogsEnabledSwitch">
                   <input type="checkbox" id="diagnosticLogsEnabledSwitch" class="mdl-switch__input" checked>
                   <span class="mdl-switch__label" data-i18n="Save diagnostic logs on this device">Save diagnostic logs on this device</span>
                 </label>
-                <span class="mdl-list__item-text-body" data-i18n="- Turn this off to stop writing logs on the device. Logs that are already saved stay until you clear them.">
-                  - Turn this off to stop writing logs on the device. Logs that are already saved stay until you clear them.
-                </span>
               </div>
-              <div class="diagnostic-actions">
-                <button type="button" id="sendDiagnosticLogsBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-i18n="Send logs to PC">Send logs to PC</button>
-                <button type="button" id="clearDiagnosticLogsBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-i18n="Clear all logs">Clear all logs</button>
-              </div>
-              <div id="diagnosticStatus" class="diagnostic-status" aria-live="polite"></div>
             </div>
-            <div class="setting-option diagnostic-panel">
-              <label data-i18n="Diagnostic logs">Diagnostic logs</label>
-              <span class="mdl-list__item-text-body" data-i18n="- Keeps the current and previous streaming session. Exported logs contain local network addresses.">
-                - Keeps the current and previous streaming session. Exported logs contain local network addresses.
-              </span>
-              <div class="diagnostic-controls">
+            <div id="diagnosticOptions">
+              <div class="setting-option">
+                <label for="diagnosticHost" data-i18n="Host">Host</label>
+                <span class="mdl-list__item-text-body"></span>
+                <div id="diagnosticHostMenu">
+                  <input id="diagnosticHost" class="diagnostic-input" type="text" placeholder="192.168.1.10" aria-label="Diagnostic receiver host" readonly>
+                </div>
+              </div>
+              <div class="setting-option">
+                <label for="diagnosticPort" data-i18n="Port">Port</label>
+                <span class="mdl-list__item-text-body"></span>
+                <div id="diagnosticPortMenu">
+                  <input id="diagnosticPort" class="diagnostic-input" type="text" inputmode="numeric" pattern="[0-9]*" value="48150" aria-label="Diagnostic receiver port" readonly>
+                </div>
+              </div>
+              <div class="setting-option">
+                <label data-i18n="Send logs to PC">Send logs to PC</label>
+                <span class="mdl-list__item-text-body" data-i18n="- Start Receive-MoonlightLogs.ps1 on the streaming PC before sending.">
+                  - Start Receive-MoonlightLogs.ps1 on the streaming PC before sending.
+                </span>
+                <div id="sendDiagnosticLogsMenu">
+                  <button type="button" id="sendDiagnosticLogsBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-i18n="Send">Send</button>
+                </div>
+                <div id="diagnosticStatus" class="diagnostic-status" aria-live="polite"></div>
+              </div>
+              <div class="setting-option">
+                <label data-i18n="Clear all logs">Clear all logs</label>
+                <span class="mdl-list__item-text-body"></span>
+                <div id="clearDiagnosticLogsMenu">
+                  <button type="button" id="clearDiagnosticLogsBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-i18n="Clear">Clear</button>
+                </div>
+              </div>
+              <div class="setting-option">
                 <label data-i18n="Session">Session</label>
-                <div class="diagnostic-session-actions" role="group" aria-label="Diagnostic session">
+                <span class="mdl-list__item-text-body"></span>
+                <div id="diagnosticSessionMenu" class="diagnostic-session-actions" role="group" aria-label="Diagnostic session">
                   <button type="button" id="diagnosticCurrentSessionBtn" class="mdl-button diagnostic-session-button selected" aria-pressed="true" data-i18n="Current session">Current session</button>
                   <button type="button" id="diagnosticPreviousSessionBtn" class="mdl-button diagnostic-session-button" aria-pressed="false" data-i18n="Previous session">Previous session</button>
                 </div>
-                <label for="diagnosticFilter" data-i18n="Filter">Filter</label>
-                <input id="diagnosticFilter" class="diagnostic-input" type="text" placeholder="IDR, FEC, dropped, AppendPacket" aria-label="Filter diagnostic log">
-                <div id="diagnosticSummary">No diagnostic log loaded.</div>
-                <pre id="diagnosticLogViewport" tabindex="0" aria-label="Diagnostic log contents">No diagnostic log is available for this session.</pre>
+              </div>
+              <div class="setting-option">
+                <label data-i18n="Diagnostic logs">Diagnostic logs</label>
+                <span class="mdl-list__item-text-body" data-i18n="- Keeps the current and previous streaming session. Exported logs contain local network addresses.">
+                  - Keeps the current and previous streaming session. Exported logs contain local network addresses.
+                </span>
+                <div id="diagnosticLogMenu">
+                  <div id="diagnosticSummary">No diagnostic log loaded.</div>
+                  <pre id="diagnosticLogViewport" tabindex="0" aria-label="Diagnostic log contents">No diagnostic log is available for this session.</pre>
+                </div>
               </div>
             </div>
           </div>

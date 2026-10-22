@@ -37,9 +37,11 @@ Object.keys(colors).forEach((name) => assert.strictEqual(tokens[name], colors[na
 
 const used = withoutComments.match(/var\((--[a-z-]+)\)/g) || [];
 assert(used.length >= 200, 'the tokens are used (' + used.length + ' uses)');
+// A property of one element (the radius of a component, for the outline that follows it) is declared where it is used
+const declared = new Set(withoutComments.match(/--[a-z-]+(?=\s*:)/g) || []);
 used.forEach((use) => {
   const name = use.slice(4, -1);
-  assert(name in tokens, name + ' is defined');
+  assert(declared.has(name), name + ' is defined');
 });
 
 // A token is not written out again where it has its role: the colors of the page are in :root and nowhere else

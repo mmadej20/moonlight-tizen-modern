@@ -36,6 +36,11 @@ function createContext(options) {
         openFile(path, mode) {
           opened.push({ path, mode });
           if (mode === 'r') {
+            if (/-thumb\.jpg$/.test(path)) {
+              if (!options.thumbnailBlob) throw new Error('no smaller copy');
+              return { readBlob() { return options.thumbnailBlob; }, close() {} };
+            }
+            if (options.previewMissing && path.startsWith('documents/')) throw new Error('no preview');
             if (!options.cachedBlob) throw new Error('cache miss');
             return {
               readBlob() { return options.cachedBlob; },
@@ -72,8 +77,21 @@ function createContext(options) {
   context.window.atob = context.atob;
   context.window.btoa = context.btoa;
   if (options.crypto) context.window.crypto = options.crypto;
+  const drawn = [];
+  if (options.shrink) {
+    context.createImageBitmap = () => (options.shrinkError ? Promise.reject(options.shrinkError)
+      : Promise.resolve({ width: options.sourceWidth || 600, height: options.sourceHeight || 900, close() { drawn.push('closed'); } }));
+    context.document = {
+      createElement: () => ({
+        width: 0,
+        height: 0,
+        getContext() { return { fillRect() {}, drawImage() { drawn.push('drawn'); } }; },
+        toDataURL(type, quality) { drawn.push([type, quality, this.width, this.height]); return 'data:image/jpeg;base64,AQID'; },
+      }),
+    };
+  }
   vm.runInNewContext(fs.readFileSync('wasm/static/js/utils.js', 'utf8'), context);
-  return { context, opened, deleted, writes, sent };
+  return { context, opened, deleted, writes, sent, drawn };
 }
 
 async function testHostScopedPreviewFiles() {
@@ -161,6 +179,53 @@ async function testSunshineDefaultBoxArtIsRefetchedPerHost() {
     'only this host\'s generated preview is invalidated');
 }
 
+// The list shows a smaller copy of a box art: heavy pictures made moving through it heavy on the TV
+async function testListGetsTheSmallerCopy() {
+  // An original that is in the storage becomes a copy of 360 px, which is stored next to it
+  const cached = createContext({ cachedBlob: new Blob([new Uint8Array([1, 2, 3])]), shrink: true });
+  const host = new cached.context.NvHTTP('host', 'client');
+  assert.strictEqual(await host.getBoxArt(7, false), 'data:image/jpeg;base64,AQID');
+  assert.deepStrictEqual(cached.drawn.find(Array.isArray), ['image/jpeg', 0.85, 360, 540], 'the width is 360 and the height keeps the proportions');
+  assert(cached.drawn.includes('closed'), 'the decoded picture is released');
+  const stored = cached.writes.find((entry) => entry.path === 'wgt-private/host/boxart-7-thumb.jpg');
+  assert(stored, 'the copy is stored next to the original');
+  assert.deepStrictEqual(Array.from(stored.value), [1, 2, 3], 'as the bytes of the JPEG');
+
+  // A picture that is smaller than that is not enlarged
+  const small = createContext({ cachedBlob: new Blob([new Uint8Array([1])]), shrink: true, sourceWidth: 200, sourceHeight: 300 });
+  await new small.context.NvHTTP('host', 'client').getBoxArt(7, false);
+  assert.deepStrictEqual(small.drawn.find(Array.isArray).slice(2), [200, 300]);
+
+  // Next time the copy is read and the original is left alone, so there is no test of the default art and no network
+  const again = createContext({ thumbnailBlob: new Blob([new Uint8Array([9])]), dataUrl: 'data:image/jpeg;base64,CQ==' });
+  const againHost = new again.context.NvHTTP('host', 'client');
+  assert.strictEqual(await againHost.getBoxArt(7, false), 'data:image/jpeg;base64,CQ==');
+  assert(!again.opened.some((entry) => entry.path.endsWith('boxart-7.png')), 'the original is not read');
+  assert.strictEqual(again.sent.length, 0);
+
+  // The Smart Hub preview is made from the original, so a missing preview sends the list back to the original
+  const needsPreview = createContext({
+    thumbnailBlob: new Blob([new Uint8Array([9])]), cachedBlob: new Blob([new Uint8Array([1, 2, 3])]), previewMissing: true, shrink: true,
+  });
+  const previewHost = new needsPreview.context.NvHTTP('host', 'client');
+  previewHost.serverUid = 'server';
+  await previewHost.getBoxArt(7, true);
+  assert(needsPreview.opened.some((entry) => entry.path.endsWith('boxart-7.png') && entry.mode === 'r'), 'the original is read for the preview');
+
+  // A picture that was just fetched is shown small, but its copy is not stored: it may be the default art of the host, which is fetched again later
+  const fetched = createContext({ networkBytes: new Uint8Array([0x89, 0x50]), shrink: true });
+  const fetchedHost = new fetched.context.NvHTTP('host', 'client');
+  fetchedHost.serverUid = 'server';
+  fetchedHost._baseUrlHttps = 'https://host:47984';
+  assert.strictEqual(await fetchedHost.getBoxArt(8, false), 'data:image/jpeg;base64,AQID');
+  assert.deepStrictEqual(fetched.writes.map((entry) => entry.path), ['wgt-private/host/boxart-8.png'], 'only the original is stored');
+
+  // When the copy cannot be made, the list gets the original as before
+  const broken = createContext({ cachedBlob: new Blob([new Uint8Array([1])]), shrink: true, shrinkError: new Error('cannot decode') });
+  assert.match(await new broken.context.NvHTTP('host', 'client').getBoxArt(7, false), /^data:image\/png;base64,/);
+  assert(!broken.writes.some((entry) => entry.path.endsWith('-thumb.jpg')));
+}
+
 async function testLoopbackAddressesAreNeverPolledAsRemoteHosts() {
   const harness = createContext({ networkBytes: new Uint8Array([1]) });
   const host = new harness.context.NvHTTP('127.0.0.1', 'client', 'localhost');
@@ -185,6 +250,7 @@ async function main() {
   await testNetworkPngBytesAreWrittenDirectly();
   await testCachedBlobAndReadFailureSettlement();
   await testSunshineDefaultBoxArtIsRefetchedPerHost();
+  await testListGetsTheSmallerCopy();
   await testLoopbackAddressesAreNeverPolledAsRemoteHosts();
   console.log('box_art_behavior_tests: PASS');
 }

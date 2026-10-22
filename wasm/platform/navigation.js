@@ -266,6 +266,23 @@ function handleIpTextFieldState(enabled) {
   }
 }
 
+// The fields of the diagnostic receiver are read-only while they only have the focus, so that the keyboard of the TV does not
+// open by itself on the way through the list; A makes one of them typeable, and the end of the typing makes it read-only again
+function handleDiagnosticFieldState(target, enabled) {
+  const field = resolveElement(target);
+  if (!field) return;
+  field.readOnly = !enabled;
+  if (enabled) {
+    field.focus();
+    // Trigger a click to open the virtual keyboard on Tizen devices
+    if (typeof field.click === 'function') {
+      field.click();
+    }
+  } else {
+    field.blur();
+  }
+}
+
 // Change the value of the IP address numeric field
 function changeIpNumericFieldValue(adjust) {
   const currentItem = elementId(this.view.current());
@@ -1493,16 +1510,22 @@ const Views = {
     },
   },
   DiagnosticSettings: {
-    view: new ListView(() => [
-      'diagnosticHost',
-      'diagnosticPort',
-      'sendDiagnosticLogsBtn',
-      'clearDiagnosticLogsBtn',
-      'diagnosticCurrentSessionBtn',
-      'diagnosticPreviousSessionBtn',
-      'diagnosticFilter',
-      'diagnosticLogViewport'
-    ]),
+    // The switch that saves the logs is the first row, and the rest is there only while the logs are saved
+    view: new ListView(() => {
+      const options = document.getElementById('diagnosticOptions');
+      if (options && options.classList.contains('hide-container')) {
+        return ['diagnosticLogsEnabledBtn'];
+      }
+      return [
+        'diagnosticLogsEnabledBtn',
+        'diagnosticHost',
+        'diagnosticPort',
+        'sendDiagnosticLogsBtn',
+        'clearDiagnosticLogsBtn',
+        'diagnosticCurrentSessionBtn',
+        'diagnosticLogViewport'
+      ];
+    }),
     up: function() {
       if (this.view.current() === 'diagnosticLogViewport') {
         const viewport = resolveElement('diagnosticLogViewport');
@@ -1525,12 +1548,38 @@ const Views = {
       this.view.nextOption();
       focusElement(this.view.current());
     },
-    left: function() {},
-    right: function() {},
+    // The two buttons of the session row are one control: left is the current session, right is the previous one
+    left: function() {
+      if (this.view.current() === 'diagnosticCurrentSessionBtn') {
+        clickElement('diagnosticCurrentSessionBtn');
+      }
+    },
+    right: function() {
+      if (this.view.current() === 'diagnosticCurrentSessionBtn') {
+        clickElement('diagnosticPreviousSessionBtn');
+      }
+    },
     accept: function() {
-      clickElement(this.view.current());
+      const current = this.view.current();
+      if (current === 'diagnosticHost' || current === 'diagnosticPort') {
+        handleDiagnosticFieldState(current, true);
+        return;
+      }
+      if (current === 'diagnosticCurrentSessionBtn') {
+        // A switches to the session that is not shown
+        const showsCurrent = resolveElement('diagnosticCurrentSessionBtn').classList.contains('selected');
+        clickElement(showsCurrent ? 'diagnosticPreviousSessionBtn' : 'diagnosticCurrentSessionBtn');
+        return;
+      }
+      clickElement(current);
     },
     back: function() {
+      // B first ends the typing in a field
+      const typing = document.activeElement;
+      if (typing && (typing.id === 'diagnosticHost' || typing.id === 'diagnosticPort') && !typing.readOnly) {
+        handleDiagnosticFieldState(typing, false);
+        return;
+      }
       blurElement(this.view.current());
       resetSettingsView();
       Navigation.change(Views.Settings);

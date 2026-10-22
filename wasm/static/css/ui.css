@@ -61,7 +61,7 @@
     position: absolute;
     inset: -8px;
     border: 6px solid var(--ui-ring);
-    border-radius: inherit;
+    border-radius: calc(var(--ui-r, 32px) + 8px);
     opacity: 0;
     transform: scale(0.97);
     transition: opacity 0.2s var(--ui-ease), transform 0.2s var(--ui-ease);
@@ -109,10 +109,11 @@
     align-items: center;
     justify-content: center;
     gap: 14px;
+    --ui-r: 32px;
     height: 64px;
     padding: 0 28px;
     box-sizing: border-box;
-    border-radius: 32px;
+    border-radius: var(--ui-r);
     border: 2px solid var(--ui-line);
     background: var(--ui-surface-raised);
     color: var(--ui-text);
@@ -191,9 +192,10 @@
 .ui-card {
     display: flex;
     flex-direction: column;
+    --ui-r: 32px;
     box-sizing: border-box;
     padding: 36px;
-    border-radius: 32px;
+    border-radius: var(--ui-r);
     border: 2px solid var(--ui-line);
     background: var(--ui-surface);
     color: var(--ui-text);
@@ -771,6 +773,11 @@ body {
     display: none;
 }
 
+/* A row without a hint centers its title against its control */
+.setting-option > label:has(+ .mdl-list__item-text-body:empty) {
+    grid-row: 1 / span 2;
+}
+
 .setting-option > div[id$="Menu"] {
     grid-column: 2;
     grid-row: 1 / span 2;
@@ -1053,79 +1060,117 @@ body {
     background: var(--ui-moon);
 }
 
-/* Logs: a panel with its own controls, not a row with one control */
-.setting-option.diagnostic-panel {
-    display: block;
-}
-
-.diagnostic-panel > label {
-    margin-bottom: 6px;
-}
-
-.diagnostic-controls, .diagnostic-destination {
-    display: grid;
-    grid-template-columns: 150px 1fr;
-    gap: 12px 16px;
-    align-items: center;
-    margin-top: 16px;
-}
-
-.diagnostic-controls > label, .diagnostic-destination > label {
-    font: 600 24px/1.2 var(--ui-font);
-    color: var(--ui-mute);
-}
-
+/* Logs: the rows are like the others. The fields of the receiver are read-only until A makes one of them typeable, so they look
+   like the fields that open a menu, and they get the outline of the typing when they are open */
 .diagnostic-input {
     box-sizing: border-box;
-    width: 100%;
-    min-height: 56px;
+    width: 420px;
+    height: 56px;
     padding: 0 20px;
     border-radius: 16px;
     border: 2px solid var(--ui-line);
     background: var(--ui-bg);
     color: var(--ui-text);
-    font: 600 24px/1 var(--ui-font);
+    font: 600 26px/1 var(--ui-font);
+    letter-spacing: 0;
+    text-overflow: ellipsis;
 }
 
-.diagnostic-input:focus, #diagnosticLogViewport:focus, #sendDiagnosticLogsBtn:focus, #clearDiagnosticLogsBtn:focus,
-.diagnostic-session-button:focus {
+.diagnostic-input::placeholder {
+    color: var(--ui-mute);
+}
+
+.diagnostic-input:focus, .diagnostic-input.hovered, #sendDiagnosticLogsBtn:focus, #clearDiagnosticLogsBtn:focus,
+.diagnostic-session-button:focus, #diagnosticLogViewport:focus {
     outline: none;
     border-color: var(--ui-moon);
     box-shadow: none;
 }
 
-.diagnostic-session-actions {
-    display: flex;
-    gap: 12px;
+.diagnostic-input:not([readonly]) {
+    outline: 6px solid var(--ui-ring);
 }
 
-.diagnostic-session-button {
-    flex: 1;
-    min-height: 56px;
-    padding: 0 20px;
+/* The buttons of the row of the logs that are sent and cleared are buttons that do something, like the ones of the About page */
+.setting-option #sendDiagnosticLogsBtn, .setting-option #clearDiagnosticLogsBtn {
+    min-width: 200px;
+    height: 56px;
+    padding: 0 28px;
+    box-sizing: border-box;
     border-radius: 16px;
     border: 2px solid var(--ui-line);
     background: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 24px/52px var(--ui-font);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.setting-option #clearDiagnosticLogsBtn {
+    color: var(--ui-bad);
+    border-color: var(--ui-bad);
+}
+
+/* The session: two buttons in one frame, the shown one is filled */
+.diagnostic-session-actions {
+    display: flex;
+    gap: 8px;
+    padding: 6px;
+    border-radius: 22px;
+    background: var(--ui-bg);
+}
+
+.diagnostic-session-button {
+    min-height: 52px;
+    padding: 0 24px;
+    border: 0;
+    border-radius: 16px;
+    background: transparent;
     color: var(--ui-mute);
-    font: 600 24px/1 var(--ui-font);
+    font: 600 24px/52px var(--ui-font);
     letter-spacing: 0;
     text-transform: none;
 }
 
 .diagnostic-session-button.selected {
     background: var(--ui-moon);
-    border-color: var(--ui-moon);
     color: var(--ui-ink);
 }
 
-#diagnosticSummary {
+/* The message about what was sent or cleared sits under the row that sent it */
+.setting-option > .diagnostic-status {
     grid-column: 1 / -1;
+    grid-row: 3;
+}
+
+.diagnostic-status {
+    min-height: 0;
+    color: var(--ui-ok);
+    font: 500 22px/1.3 var(--ui-font);
+}
+
+.diagnostic-status:empty {
+    display: none;
+}
+
+.diagnostic-error {
+    color: var(--ui-bad);
+}
+
+/* The log is a panel under its title, as wide as the row */
+.setting-option > #diagnosticLogMenu {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    margin-top: 12px;
+}
+
+#diagnosticSummary {
+    margin-bottom: 10px;
     color: var(--ui-mute);
     font: 500 22px/1.3 var(--ui-font);
 }
 
 #diagnosticLogViewport {
-    grid-column: 1 / -1;
     box-sizing: border-box;
     width: 100%;
     height: 340px;
@@ -1139,71 +1184,6 @@ body {
     border: 2px solid var(--ui-line);
     border-radius: 16px;
     font: 18px/1.4 monospace;
-}
-
-.diagnostic-toggle {
-    margin-top: 16px;
-}
-
-.diagnostic-toggle .mdl-switch {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    height: 56px;
-}
-
-.diagnostic-toggle .mdl-switch__label {
-    left: 0;
-    margin: 0;
-    padding: 0;
-    color: var(--ui-text);
-    font: 600 26px/1.15 var(--ui-font);
-    letter-spacing: 0;
-}
-
-.diagnostic-toggle .mdl-switch__track {
-    left: auto;
-    right: 0;
-}
-
-.diagnostic-toggle .mdl-switch__thumb, .diagnostic-toggle .mdl-switch.is-checked .mdl-switch__thumb {
-    left: calc(100% - 90px);
-}
-
-.diagnostic-toggle > .mdl-list__item-text-body {
-    display: block;
-    margin-top: 6px;
-    font: 500 22px/1.3 var(--ui-font);
-    color: var(--ui-mute);
-}
-
-.diagnostic-actions {
-    display: flex;
-    gap: 16px;
-    margin-top: 16px;
-}
-
-#sendDiagnosticLogsBtn, #clearDiagnosticLogsBtn {
-    flex: 1;
-    min-height: 56px;
-    border-radius: 16px;
-    border: 2px solid var(--ui-line);
-    background: var(--ui-bg);
-    color: var(--ui-text);
-    font: 600 24px/1 var(--ui-font);
-    letter-spacing: 0;
-    text-transform: none;
-}
-
-.diagnostic-status {
-    min-height: 28px;
-    margin-top: 12px;
-    color: var(--ui-ok);
-    font: 500 22px/1.3 var(--ui-font);
-}
-
-.diagnostic-error {
-    color: var(--ui-bad);
 }
 
 #settings-hints {
@@ -1589,7 +1569,6 @@ dialog[id^="hostMenuDialog-"] .mdl-dialog__content button.mdl-button.mdl-button-
 .mdl-progress {
     border-radius: 8px;
     background: var(--ui-line);
-    overflow: hidden;
 }
 
 .mdl-progress > .progressbar, .mdl-progress > .bufferbar, .mdl-progress > .auxbar {

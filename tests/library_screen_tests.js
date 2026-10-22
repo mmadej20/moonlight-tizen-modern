@@ -115,4 +115,7 @@ for (const locale of ['en-US', 'pt-BR', 'pl-PL']) {
   for (const key of ['Library', 'Apps: %1$d', 'Running']) assert(key in strings, locale + ' has "' + key + '"');
 }
 
+// The pictures are decoded off the main thread
+assert(/boxArtPlaceholderImg\.decoding = 'async'/.test(showApps));
+
 console.log('library_screen_tests: PASS');

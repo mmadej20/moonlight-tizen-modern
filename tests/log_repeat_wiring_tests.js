@@ -40,24 +40,28 @@ assert(/Module\.setDiagnosticLogEnabled\(this\.enabled\)/.test(manager));
 
 // The page has the switch and the button that clears everything
 assert(/id="diagnosticLogsEnabledSwitch"[^>]*class="mdl-switch__input"[^>]*checked/.test(html));
-assert(/id="clearDiagnosticLogsBtn"[^>]*data-i18n="Clear all logs">Clear all logs</.test(html));
+assert(/id="clearDiagnosticLogsBtn"[^>]*data-i18n="Clear">Clear</.test(html));
+assert(/<label data-i18n="Clear all logs">Clear all logs<\/label>/.test(html), 'the row that clears is titled by the old label');
 assert(!/data-i18n="Clear logs"/.test(html), 'the old label is gone');
 
 // A full log is cut down to three quarters, only the end of it is put on the page, and not more often than every 3 s
 assert(/var COMPACT_TARGET_BYTES = Math\.floor\(SESSION_LIMIT_BYTES \* 0\.75\);/.test(manager));
 assert(/trimDiagnosticLog\(current \+ batch, COMPACT_TARGET_BYTES\)/.test(manager));
 assert(!/trimDiagnosticLog\(current \+ batch, SESSION_LIMIT_BYTES\)/.test(manager));
-assert(/tailOfLog\(visible, VIEW_TAIL_BYTES\)/.test(manager));
+assert(/tailOfLog\(text, VIEW_TAIL_BYTES\)/.test(manager));
 assert(/Date\.now\(\) - this\.lastViewRefreshMs >= VIEW_REFRESH_MS/.test(manager));
 
 // Both languages have the new texts, and the label that was renamed is not left behind
 for (const locale of ['en-US', 'pt-BR']) {
   const dictionary = JSON.parse(read('wasm/static/locales/' + locale + '.json'));
-  for (const key of ['Save diagnostic logs on this device', 'Clear all logs',
-    '- Turn this off to stop writing logs on the device. Logs that are already saved stay until you clear them.']) {
+  for (const key of ['Save diagnostic logs on this device', 'Clear all logs', 'Send', 'Clear',
+    '- Turning this off stops saving logs and deletes all the logs that are saved on this device.']) {
     assert(Object.prototype.hasOwnProperty.call(dictionary, key), locale + ' has "' + key + '"');
   }
   assert(!Object.prototype.hasOwnProperty.call(dictionary, 'Clear logs'), locale + ' has no stale label');
+  assert(!Object.prototype.hasOwnProperty.call(dictionary, 'Filter'), locale + ' has no label of the filter');
+  assert(!Object.prototype.hasOwnProperty.call(dictionary,
+    '- Turn this off to stop writing logs on the device. Logs that are already saved stay until you clear them.'), locale + ' does not promise that saved logs stay');
 }
 
 console.log('log repeat wiring tests passed');

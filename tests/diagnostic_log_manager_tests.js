@@ -123,15 +123,20 @@ const PREVIOUS = 'wgt-private/moonlight-diagnostics-previous.log';
     await offManager.appendLine('kept while on', new Date('2026-10-21T10:00:00.000Z'));
     assert((await offStorage.read(CURRENT)).includes('kept while on'));
 
+    // Turning the saving off deletes what was saved, the previous session too, and the page says so next to the switch
+    await offStorage.write(PREVIOUS, 'previous session\n');
     await offManager.setEnabled(false);
     assert.strictEqual(memory[diagnostics.ENABLED_KEY], 'false', 'the choice is stored');
     assert.strictEqual(offManager.isEnabled(), false);
+    assert.strictEqual(await offStorage.read(CURRENT), '', 'the log of the session is deleted');
+    assert.strictEqual(await offStorage.read(PREVIOUS), '', 'and the log of the previous one');
     const before = await offStorage.read(CURRENT);
     await offManager.appendLine('not kept', new Date('2026-10-21T10:00:01.000Z'));
     offManager.pending = 'pending text\n';
     await offManager.persistPending();
     await offManager.beginSession({host: '192.168.1.10', startedAt: '2026-10-21T10:00:02.000Z'});
     assert.strictEqual(await offStorage.read(CURRENT), before, 'nothing is written while the logs are off');
+    assert.strictEqual(before, '');
     assert.strictEqual(offManager.pending, '');
 
     const reopened = diagnostics.createManager(new diagnostics.MemoryStorage());
@@ -154,6 +159,29 @@ const PREVIOUS = 'wgt-private/moonlight-diagnostics-previous.log';
     global.localStorage = {getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); }};
     assert.strictEqual(diagnostics.createManager(new diagnostics.MemoryStorage()).isEnabled(), true);
     await diagnostics.createManager(new diagnostics.MemoryStorage()).setEnabled(false);
+    delete global.localStorage;
+  }
+
+  // The options of the page are there only while the logs are saved
+  {
+    const classes = { diagnosticOptions: new Set() };
+    const element = (id) => ({
+      id, textContent: '', className: '', checked: true, value: '',
+      classList: { add: (name) => (classes[id] = classes[id] || new Set()).add(name), remove: (name) => (classes[id] = classes[id] || new Set()).delete(name) },
+      setAttribute() {}, addEventListener() {}, parentElement: null
+    });
+    const elements = {};
+    global.document = { getElementById: (id) => (elements[id] = elements[id] || element(id)) };
+    global.localStorage = { getItem: () => null, setItem: () => {} };
+    const storage = new diagnostics.MemoryStorage();
+    storage.degraded = false;
+    const manager = diagnostics.createManager(storage);
+    await manager.setEnabled(false);
+    assert(classes.diagnosticOptions.has('hide-container'), 'off: the options are hidden');
+    assert.strictEqual(elements.diagnosticLogsEnabledSwitch.checked, false);
+    await manager.setEnabled(true);
+    assert(!classes.diagnosticOptions.has('hide-container'), 'on: the options are shown');
+    delete global.document;
     delete global.localStorage;
   }
 

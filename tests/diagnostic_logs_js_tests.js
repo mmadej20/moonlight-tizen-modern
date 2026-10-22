@@ -52,13 +52,14 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'wasm', 'index.html'), '
   'diagnosticSettings',
   'diagnosticCurrentSessionBtn',
   'diagnosticPreviousSessionBtn',
-  'diagnosticFilter',
   'diagnosticLogViewport',
   'diagnosticHost',
   'diagnosticPort',
   'sendDiagnosticLogsBtn',
   'clearDiagnosticLogsBtn',
-  'diagnosticLogsEnabledSwitch'
+  'diagnosticLogsEnabledSwitch',
+  'diagnosticLogsEnabledBtn',
+  'diagnosticOptions'
 ].forEach((id) => {
   assert.strictEqual((html.match(new RegExp('id="' + id + '"', 'g')) || []).length, 1, id);
 });
@@ -71,6 +72,14 @@ assert(/type="text"/.test(portInput[0]), 'port should use plain text input');
 assert(/inputmode="numeric"/.test(portInput[0]), 'port should request the numeric keyboard');
 assert(/pattern="\[0-9\]\*"/.test(portInput[0]), 'port should accept digits only');
 assert(/value="48150"/.test(portInput[0]), 'default port should remain 48150');
+assert(/ readonly>/.test(portInput[0]), 'the port opens the keyboard only after A, so it starts read-only');
+assert(/<input[^>]*id="diagnosticHost"[^>]*readonly>/.test(html), 'and so does the host');
+assert.strictEqual(html.includes('diagnosticFilter'), false, 'the filter of the log is gone');
+assert(
+  html.indexOf('id="diagnosticLogsEnabledSwitch"') < html.indexOf('id="diagnosticOptions"') &&
+  html.indexOf('id="diagnosticOptions"') < html.indexOf('id="diagnosticHost"'),
+  'the switch is on top and the rest is under it, in a container that the switch hides'
+);
 assert(
   html.indexOf('id="diagnosticHost"') < html.indexOf('id="diagnosticLogViewport"'),
   'export controls should be above the log viewport'

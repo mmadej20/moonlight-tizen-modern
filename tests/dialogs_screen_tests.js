@@ -44,6 +44,9 @@ assert(/#autoWolCheckboxContainer \.mdl-switch\.is-checked \.mdl-switch__thumb \
 // The loading screen: a moon above the bar, a bar without the pale buffer of MDL
 assert(/<svg id="wasmSpinnerLogo"/.test(html) && !/ic_moonlight_logo/.test(html), 'the moon is drawn by the page');
 assert(/\.mdl-progress > \.bufferbar \{\s*display: none;/.test(uiCss));
+// The captions of the loading screen are inside of the bar, which is 10 px high: a bar that clips its content hides them
+assert(!/\.mdl-progress \{[^}]*overflow/.test(uiCss), 'the bar does not clip the captions');
+assert(/<h4 id="wasmSpinnerMessage"><\/h4>/.test(html) && /<h4 id="loadingSpinnerMessage"><\/h4>/.test(html));
 assert(/\.mdl-progress > \.auxbar \{[^}]*background-image: none !important;[^}]*mask: none !important;/.test(uiCss));
 assert(/\.mdl-progress > \.progressbar, \.mdl-progress\.mdl-progress__indeterminate > \.bar1, \.mdl-progress\.mdl-progress__indeterminate > \.bar3 \{\s*background-color: var\(--ui-moon\);/.test(uiCss));
 
