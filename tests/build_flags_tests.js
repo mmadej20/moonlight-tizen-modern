@@ -38,4 +38,39 @@ const configure = docker.slice(docker.indexOf('RUN cmake'), docker.indexOf('cmak
 assert(/-DMOONLIGHT_OPT_LEVEL=\$\{OPT_LEVEL\}/.test(configure), 'the configure step receives the level');
 assert(docker.indexOf('ARG OPT_LEVEL=-O2') < docker.indexOf('RUN cmake'), 'the argument is declared before it is used');
 
+// Opus decodes the audio with float arithmetic by default (fixed-point decoded 5 ms of audio in 1.26 ms on the TV). It is one option that
+// picks the part of SILK that depends on the arithmetic, the include directory and the FIXED_POINT definition together, so the two can never
+// be mixed, and the stream log says which one decoded the audio.
+{
+  const code = cmake.replace(/#.*$/gm, '');
+  assert(/option\(MOONLIGHT_OPUS_FIXED_POINT "[^"]+" OFF\)/.test(code), 'the float build is the default');
+  const list = (name) => {
+    const match = new RegExp('set\\(' + name + '\\n([^)]*)\\)').exec(code);
+    assert(match, 'missing list ' + name);
+    return match[1].split('\n').map((line) => line.trim()).filter(Boolean);
+  };
+  const common = list('MOONLIGHT_OPUS_COMMON_SOURCES');
+  const fixed = list('MOONLIGHT_OPUS_FIXED_SOURCES');
+  const floating = list('MOONLIGHT_OPUS_FLOAT_SOURCES');
+  const all = common.concat(fixed, floating);
+  all.forEach((file) => assert(fs.existsSync(file), file + ' exists'));
+  assert.strictEqual(new Set(all).size, all.length, 'no file is listed twice');
+  assert(common.every((file) => !/^opus\/silk\/(fixed|float)\//.test(file)), 'the common part has nothing that depends on the arithmetic');
+  assert(fixed.every((file) => file.startsWith('opus/silk/fixed/')) && floating.every((file) => file.startsWith('opus/silk/float/')));
+  // Every file of the directory is in its list: a source that is left out would be a missing symbol that only the link of the WASM shows
+  for (const [directory, listed] of [['opus/silk/fixed', fixed], ['opus/silk/float', floating]]) {
+    const onDisk = fs.readdirSync(directory).filter((name) => name.endsWith('.c')).map((name) => directory + '/' + name).sort();
+    assert.deepStrictEqual(listed.slice().sort(), onDisk, directory + ' is listed whole');
+  }
+  assert(/if\(MOONLIGHT_OPUS_FIXED_POINT\)\s*set\(MOONLIGHT_OPUS_SOURCES \$\{MOONLIGHT_OPUS_COMMON_SOURCES\} \$\{MOONLIGHT_OPUS_FIXED_SOURCES\}\)\s*set\(MOONLIGHT_OPUS_ARITHMETIC_INCLUDE opus\/silk\/fixed\)\s*set\(MOONLIGHT_OPUS_ARITHMETIC_DEFINITIONS FIXED_POINT\)/.test(code));
+  assert(/else\(\)\s*set\(MOONLIGHT_OPUS_SOURCES \$\{MOONLIGHT_OPUS_COMMON_SOURCES\} \$\{MOONLIGHT_OPUS_FLOAT_SOURCES\}\)\s*set\(MOONLIGHT_OPUS_ARITHMETIC_INCLUDE opus\/silk\/float\)\s*set\(MOONLIGHT_OPUS_ARITHMETIC_DEFINITIONS ""\)/.test(code));
+  assert(!/^\s*FIXED_POINT\s*$/m.test(code), 'FIXED_POINT is only ever set through the option');
+  assert(/add_library\(opus STATIC \$\{MOONLIGHT_OPUS_SOURCES\}\)/.test(code));
+  assert(/target_compile_definitions\(moonlight-wasm PRIVATE MOONLIGHT_OPUS_TEXT="\$\{MOONLIGHT_OPUS_TEXT\}"\)/.test(code), 'the log gets the name');
+  assert(/#ifndef MOONLIGHT_OPUS_TEXT/.test(main));
+  assert(/ClLogMessage\("Opus decoder: %s\\n", MOONLIGHT_OPUS_TEXT\);/.test(main), 'every stream log names the decoder');
+  assert(/ARG OPUS_FIXED_POINT=OFF/.test(docker) && /-DMOONLIGHT_OPUS_FIXED_POINT=\$\{OPUS_FIXED_POINT\}/.test(configure), 'the Docker build passes the choice through');
+  assert(docker.indexOf('ARG OPUS_FIXED_POINT=OFF') < docker.indexOf('RUN cmake'));
+}
+
 console.log('build flags tests passed');

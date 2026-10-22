@@ -82,9 +82,12 @@ COPY --chown=moonlight wasm/dispatcher ./moonlight-tizen/wasm/dispatcher/
 
 # Optimization level of the WASM module: -O2 by default, --build-arg OPT_LEVEL=-Os builds for size like before
 ARG OPT_LEVEL=-O2
+# Opus is built with float arithmetic by default: --build-arg OPUS_FIXED_POINT=ON builds the fixed-point decoder again, for a comparison
+ARG OPUS_FIXED_POINT=OFF
 RUN cmake \
 	-DCMAKE_TOOLCHAIN_FILE=/home/moonlight/emscripten-release-bundle/emsdk/fastcomp/emscripten/cmake/Modules/Platform/Emscripten.cmake \
 	-DMOONLIGHT_OPT_LEVEL=${OPT_LEVEL} \
+	-DMOONLIGHT_OPUS_FIXED_POINT=${OPUS_FIXED_POINT} \
 	-DCMAKE_C_COMPILER_LAUNCHER=ccache \
 	-DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
 	-G Ninja \
