@@ -5393,6 +5393,7 @@ window.addEventListener('gamepadconnected', function(e) {
   const gamepadIndex = connectedGamepad.index;
   const rumbleFeedbackSwitch = document.getElementById('rumbleFeedbackSwitch');
   console.log('%c[index.js, gamepadconnected]', 'color: green;', 'Gamepad connected:\n' + JSON.stringify(connectedGamepad), connectedGamepad);
+  logDiagnostic('Gamepad connected: ' + describeGamepad(connectedGamepad));
   snackbarLog('Gamepad %1$s has been connected.', gamepadIndex);
   // Check if the rumble feedback switch is checked
   if (rumbleFeedbackSwitch.checked) {

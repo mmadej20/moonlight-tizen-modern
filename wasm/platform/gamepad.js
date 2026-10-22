@@ -189,8 +189,24 @@ function createGamepadController(environment) {
   };
 }
 
+// One line that says what the browser knows about a pad, for the log. The log used to hold the pad as JSON, which is {} for a Gamepad,
+// so nothing told which pad it was or which vibration effects the browser offers for it (a trigger-rumble effect is what the trigger motors need)
+function describeGamepad(gamepad) {
+  var actuator = gamepad.vibrationActuator;
+  var effects = 'none';
+  if (actuator) {
+    effects = Array.isArray(actuator.effects) ? actuator.effects.join(',') : 'not listed';
+    if (actuator.type) {
+      effects += ' (type ' + actuator.type + ')';
+    }
+  }
+  return 'id="' + gamepad.id + '" index=' + gamepad.index + ' mapping="' + (gamepad.mapping || '') + '" buttons=' +
+    (gamepad.buttons ? gamepad.buttons.length : 0) + ' axes=' + (gamepad.axes ? gamepad.axes.length : 0) +
+    ' vibrationEffects=' + effects;
+}
+
 const Controller = typeof window !== 'undefined' ? createGamepadController(window) : null;
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { createGamepadController: createGamepadController };
+  module.exports = { createGamepadController: createGamepadController, describeGamepad: describeGamepad };
 }
