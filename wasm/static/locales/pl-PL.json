@@ -119,6 +119,7 @@
   "- May shorten recovery after isolated packet loss, but unsupported TV decoders can freeze or display corrupted video. Takes effect on the next stream.": "- Może skrócić odzyskiwanie po pojedynczej utracie pakietów, ale nieobsługiwane dekodery telewizorów mogą się zawiesić lub pokazać uszkodzony obraz. Działa od następnego streamu.",
   "Enable codec-specific reference frame invalidation recovery": "Włącz odzyskiwanie przez unieważnianie klatek referencyjnych zależne od kodeka",
   "Send logs to PC": "Wyślij logi na komputer",
+  "- Press A to change the host or the port. Up and Down change a number, Left and Right move to the next one, A or B finish.": "- Naciśnij A, aby zmienić host lub port. Góra i dół zmieniają liczbę, lewo i prawo przechodzą do następnej, A lub B kończą.",
   "- Start Receive-MoonlightLogs.ps1 on the streaming PC before sending.": "- Przed wysłaniem uruchom Receive-MoonlightLogs.ps1 na komputerze, z którego streamujesz.",
   "Host": "Host",
   "Port": "Port",

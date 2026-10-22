@@ -302,21 +302,53 @@ function handleIpTextFieldState(enabled) {
   }
 }
 
-// The fields of the diagnostic receiver are read-only while they only have the focus, so that the keyboard of the TV does not
-// open by itself on the way through the list; A makes one of them typeable, and the end of the typing makes it read-only again
-function handleDiagnosticFieldState(target, enabled) {
-  const field = resolveElement(target);
+// The host and the port of the diagnostic receiver are numbers that the remote changes, like the address of a host (the keyboard of
+// the TV did not open for a field of text). A opens one of them with the mark on its first number, Up and Down change the number
+// under the mark, Left and Right move the mark to the next number, and A or B close it. Only one is open at a time.
+const diagnosticEdit = { field: null, cell: 0 };
+
+function diagnosticCells(fieldId) {
+  const field = fieldId ? document.getElementById(fieldId) : null;
+  return field ? Array.from(field.querySelectorAll('.diagnostic-cell')) : [];
+}
+
+// Puts the mark on the open number and takes it from the others
+function markDiagnosticCell() {
+  const field = diagnosticEdit.field ? document.getElementById(diagnosticEdit.field) : null;
   if (!field) return;
-  field.readOnly = !enabled;
-  if (enabled) {
-    field.focus();
-    // Trigger a click to open the virtual keyboard on Tizen devices
-    if (typeof field.click === 'function') {
-      field.click();
-    }
-  } else {
-    field.blur();
+  field.classList.add('editing');
+  diagnosticCells(diagnosticEdit.field).forEach((cell, index) => {
+    cell.classList.toggle(hoveredClassName, index === diagnosticEdit.cell);
+  });
+}
+
+function startDiagnosticEdit(fieldId) {
+  diagnosticEdit.field = fieldId;
+  diagnosticEdit.cell = 0;
+  markDiagnosticCell();
+}
+
+// Closes the open field, if there is one. Tells whether there was one, so that B closes the field before it leaves the page.
+function finishDiagnosticEdit() {
+  if (!diagnosticEdit.field) return false;
+  const field = document.getElementById(diagnosticEdit.field);
+  if (field) {
+    field.classList.remove('editing');
+    diagnosticCells(diagnosticEdit.field).forEach((cell) => cell.classList.remove(hoveredClassName));
   }
+  diagnosticEdit.field = null;
+  DiagnosticLogs.finishReceiverEdit();
+  return true;
+}
+
+function moveDiagnosticCell(step) {
+  const count = diagnosticCells(diagnosticEdit.field).length;
+  diagnosticEdit.cell = Math.max(0, Math.min(count - 1, diagnosticEdit.cell + step));
+  markDiagnosticCell();
+}
+
+function changeDiagnosticCell(delta) {
+  DiagnosticLogs.stepReceiverCell(diagnosticEdit.field, diagnosticEdit.cell, delta);
 }
 
 // Change the value of the IP address numeric field
@@ -1564,6 +1596,11 @@ const Views = {
       ];
     }),
     up: function() {
+      // In an open field Up raises the number, as it does for the address of a host
+      if (diagnosticEdit.field) {
+        changeDiagnosticCell(1);
+        return;
+      }
       if (this.view.current() === 'diagnosticLogViewport') {
         const viewport = resolveElement('diagnosticLogViewport');
         if (viewport.scrollTop > 0) {
@@ -1575,6 +1612,10 @@ const Views = {
       focusElement(this.view.current());
     },
     down: function() {
+      if (diagnosticEdit.field) {
+        changeDiagnosticCell(-1);
+        return;
+      }
       if (this.view.current() === 'diagnosticLogViewport') {
         const viewport = resolveElement('diagnosticLogViewport');
         if (viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight) {
@@ -1585,21 +1626,34 @@ const Views = {
       this.view.nextOption();
       focusElement(this.view.current());
     },
-    // The two buttons of the session row are one control: left is the current session, right is the previous one
+    // The two buttons of the session row are one control: left is the current session, right is the previous one. In an open field
+    // the keys move the mark between its numbers
     left: function() {
+      if (diagnosticEdit.field) {
+        moveDiagnosticCell(-1);
+        return;
+      }
       if (this.view.current() === 'diagnosticCurrentSessionBtn') {
         clickElement('diagnosticCurrentSessionBtn');
       }
     },
     right: function() {
+      if (diagnosticEdit.field) {
+        moveDiagnosticCell(1);
+        return;
+      }
       if (this.view.current() === 'diagnosticCurrentSessionBtn') {
         clickElement('diagnosticPreviousSessionBtn');
       }
     },
     accept: function() {
       const current = this.view.current();
+      // A closes the open field, and opens the field that has the mark
+      if (finishDiagnosticEdit()) {
+        return;
+      }
       if (current === 'diagnosticHost' || current === 'diagnosticPort') {
-        handleDiagnosticFieldState(current, true);
+        startDiagnosticEdit(current);
         return;
       }
       if (current === 'diagnosticCurrentSessionBtn') {
@@ -1611,10 +1665,8 @@ const Views = {
       clickElement(current);
     },
     back: function() {
-      // B first ends the typing in a field
-      const typing = document.activeElement;
-      if (typing && (typing.id === 'diagnosticHost' || typing.id === 'diagnosticPort') && !typing.readOnly) {
-        handleDiagnosticFieldState(typing, false);
+      // B first closes an open field
+      if (finishDiagnosticEdit()) {
         return;
       }
       blurElement(this.view.current());
@@ -1630,6 +1682,7 @@ const Views = {
       mark(this.view.current());
     },
     leave: function() {
+      finishDiagnosticEdit();
       unmark(this.view.current());
     },
   },

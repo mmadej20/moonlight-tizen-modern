@@ -531,17 +531,23 @@
             </div>
             <div id="diagnosticOptions">
               <div class="setting-option">
-                <label for="diagnosticHost" data-i18n="Host">Host</label>
-                <span class="mdl-list__item-text-body"></span>
+                <label data-i18n="Host">Host</label>
+                <span class="mdl-list__item-text-body" data-i18n="- Press A to change the host or the port. Up and Down change a number, Left and Right move to the next one, A or B finish.">
+                  - Press A to change the host or the port. Up and Down change a number, Left and Right move to the next one, A or B finish.
+                </span>
                 <div id="diagnosticHostMenu">
-                  <input id="diagnosticHost" class="diagnostic-input" type="text" placeholder="192.168.1.10" aria-label="Diagnostic receiver host" readonly>
+                  <div id="diagnosticHost" class="diagnostic-cells" role="group" aria-label="Diagnostic receiver host">
+                    <span class="diagnostic-cell">192</span><span class="diagnostic-dot">.</span><span class="diagnostic-cell">168</span><span class="diagnostic-dot">.</span><span class="diagnostic-cell">0</span><span class="diagnostic-dot">.</span><span class="diagnostic-cell">0</span>
+                  </div>
                 </div>
               </div>
               <div class="setting-option">
-                <label for="diagnosticPort" data-i18n="Port">Port</label>
+                <label data-i18n="Port">Port</label>
                 <span class="mdl-list__item-text-body"></span>
                 <div id="diagnosticPortMenu">
-                  <input id="diagnosticPort" class="diagnostic-input" type="text" inputmode="numeric" pattern="[0-9]*" value="48150" aria-label="Diagnostic receiver port" readonly>
+                  <div id="diagnosticPort" class="diagnostic-cells" role="group" aria-label="Diagnostic receiver port">
+                    <span class="diagnostic-cell">4</span><span class="diagnostic-cell">8</span><span class="diagnostic-cell">1</span><span class="diagnostic-cell">5</span><span class="diagnostic-cell">0</span>
+                  </div>
                 </div>
               </div>
               <div class="setting-option">

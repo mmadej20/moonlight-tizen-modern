@@ -42,7 +42,7 @@ assert((settings.match(/mdl-menu--bottom-right/g) || []).length === menus.length
 // A switch row has a hint: the rows that had none show the sentence of the switch as their hint
 const rows = settings.split('<div class="setting-option').slice(1);
 const emptyHints = rows.filter((row) => /<span class="mdl-list__item-text-body"><\/span>/.test(row.split('<div id=')[0]));
-assert.strictEqual(emptyHints.length, 6, 'only the removal of the hosts, the system information and four rows of the logs (host, port, clear, session) have no hint');
+assert.strictEqual(emptyHints.length, 5, 'only the removal of the hosts, the system information and three rows of the logs (port, clear, session) have no hint');
 for (const id of ['rumbleFeedbackMenu', 'mouseEmulationMenu', 'flipABfaceButtonsMenu', 'flipXYfaceButtonsMenu', 'playHostAudioMenu',
   'connectionWarningsMenu', 'performanceStatsMenu']) {
   const row = rows.find((candidate) => candidate.includes('<div id="' + id + '">'));
@@ -109,24 +109,70 @@ const diagnostic = navigation.slice(navigation.indexOf('  DiagnosticSettings: {'
 assert(/options && options\.classList\.contains\('hide-container'\)\) \{\s*return \['diagnosticLogsEnabledBtn'\];/.test(diagnostic), 'switched off, the switch is all there is');
 assert(/return \[\s*'diagnosticLogsEnabledBtn',\s*'diagnosticHost',\s*'diagnosticPort',\s*'sendDiagnosticLogsBtn',\s*'clearDiagnosticLogsBtn',\s*'diagnosticCurrentSessionBtn',\s*'diagnosticLogViewport'\s*\];/.test(diagnostic));
 assert(!/diagnosticFilter/.test(diagnostic + index));
-assert(/current === 'diagnosticHost' \|\| current === 'diagnosticPort'\) \{\s*handleDiagnosticFieldState\(current, true\);/.test(diagnostic), 'A makes a field typeable');
-assert(/typing\.id === 'diagnosticHost' \|\| typing\.id === 'diagnosticPort'\) && !typing\.readOnly\) \{\s*handleDiagnosticFieldState\(typing, false\);/.test(diagnostic), 'B ends the typing before it leaves the page');
-assert(/left: function\(\) \{\s*if \(this\.view\.current\(\) === 'diagnosticCurrentSessionBtn'\) \{\s*clickElement\('diagnosticCurrentSessionBtn'\);/.test(diagnostic));
-assert(/right: function\(\) \{\s*if \(this\.view\.current\(\) === 'diagnosticCurrentSessionBtn'\) \{\s*clickElement\('diagnosticPreviousSessionBtn'\);/.test(diagnostic));
+assert(/if \(finishDiagnosticEdit\(\)\) \{\s*return;\s*\}\s*if \(current === 'diagnosticHost' \|\| current === 'diagnosticPort'\) \{\s*startDiagnosticEdit\(current\);/.test(diagnostic), 'A closes an open field and opens the one that has the mark');
+assert(/back: function\(\) \{\s*\/\/ B first closes an open field\s*if \(finishDiagnosticEdit\(\)\) \{\s*return;/.test(diagnostic), 'B closes the field before it leaves the page');
+assert(/leave: function\(\) \{\s*finishDiagnosticEdit\(\);/.test(diagnostic), 'leaving the page closes the field');
+assert(/up: function\(\) \{[^]*?if \(diagnosticEdit\.field\) \{\s*changeDiagnosticCell\(1\);\s*return;/.test(diagnostic), 'Up raises the number of an open field');
+assert(/down: function\(\) \{\s*if \(diagnosticEdit\.field\) \{\s*changeDiagnosticCell\(-1\);\s*return;/.test(diagnostic), 'Down lowers it');
+assert(/left: function\(\) \{[^]*?if \(diagnosticEdit\.field\) \{\s*moveDiagnosticCell\(-1\);\s*return;\s*\}\s*if \(this\.view\.current\(\) === 'diagnosticCurrentSessionBtn'\) \{\s*clickElement\('diagnosticCurrentSessionBtn'\);/.test(diagnostic));
+assert(/right: function\(\) \{\s*if \(diagnosticEdit\.field\) \{\s*moveDiagnosticCell\(1\);\s*return;\s*\}\s*if \(this\.view\.current\(\) === 'diagnosticCurrentSessionBtn'\) \{\s*clickElement\('diagnosticPreviousSessionBtn'\);/.test(diagnostic));
+assert(!/readOnly|\.click\(\)|handleDiagnosticFieldState/.test(diagnostic), 'there is no field of text and no keyboard in the logs');
 {
-  const calls = [];
-  const field = { readOnly: true, focus: () => calls.push('focus'), click: () => calls.push('click'), blur: () => calls.push('blur') };
-  const context = { resolveElement: () => field };
+  // The numbers of the receiver, on a page of two fields: four cells for the host and five digits for the port
+  const makeField = (id, count) => {
+    const classes = new Set();
+    const cells = Array.from({ length: count }, () => {
+      const set = new Set();
+      return { classList: { toggle: (name, on) => (on ? set.add(name) : set.delete(name)), add: (name) => set.add(name), remove: (name) => set.delete(name), has: (name) => set.has(name) } };
+    });
+    return { id, cells, classes, classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name) }, querySelectorAll: () => cells };
+  };
+  const fields = { diagnosticHost: makeField('diagnosticHost', 4), diagnosticPort: makeField('diagnosticPort', 5) };
+  const log = [];
+  const context = {
+    document: { getElementById: (id) => fields[id] || null },
+    DiagnosticLogs: { stepReceiverCell: (...args) => log.push(['step', ...args]), finishReceiverEdit: () => log.push(['finish']) },
+    Array
+  };
   vm.createContext(context);
-  vm.runInContext(extractFunction(navigation, 'handleDiagnosticFieldState'), context);
-  context.handleDiagnosticFieldState('diagnosticHost', true);
-  assert.strictEqual(field.readOnly, false);
-  assert.deepStrictEqual(calls, ['focus', 'click'], 'the keyboard opens when A makes the field typeable');
-  calls.length = 0;
-  context.handleDiagnosticFieldState('diagnosticHost', false);
-  assert.strictEqual(field.readOnly, true);
-  assert.deepStrictEqual(calls, ['blur']);
+  vm.runInContext("const hoveredClassName = 'hovered'; const diagnosticEdit = { field: null, cell: 0 };", context);
+  for (const name of ['diagnosticCells', 'markDiagnosticCell', 'startDiagnosticEdit', 'finishDiagnosticEdit', 'moveDiagnosticCell', 'changeDiagnosticCell']) {
+    vm.runInContext(extractFunction(navigation, name), context);
+  }
+  const marked = (field) => field.cells.map((cell) => cell.classList.has('hovered'));
+
+  assert.strictEqual(context.finishDiagnosticEdit(), false, 'with no open field there is nothing to close, and the page may be left');
+  assert.deepStrictEqual(log, []);
+  context.startDiagnosticEdit('diagnosticHost');
+  assert(fields.diagnosticHost.classes.has('editing'));
+  assert.deepStrictEqual(marked(fields.diagnosticHost), [true, false, false, false], 'the mark starts on the first number');
+  context.moveDiagnosticCell(1);
+  context.moveDiagnosticCell(1);
+  assert.deepStrictEqual(marked(fields.diagnosticHost), [false, false, true, false], 'Right moves the mark');
+  context.moveDiagnosticCell(5);
+  assert.deepStrictEqual(marked(fields.diagnosticHost), [false, false, false, true], 'and stops at the last number');
+  context.moveDiagnosticCell(-9);
+  assert.deepStrictEqual(marked(fields.diagnosticHost), [true, false, false, false], 'and at the first');
+  context.moveDiagnosticCell(2);
+  context.changeDiagnosticCell(1);
+  context.changeDiagnosticCell(-1);
+  assert.deepStrictEqual(log, [['step', 'diagnosticHost', 2, 1], ['step', 'diagnosticHost', 2, -1]], 'the number under the mark is the one that changes');
+  log.length = 0;
+  assert.strictEqual(context.finishDiagnosticEdit(), true, 'closing says that there was a field');
+  assert(!fields.diagnosticHost.classes.has('editing'));
+  assert.deepStrictEqual(marked(fields.diagnosticHost), [false, false, false, false], 'no number keeps its mark');
+  assert.deepStrictEqual(log, [['finish']], 'the port is brought into its range when a field closes');
+  assert.strictEqual(context.finishDiagnosticEdit(), false);
+
+  context.startDiagnosticEdit('diagnosticPort');
+  context.moveDiagnosticCell(4);
+  assert.deepStrictEqual(marked(fields.diagnosticPort), [false, false, false, false, true], 'the port has five numbers');
 }
+
+// The selected number of the address of a host shows which one it is: the id selectors of the four numbers outweigh a class, so the
+// color of the selected one is named by id too, and it differs from the color of the others
+assert(/\.ip-address-select-field\.hovered, \.ip-address-select-field:hover,\s*#ipAddressField1\.hovered, #ipAddressField2\.hovered, #ipAddressField3\.hovered, #ipAddressField4\.hovered \{\s*border-color: var\(--ui-moon\);/.test(uiCss));
+assert(/\.diagnostic-cells\.editing \.diagnostic-cell\.hovered \{\s*border-color: var\(--ui-moon\);\s*background: var\(--ui-surface-raised\);\s*outline: 6px solid var\(--ui-ring\);/.test(uiCss), 'the number that is open shows it');
 
 // The list of the options scrolls to the row that has the focus. The browser scrolls to the element that has it, but a switch is a
 // box of no size at the start of its row, so a row that is cut in half still counts as visible: the row is kept in view instead
@@ -157,9 +203,8 @@ assert(/ keepInView\(element\);\s*return;/.test(extractFunction(navigation, 'foc
 assert(/closest\('\.settings-options, #settings-left-pane'\)/.test(extractFunction(navigation, 'keepInView')));
 
 const manager = read('wasm/platform/diagnostic_logs.js');
-assert(/field\.addEventListener\('blur', function\(\) \{ field\.readOnly = true; \}\)/.test(manager), 'a field is read-only again when the keyboard closes');
-assert(/id="diagnosticSettings"[\s\S]*?<input id="diagnosticPort"[^>]* readonly>/.test(html));
-assert(/\.diagnostic-input:not\(\[readonly\]\) \{\s*outline: 6px solid var\(--ui-ring\);/.test(uiCss), 'a field that is open shows it');
+assert(!/addEventListener\('(blur|keydown)'/.test(manager), 'no listener of the keyboard is left in the logs');
+assert(/id="diagnosticSettings"[\s\S]*?<div id="diagnosticPort" class="diagnostic-cells"/.test(html));
 assert(/\.setting-option > label:has\(\+ \.mdl-list__item-text-body:empty\) \{\s*grid-row: 1 \/ span 2;/.test(uiCss), 'a row without a hint centers its title');
 
 console.log('settings_screen_tests: PASS');

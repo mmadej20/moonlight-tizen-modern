@@ -119,6 +119,7 @@
   "- May shorten recovery after isolated packet loss, but unsupported TV decoders can freeze or display corrupted video. Takes effect on the next stream.": "- May shorten recovery after isolated packet loss, but unsupported TV decoders can freeze or display corrupted video. Takes effect on the next stream.",
   "Enable codec-specific reference frame invalidation recovery": "Enable codec-specific reference frame invalidation recovery",
   "Send logs to PC": "Send logs to PC",
+  "- Press A to change the host or the port. Up and Down change a number, Left and Right move to the next one, A or B finish.": "- Press A to change the host or the port. Up and Down change a number, Left and Right move to the next one, A or B finish.",
   "- Start Receive-MoonlightLogs.ps1 on the streaming PC before sending.": "- Start Receive-MoonlightLogs.ps1 on the streaming PC before sending.",
   "Host": "Host",
   "Port": "Port",

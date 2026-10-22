@@ -1074,35 +1074,57 @@ body {
     background: var(--ui-moon);
 }
 
-/* Logs: the rows are like the others. The fields of the receiver are read-only until A makes one of them typeable, so they look
-   like the fields that open a menu, and they get the outline of the typing when they are open */
-.diagnostic-input {
+/* Logs: the rows are like the others. The host and the port of the receiver are numbers in cells, like the address of a host: the
+   row that has the mark shows its cells with the color of the moon, and the field that A opened shows the one cell that Up and Down
+   change, with a ring around it */
+.diagnostic-cells {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.diagnostic-cell {
     box-sizing: border-box;
-    width: 420px;
+    min-width: 56px;
     height: 56px;
-    padding: 0 20px;
+    padding: 0 12px;
     border-radius: 16px;
     border: 2px solid var(--ui-line);
     background: var(--ui-bg);
     color: var(--ui-text);
-    font: 600 26px/1 var(--ui-font);
+    font: 600 26px/52px var(--ui-font);
     letter-spacing: 0;
-    text-overflow: ellipsis;
+    text-align: center;
 }
 
-.diagnostic-input::placeholder {
+#diagnosticHost .diagnostic-cell {
+    min-width: 104px;
+}
+
+.diagnostic-dot {
     color: var(--ui-mute);
+    font: 600 26px/1 var(--ui-font);
 }
 
-.diagnostic-input:focus, .diagnostic-input.hovered, #sendDiagnosticLogsBtn:focus, #clearDiagnosticLogsBtn:focus,
+.diagnostic-cells.hovered .diagnostic-cell {
+    border-color: var(--ui-moon);
+}
+
+.diagnostic-cells.editing .diagnostic-cell {
+    border-color: var(--ui-line);
+}
+
+.diagnostic-cells.editing .diagnostic-cell.hovered {
+    border-color: var(--ui-moon);
+    background: var(--ui-surface-raised);
+    outline: 6px solid var(--ui-ring);
+}
+
+#sendDiagnosticLogsBtn:focus, #clearDiagnosticLogsBtn:focus,
 .diagnostic-session-button:focus, #diagnosticLogViewport:focus {
     outline: none;
     border-color: var(--ui-moon);
     box-shadow: none;
-}
-
-.diagnostic-input:not([readonly]) {
-    outline: 6px solid var(--ui-ring);
 }
 
 /* The buttons of the row of the logs that are sent and cleared are buttons that do something, like the ones of the About page */
@@ -1421,8 +1443,13 @@ dialog[id^="hostMenuDialog-"] .mdl-dialog__content button.mdl-button.mdl-button-
     cursor: pointer;
 }
 
-.ip-address-select-field.hovered, .ip-address-select-field:hover {
+/* The mark of the number that is selected. The four numbers are also named by id above, and an id outweighs a class, so they are named
+   here too: without that the border of the selected number kept the color of the others and nothing showed which one it was */
+.ip-address-select-field.hovered, .ip-address-select-field:hover,
+#ipAddressField1.hovered, #ipAddressField2.hovered, #ipAddressField3.hovered, #ipAddressField4.hovered {
     border-color: var(--ui-moon);
+    background-color: var(--ui-surface-raised);
+    outline: 6px solid var(--ui-ring);
     box-shadow: none;
 }
 

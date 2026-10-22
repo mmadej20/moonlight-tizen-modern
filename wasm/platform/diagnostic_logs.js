@@ -104,6 +104,45 @@
     return {host: host, port: numericPort};
   }
 
+  // The receiver of the logs is set with the keys of the remote, like the address of a host: four numbers for the address and five digits
+  // for the port, each changed by Up and Down. The keyboard of the TV did not open for a field of text, so there is none.
+  var DEFAULT_RECEIVER_HOST = [192, 168, 0, 0];
+  var DEFAULT_RECEIVER_PORT = 48150;
+  var PORT_DIGITS = 5;
+
+  function parseIpv4Octets(text) {
+    var match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(text || '').trim());
+    if (!match) {
+      return null;
+    }
+    var octets = match.slice(1).map(Number);
+    return octets.every(function(octet) { return octet <= 255; }) ? octets : null;
+  }
+
+  // A number goes up or down by one and comes around at the end of its range
+  function stepCellValue(value, delta, count) {
+    return (((value + delta) % count) + count) % count;
+  }
+
+  function portDigits(port) {
+    var text = String(Math.max(0, Math.min(99999, Math.floor(Number(port) || 0))));
+    while (text.length < PORT_DIGITS) {
+      text = '0' + text;
+    }
+    return text;
+  }
+
+  function stepPortDigit(port, index, delta) {
+    var digits = portDigits(port).split('');
+    digits[index] = String(stepCellValue(Number(digits[index]), delta, 10));
+    return Number(digits.join(''));
+  }
+
+  // Five digits can say more than a port can: when the typing ends, the port is brought into the range
+  function clampPort(port) {
+    return Math.max(1, Math.min(65535, Math.floor(Number(port) || 0)));
+  }
+
   function safeFilenamePart(value) {
     return String(value || 'unknown').replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
   }
@@ -197,6 +236,7 @@
     this.selectedSession = 'current';
     this.enabled = readEnabledSetting();
     this.lastViewRefreshMs = 0;
+    this.receiver = {octets: DEFAULT_RECEIVER_HOST.slice(), port: DEFAULT_RECEIVER_PORT};
   }
 
   DiagnosticLogManager.prototype.init = function() {
@@ -422,23 +462,53 @@
     return Promise.resolve();
   };
 
+  // The streaming PC is where the receiver usually runs, so its address is the one that is offered. A name that is not an address of
+  // four numbers cannot be shown in the cells, and the address that was set stays.
   DiagnosticLogManager.prototype.setDefaultHost = function(host) {
+    var octets = parseIpv4Octets(host);
+    if (octets) {
+      this.receiver.octets = octets;
+      this.renderReceiver();
+    }
+  };
+
+  // Puts the numbers of the receiver into the cells of the page
+  DiagnosticLogManager.prototype.renderReceiver = function() {
     if (typeof document === 'undefined') {
       return;
     }
-    var field = document.getElementById('diagnosticHost');
-    if (field && host) {
-      field.value = host;
+    var hostCells = document.querySelectorAll('#diagnosticHost .diagnostic-cell');
+    for (var i = 0; i < hostCells.length; i++) {
+      hostCells[i].textContent = String(this.receiver.octets[i]);
     }
+    var digits = portDigits(this.receiver.port);
+    var portCells = document.querySelectorAll('#diagnosticPort .diagnostic-cell');
+    for (var j = 0; j < portCells.length; j++) {
+      portCells[j].textContent = digits.charAt(j);
+    }
+  };
+
+  // Up and Down on a cell: the field is the id of the row, the cell is its place in the row, the change is +1 or -1
+  DiagnosticLogManager.prototype.stepReceiverCell = function(field, cell, delta) {
+    if (field === 'diagnosticHost' && cell >= 0 && cell < this.receiver.octets.length) {
+      this.receiver.octets[cell] = stepCellValue(this.receiver.octets[cell], delta, 256);
+    } else if (field === 'diagnosticPort' && cell >= 0 && cell < PORT_DIGITS) {
+      this.receiver.port = stepPortDigit(this.receiver.port, cell, delta);
+    }
+    this.renderReceiver();
+  };
+
+  // The typing of a field ended
+  DiagnosticLogManager.prototype.finishReceiverEdit = function() {
+    this.receiver.port = clampPort(this.receiver.port);
+    this.renderReceiver();
   };
 
   DiagnosticLogManager.prototype.exportSelected = function() {
     var self = this;
-    var hostField = document.getElementById('diagnosticHost');
-    var portField = document.getElementById('diagnosticPort');
     var destination;
     try {
-      destination = validateDiagnosticDestination(hostField.value, portField.value);
+      destination = validateDiagnosticDestination(self.receiver.octets.join('.'), self.receiver.port);
     } catch (error) {
       self.setStatus(error.message, true);
       return Promise.resolve({ok: false, error: error.message});
@@ -542,17 +612,7 @@
       enabledSwitch.addEventListener('change', function() { self.setEnabled(enabledSwitch.checked); });
     }
     self.updateEnabledSwitch();
-    var port = document.getElementById('diagnosticPort');
-    if (port && !port.value) port.value = '48150';
-    ['diagnosticHost', 'diagnosticPort'].forEach(function(id) {
-      var field = document.getElementById(id);
-      if (!field) return;
-      // The keyboard closing, or Enter, ends the typing
-      field.addEventListener('blur', function() { field.readOnly = true; });
-      field.addEventListener('keydown', function(event) {
-        if (event.key === 'Enter') field.blur();
-      });
-    });
+    self.renderReceiver();
     self.updateSessionButtons();
   };
 
@@ -564,6 +624,11 @@
     SESSION_LIMIT_BYTES: SESSION_LIMIT_BYTES,
     ENABLED_KEY: ENABLED_KEY,
     validateDiagnosticDestination: validateDiagnosticDestination,
+    parseIpv4Octets: parseIpv4Octets,
+    stepCellValue: stepCellValue,
+    portDigits: portDigits,
+    stepPortDigit: stepPortDigit,
+    clampPort: clampPort,
     buildDiagnosticExport: buildDiagnosticExport,
     DiagnosticLogManager: DiagnosticLogManager,
     MemoryStorage: MemoryStorage,
