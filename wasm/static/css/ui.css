@@ -447,8 +447,8 @@ body {
     padding: 8px 96px 56px;
 }
 
-/* A row that scrolls has no bar: the tile that has the focus is brought to the middle */
-#host-grid::-webkit-scrollbar, #game-grid::-webkit-scrollbar {
+/* A row that scrolls has no bar: the card that has the focus is brought into view */
+#host-grid::-webkit-scrollbar {
     display: none;
 }
 
@@ -469,17 +469,30 @@ body {
     margin: 72px 96px 0;
 }
 
-/* The room above and below the tiles is for the tile that grows and for its outline: the row clips what leaves it */
-#game-grid {
-    display: flex;
+/* The row is a strip under a window. The window clips (nothing can scroll it, not even the focus), the strip is moved with a
+   transform by the navigation, so the compositor does the move and it stays smooth. The room above and below the tiles is for
+   the tile that grows and for its outline: the window clips what leaves it */
+#game-row {
+    position: relative;
     flex: 1;
+    min-height: 0;
+    overflow: clip;
+}
+
+#game-grid {
+    position: relative;
+    display: flex;
+    box-sizing: border-box;
+    width: max-content;
+    min-width: 100%;
+    height: 100%;
     gap: 40px;
     margin: 0;
     padding: 56px 96px 64px;
     align-items: center;
     justify-content: flex-start;
-    overflow-x: auto;
-    overflow-y: hidden;
+    transition: transform 0.32s var(--ui-ease);
+    will-change: transform;
 }
 
 /* A tile does not change its size when it has the focus (that would lay out the row): it grows with a transform around the

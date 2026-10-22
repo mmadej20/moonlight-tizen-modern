@@ -149,20 +149,56 @@ function focusElement(target) {
     if (listener && typeof listener.focus === 'function') {
       listener.focus();
     }
+    keepInView(element);
     return;
   }
   // If the element supports focus, add focus to it
   if (typeof element.focus === 'function') {
     element.focus();
   }
+  keepInView(element);
 }
 
-// Bring an element of a row to the middle of the row. Only the row moves, the page does not
+// Bring an element of a row to the middle of the window of the row. The row is a strip that is moved under the window with a
+// transform, which the compositor does: it stays smooth when the page is busy, which the scroll of the browser did not
 function centerInRow(target, behavior) {
   if (target === undefined || target === null) return;
   const element = resolveElement(target);
-  if (!element || typeof element.scrollIntoView !== 'function') return;
-  element.scrollIntoView({ behavior: behavior, block: 'nearest', inline: 'center' });
+  const strip = element ? element.parentElement : null;
+  const view = strip ? strip.parentElement : null;
+  if (!view) return;
+  const room = Math.max(0, strip.offsetWidth - view.clientWidth);
+  const offset = Math.round(Math.min(room, Math.max(0, element.offsetLeft + element.offsetWidth / 2 - view.clientWidth / 2)));
+  const transform = 'translate3d(' + (-offset) + 'px, 0, 0)';
+  if (strip.style.transform === transform) return;
+  if (behavior === 'smooth') {
+    strip.style.transform = transform;
+    return;
+  }
+  // A jump: the strip does not glide for this one change
+  strip.style.transition = 'none';
+  strip.style.transform = transform;
+  void strip.offsetWidth;
+  strip.style.transition = '';
+}
+
+// Keep the row of a list that scrolls inside the window of the list. The browser does that for the element that has the focus,
+// but a switch is a box of no size at the start of its row, so a row can be cut in half and still count as visible
+function keepInView(target) {
+  if (target === undefined || target === null) return;
+  const element = resolveElement(target);
+  if (!element || typeof element.closest !== 'function') return;
+  const row = element.closest('.setting-option, .settings-category') || element;
+  const list = row.closest('.settings-options, #settings-left-pane');
+  if (!list) return;
+  const rowBox = row.getBoundingClientRect();
+  const listBox = list.getBoundingClientRect();
+  const margin = 12;
+  if (rowBox.bottom > listBox.bottom - margin) {
+    list.scrollTop += rowBox.bottom - listBox.bottom + margin;
+  } else if (rowBox.top < listBox.top + margin) {
+    list.scrollTop -= listBox.top + margin - rowBox.top;
+  }
 }
 
 // Focus a tile of a row and bring it to the middle. The focus is given without the scroll of the browser, which would only

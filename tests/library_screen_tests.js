@@ -71,11 +71,23 @@ assert(/enter: function\(\) \{[^}]*centerInRow\(this\.view\.current\(\), 'auto'\
 assert(/switch: function\(\) \{[^}]*centerInRow\(/.test(apps));
 assert(/focusTile\(Views\.Apps\.view\.current\(\), 'smooth'\)/.test(navigation.slice(navigation.indexOf('  AppsNav: {'))), 'coming down from the header too');
 
+// The row is a strip under a window: the strip is moved with a transform (the compositor does that), nothing scrolls
 {
   const calls = [];
-  const element = (name) => ({
-    focus: (options) => calls.push(name + ' focus ' + JSON.stringify(options)),
-    scrollIntoView: (options) => calls.push(name + ' scroll ' + JSON.stringify(options))
+  // A window 1000 wide with a strip of 2000 under it, and tiles of 200 that start 100 from the left, a tile every 300
+  const view = { clientWidth: 1000 };
+  const strip = { offsetWidth: 2000, parentElement: view, style: { transform: '' } };
+  let transition = '';
+  Object.defineProperty(strip.style, 'transition', {
+    get: () => transition,
+    set: (value) => { transition = value; calls.push('transition ' + JSON.stringify(value)); }
+  });
+  const tile = (name, index) => ({
+    name,
+    offsetLeft: 100 + index * 300,
+    offsetWidth: 200,
+    parentElement: strip,
+    focus: (options) => calls.push(name + ' focus ' + JSON.stringify(options))
   });
   const context = {
     resolveElement: (target) => target,
@@ -84,21 +96,40 @@ assert(/focusTile\(Views\.Apps\.view\.current\(\), 'smooth'\)/.test(navigation.s
   };
   vm.createContext(context);
   vm.runInContext(extractFunction(navigation, 'centerInRow') + extractFunction(navigation, 'focusTile'), context);
-  context.focusTile(element('tile'), 'smooth');
-  assert.deepStrictEqual(calls, [
-    'blur old',
-    'tile focus {"preventScroll":true}',
-    'tile scroll {"behavior":"smooth","block":"nearest","inline":"center"}'
-  ], 'the focus does not scroll, the row moves once, and only the row (not the page) moves');
+
+  context.focusTile(tile('third', 2), 'smooth');
+  assert.deepStrictEqual(calls, ['blur old', 'third focus {"preventScroll":true}'], 'the focus does not scroll the window');
+  assert.strictEqual(strip.style.transform, 'translate3d(-300px, 0, 0)', 'the tile (at 700..900) is brought to the middle of the window');
+  assert(!calls.some((call) => call.startsWith('transition')), 'a move that glides leaves the transition of the stylesheet alone');
+
+  context.centerInRow(tile('first', 0), 'smooth');
+  assert.strictEqual(strip.style.transform, 'translate3d(0px, 0, 0)', 'the strip does not leave a gap before the first tile');
+
+  context.centerInRow(tile('last', 6), 'smooth');
+  assert.strictEqual(strip.style.transform, 'translate3d(-1000px, 0, 0)', 'nor does it go further than its end (2000 under a window of 1000)');
+
   calls.length = 0;
+  context.centerInRow(tile('second', 1), 'auto');
+  assert.deepStrictEqual(calls, ['transition "none"', 'transition ""'], 'a jump has no glide, and the glide is back right after');
+  assert.strictEqual(strip.style.transform, 'translate3d(0px, 0, 0)');
+
+  calls.length = 0;
+  context.centerInRow(tile('second', 1), 'auto');
+  assert.deepStrictEqual(calls, [], 'a tile that is in the middle already changes nothing');
+
   context.focusTile(undefined, 'smooth');
   context.centerInRow(null, 'auto');
+  context.centerInRow({ parentElement: null }, 'auto');
   assert.deepStrictEqual(calls, [], 'an empty list has nothing to focus');
 }
+assert(!/scrollIntoView/.test(extractFunction(navigation, 'centerInRow') + extractFunction(navigation, 'focusTile')), 'the row is not moved by the scroll of the browser');
 
 // The look: a tile does not change its size, the outline is the same kind of layer as everywhere, the old rules are gone
 assert(!/mdl-card|disable-animation|scrollText/.test(uiCss), 'the old rules of the games section are gone');
-assert(/#game-grid \{[^}]*overflow-x: auto;[^}]*overflow-y: hidden;/.test(uiCss), 'the row scrolls sideways');
+assert(/<div id="game-row">\s*<div id="game-grid"><\/div>\s*<\/div>/.test(screen), 'the strip of tiles is in its window');
+assert(/#game-row \{[^}]*overflow: clip;/.test(uiCss), 'the window clips and nothing can scroll it, not even the focus');
+assert(/#game-grid \{[^}]*width: max-content;[^}]*min-width: 100%;[^}]*transition: transform 0\.32s var\(--ui-ease\);[^}]*will-change: transform;/.test(uiCss), 'the strip is a layer that glides');
+assert(!/#game-grid \{[^}]*overflow/.test(uiCss), 'the strip does not scroll');
 assert(/\.ui-tile \{[^}]*flex: none;[^}]*width: 260px;[^}]*transform-origin: 50% 195px;/.test(uiCss), 'a tile has a fixed place and grows around its box art');
 assert(/\.ui-tile:hover, \.ui-tile:focus, \.ui-tile\.hovered \{[^}]*transform: scale\(1\.12\);/.test(uiCss), 'a tile grows with a transform, not with its size');
 assert(/\.ui-tile::after \{[^}]*transition: opacity 0\.2s var\(--ui-ease\), transform 0\.2s var\(--ui-ease\)/.test(uiCss));

@@ -127,6 +127,35 @@ assert(/right: function\(\) \{\s*if \(this\.view\.current\(\) === 'diagnosticCur
   assert.strictEqual(field.readOnly, true);
   assert.deepStrictEqual(calls, ['blur']);
 }
+
+// The list of the options scrolls to the row that has the focus. The browser scrolls to the element that has it, but a switch is a
+// box of no size at the start of its row, so a row that is cut in half still counts as visible: the row is kept in view instead
+{
+  const box = (top, bottom) => ({ top, bottom });
+  const makeRow = (top, bottom) => {
+    const row = { getBoundingClientRect: () => box(top, bottom), closest: (selector) => (/settings-options/.test(selector) ? list : row) };
+    return row;
+  };
+  const list = { scrollTop: 100, getBoundingClientRect: () => box(200, 900) };
+  const input = (row) => ({ closest: (selector) => (/setting-option/.test(selector) ? row : null) });
+  const context = { resolveElement: (target) => target };
+  vm.createContext(context);
+  vm.runInContext(extractFunction(navigation, 'keepInView'), context);
+
+  context.keepInView(input(makeRow(300, 400)));
+  assert.strictEqual(list.scrollTop, 100, 'a row that is in view does not move the list');
+  context.keepInView(input(makeRow(804, 914)));
+  assert.strictEqual(list.scrollTop, 100 + (914 - 900 + 12), 'a row that is cut at the bottom is brought up, with a margin');
+  list.scrollTop = 100;
+  context.keepInView(input(makeRow(190, 300)));
+  assert.strictEqual(list.scrollTop, 100 - (200 + 12 - 190), 'a row that is cut at the top is brought down, with a margin');
+  context.keepInView(undefined);
+  context.keepInView({});
+  assert.strictEqual(list.scrollTop, 100 - 22, 'nothing to do for what is not an element or has no list around it');
+}
+assert(/ keepInView\(element\);\s*return;/.test(extractFunction(navigation, 'focusElement')) && /\n  keepInView\(element\);\n\}/.test(extractFunction(navigation, 'focusElement')), 'every focus keeps the row in view');
+assert(/closest\('\.settings-options, #settings-left-pane'\)/.test(extractFunction(navigation, 'keepInView')));
+
 const manager = read('wasm/platform/diagnostic_logs.js');
 assert(/field\.addEventListener\('blur', function\(\) \{ field\.readOnly = true; \}\)/.test(manager), 'a field is read-only again when the keyboard closes');
 assert(/id="diagnosticSettings"[\s\S]*?<input id="diagnosticPort"[^>]* readonly>/.test(html));
