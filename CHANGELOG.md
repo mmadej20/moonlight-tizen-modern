@@ -1,6 +1,52 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to Moonlight Tizen Modern are documented in this file. This project is a fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen): its version numbers start again at 1.0.0, and what happened before the fork is kept below under [Upstream changelog](#upstream-changelog).
+
+## v1.0.0
+
+The first release of the fork. It is based on upstream v1.19.0 (plus the Embind fix that upstream accepted afterwards), and this is everything that differs from it.
+
+### Added
+- A new interface, written from scratch with its own components: the hosts screen, the library of apps as one row of tiles that glides under the focus, the settings, the dialogs and the loading screen. Box art is shown from a lighter copy of 360 px
+- A new application icon: the moon of the new interface with the name under it
+- A menu during a stream, opened by holding **Select** on a gamepad for one second or by the **green** or **Info** key of the remote: back to the game, volume, statistics, mouse from the controller, disconnect, and quit the game and disconnect
+- A volume bar of Moonlight during a stream instead of the bar of the TV, which caused small stutters (setting "Volume bar in the stream", on by default)
+- Diagnostic Logs: the logs of the current and of the previous session are kept on the TV and can be sent to a computer with `tools/Receive-MoonlightLogs.ps1`. The address and the port of the computer are set with the keys of the remote, with no keyboard. Turning the logs off deletes them
+- Telemetry in the log: health of the stream, the pipelines of the audio and the video, the timing of HTTP requests, late timers of the main thread, the stages of the start of a stream, and the name of a connected gamepad with the vibration effects of the browser
+- The experimental setting "Speculative RFI recovery", off by default: the decoder advertises RFI for the selected codec
+- Polish translation
+- Automated tests: about 70 suites for the JavaScript side and for the C and C++ code that compiles on a computer
+
+### Changed
+- Frame pacing follows the frames of the last two seconds instead of anchoring every frame to the first one, and the wait is capped. The average packet queue delay fell from about 136 ms to under 1 ms on the TV where it was measured. The spin window of the pacer adapts, and a pacing reset keeps the timestamps of the video
+- Speculative RFI is used only when the decoder advertises RFI. A single late packet in a 4K60 HEVC stream no longer throws away valid reference frames and freezes the picture for about two seconds
+- Audio synchronization pulls back audio that runs ahead with an occasional single dropped packet, and drops more only past a hard limit. EMSS is the default audio backend, and Web Audio is optional
+- Controllers cost less: all gamepads are read with one call, the poll is slow while no gamepad is used, the state is sent to the host only when it changes, and rumble is deduplicated and applied at most every 50 ms
+- The scan of the local network at start runs only when no known host answers
+- The server info is refreshed once per list of apps, and box art is downloaded two at a time so it cannot delay the start of a stream
+- Game Mode is never forced and is off by default
+- The module is built with `-O2` instead of `-Os`
+- The build uses jQuery 2.2.0 and the Emscripten 1.39.4.7 toolchain of Samsung
+- The check for an update looks at the releases of this repository
+- The README, the contributing guide, the security policy and the other files that came from upstream describe this repository
+
+### Fixed
+- A freeze caused by memory corruption: reading a `std::string` that C++ returns to JavaScript through Embind wrote a byte past its buffer (also accepted upstream as pull request #185)
+- Stopping a stream is one owned sequence, so the teardown cannot race with the start of the next stream, and a failed start gives its slot back
+- Waits for the media pipeline are bounded, can be cancelled, and report an error that says what failed
+- HTTP requests have an id and a deadline and can be cancelled. Pairing parsing is hardened, and there is no time limit for entering the PIN
+- A log file that filled up could stall the application: repeated lines are collapsed and the file is cut down in one step
+- The controller could stay dead after the stream menu was opened with a held **Select**
+
+### Removed
+- The old stylesheet of the interface
+- The workflows of the bots, the funding file and the support section of upstream
+
+---
+
+# Upstream changelog
+
+The changelog of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen) up to v1.19.0, which is where this fork started.
 
 ## v1.19.0
 

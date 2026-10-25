@@ -67,7 +67,7 @@ This fork does not have a wiki of its own. The guides of the upstream project ex
 
 This project originally started as a **WASM port** for Tizen TV created by the [Samsung Developers Forum](https://github.com/SamsungDForum/moonlight-chrome). They demonstrated how Moonlight could run on Tizen OS by converting the original Native Client module to WebAssembly, reimplementing the video and audio pipelines using the Tizen WASM Player to leverage hardware acceleration, and adapting the application to the Tizen web environment (see their [full article](https://developer.samsung.com/smarttv/develop/extension-libraries/webassembly/game-streaming-on-tizen-tv-with-wasm.html) for technical details). [KyroFrCode](https://github.com/KyroFrCode/moonlight-chrome-tizen) turned it into a fully installable application, and [BrightCraft](https://github.com/brightcraft) continued it for more than two years in [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen), the project that this fork is based on.
 
-**This repository is a fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen).** It keeps the full history of the upstream project and follows its releases by merging them (the last release merged is v1.18.0). What follows is everything that this fork does differently, taken from its commits.
+**This repository is a fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen).** It keeps the full history of the upstream project and follows its releases by merging them (the last release merged is v1.19.0). What follows is everything that this fork does differently, taken from its commits.
 
 ### New interface and menus
 
