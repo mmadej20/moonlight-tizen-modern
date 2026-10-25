@@ -71,10 +71,10 @@ This project originally started as a **WASM port** for Tizen TV created by the [
 
 ### New interface and menus
 
-- **A new interface, written from scratch** with its own components (`wasm/static/css/ui.css`) in place of the old stylesheet: the hosts screen, the library of apps as one row of tiles that glides under the focus, the settings, the dialogs and the loading screen. Box art is shown from a lighter copy of 360 px, so the library stays smooth. The selected number of an IP address is clearly marked.
-- **A new application icon:** the moon of the new interface with the name under it.
-- **A menu during a stream.** Hold **Select** on a gamepad for one second, or press the **green** or **Info** key of the remote. It has: back to the game, volume, statistics, mouse from the controller, disconnect (the game keeps running on the computer), and quit the game and disconnect. While it is open the game gets no input from the pad, and nothing leaks into it when the menu closes.
-- **The volume bar of Moonlight during a stream** instead of the bar of the TV. The bar of the system drawn over the picture caused small stutters. It can be turned off in the audio settings.
+- **A new interface, written from scratch** with its own components (`wasm/static/css/ui.css`) in place of the old stylesheet: the hosts screen, the library of apps as one row of tiles that glides under the focus, the settings, the dialogs and the loading screen. Box art is shown from a lighter copy of 360 px, so the library stays smooth. 
+- **A new application icon**
+- **A menu during a stream.** Hold **Select** on a gamepad for one second, or press the **green** or **Info** key of the remote. It has: back to the game, volume, statistics, mouse from the controller, disconnect (the game keeps running on the computer), and quit the game and disconnect.
+- **The volume bar of Moonlight during a stream** instead of the bar of the TV. The bar of the system drawn over the picture caused small stutters. It can be turned off in the audio settings to restore old behaviour.
 - **Diagnostic Logs:** the application keeps a log of the current and of the previous session on the TV, and can send it to your computer with `tools/Receive-MoonlightLogs.ps1`. The address of the computer and the port are set with the keys of the remote, so no keyboard is needed. Turning the logs off deletes them.
 - **Polish translation**, next to English and Brazilian Portuguese.
 
@@ -83,9 +83,8 @@ This project originally started as a **WASM port** for Tizen TV created by the [
 - **Frame pacing that follows the stream.** Upstream anchors the time of every frame to the first one, so a late first frame becomes the delay of the whole stream. Here the anchor follows the frames of the last two seconds and the wait is capped. On the TV where it was measured the average packet queue delay fell from about 136 ms to under 1 ms. The spin window of the pacer adapts, and a pacing reset keeps the timestamps of the video.
 - **Audio synchronization** pulls back audio that runs ahead of the video with an occasional single dropped packet, and drops more only past a hard limit. EMSS is the default audio backend, and Web Audio is optional.
 - **Controllers cost less.** The input thread reads all gamepads with one call, polls slowly while no gamepad is used, and sends the state to the host only when it changes. Rumble is deduplicated and applied at most every 50 ms.
-- **An experimental setting for RFI recovery** (reference frame invalidation, per codec), off by default.
+- **Speculative RFI is used only when the decoder says it can use it.** When a video frame is missing more packets than the error correction can repair, Moonlight can guess that the frame is lost before it is sure and ask the host to invalidate only the damaged reference frames (RFI, reference frame invalidation). Upstream does this although the decoder of the TV does not advertise RFI. On the TV that this fork was made for, a single late or out-of-order packet in a 4K60 HEVC stream was enough to throw away valid reference frames, drop about 120 frames in a row and wait about two seconds for a full keyframe: the picture froze. Here the guess is made only when RFI was negotiated, so a late packet no longer freezes the stream. The switch **Speculative RFI recovery (experimental)** in the advanced settings (off by default, applied from the next stream) makes the decoder advertise RFI for the selected codec, for those who want to test whether their TV copes with it.
 - **Game Mode is never forced** and is off by default.
-- **The module is built with `-O2`** instead of `-Os`.
 
 ### Reliability
 
@@ -93,7 +92,6 @@ This project originally started as a **WASM port** for Tizen TV created by the [
 - **Stopping a stream is one owned sequence.** Teardown cannot race with the start of the next stream, and a failed start gives its slot back. Waits for the media pipeline are bounded (10 s), can be cancelled, and report an error that says what failed.
 - **HTTP requests have an id and a deadline,** and can be cancelled. Downloads of box art are limited to two at a time so they cannot delay the start of a stream. The server info is refreshed once per list of apps. Pairing parsing is hardened, and there is no time limit for entering the PIN.
 - **Start-up is lighter.** The scan of the local network runs only when no known host answers.
-- **A log that fills up cannot stall the application:** repeated lines are collapsed, and the log file is cut down in one step.
 
 ### Engineering
 
