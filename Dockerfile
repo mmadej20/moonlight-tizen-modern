@@ -144,6 +144,7 @@ RUN cmake --install build --prefix build
 # build when the code it replaces is not found exactly once, so a toolchain update cannot drop it unnoticed.
 COPY --chown=moonlight tools/patch-embind-string.js ./moonlight-tizen/tools/
 RUN /home/moonlight/emscripten-release-bundle/emsdk/node/12.9.1_64bit/bin/node moonlight-tizen/tools/patch-embind-string.js build/widget/moonlight-wasm.js
+
 RUN cp moonlight-tizen/res/icon.png build/widget/
 
 # Inject Game Mode metadata into the Tizen config.xml file, which is required for building the ForceGM variant later

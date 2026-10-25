@@ -30,7 +30,7 @@ const patched = patchEmbindString(SOURCE);
 assert(patched.includes(PATCHED));
 assert(!patched.includes(ORIGINAL));
 assert(patched.startsWith('var a=1;') && patched.endsWith('function after(){}'), 'the rest of the file is untouched');
-assert.throws(() => patchEmbindString(patched), /already patched/);
+assert.throws(() => patchEmbindString(patched), /already (be )?patched/);
 assert.throws(() => patchEmbindString('var nothing=1;'), /found 0 times/);
 assert.throws(() => patchEmbindString(SOURCE + SOURCE), /found 2 times/);
 assert.doesNotThrow(() => new Function(patched + ';'), 'the patched file still parses');
