@@ -855,11 +855,23 @@ void PostToJs(std::string msg) {
   }, msg.c_str());
 }
 
+// The message is delivered later, on the main thread, so it is copied first: a pointer into msg would point into a string that is gone
+// by then. The copy is freed by the one who reads it.
+static void DeliverMessageToJs(int messageAddress) {
+  char* message = reinterpret_cast<char*>(messageAddress);
+  MAIN_THREAD_EM_ASM({
+    handleMessage(UTF8ToString($0));
+  }, message);
+  free(message);
+}
+
 void PostToJsAsync(std::string msg) {
-  MAIN_THREAD_ASYNC_EM_ASM({
-    const msg = UTF8ToString($0);
-    handleMessage(msg);
-  }, msg.c_str());
+  char* copy = strdup(msg.c_str());
+  if (copy == nullptr) {
+    return;
+  }
+  emscripten_async_run_in_main_runtime_thread(
+    EM_FUNC_SIG_VI, DeliverMessageToJs, reinterpret_cast<int>(copy));
 }
 
 void PostPromiseMessage(int callbackId, const std::string& type, const std::string& response) {

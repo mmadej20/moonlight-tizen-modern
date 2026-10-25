@@ -104,6 +104,45 @@
     return {host: host, port: numericPort};
   }
 
+  // The receiver of the logs is set with the keys of the remote, like the address of a host: four numbers for the address and five digits
+  // for the port, each changed by Up and Down. The keyboard of the TV did not open for a field of text, so there is none.
+  var DEFAULT_RECEIVER_HOST = [192, 168, 0, 0];
+  var DEFAULT_RECEIVER_PORT = 48150;
+  var PORT_DIGITS = 5;
+
+  function parseIpv4Octets(text) {
+    var match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(text || '').trim());
+    if (!match) {
+      return null;
+    }
+    var octets = match.slice(1).map(Number);
+    return octets.every(function(octet) { return octet <= 255; }) ? octets : null;
+  }
+
+  // A number goes up or down by one and comes around at the end of its range
+  function stepCellValue(value, delta, count) {
+    return (((value + delta) % count) + count) % count;
+  }
+
+  function portDigits(port) {
+    var text = String(Math.max(0, Math.min(99999, Math.floor(Number(port) || 0))));
+    while (text.length < PORT_DIGITS) {
+      text = '0' + text;
+    }
+    return text;
+  }
+
+  function stepPortDigit(port, index, delta) {
+    var digits = portDigits(port).split('');
+    digits[index] = String(stepCellValue(Number(digits[index]), delta, 10));
+    return Number(digits.join(''));
+  }
+
+  // Five digits can say more than a port can: when the typing ends, the port is brought into the range
+  function clampPort(port) {
+    return Math.max(1, Math.min(65535, Math.floor(Number(port) || 0)));
+  }
+
   function safeFilenamePart(value) {
     return String(value || 'unknown').replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
   }
@@ -197,6 +236,7 @@
     this.selectedSession = 'current';
     this.enabled = readEnabledSetting();
     this.lastViewRefreshMs = 0;
+    this.receiver = {octets: DEFAULT_RECEIVER_HOST.slice(), port: DEFAULT_RECEIVER_PORT};
   }
 
   DiagnosticLogManager.prototype.init = function() {
@@ -232,7 +272,14 @@
     }
     this.applyNativeEnabled();
     this.updateEnabledSwitch();
-    this.setStatus(this.enabled ? 'Saving of diagnostic logs is on.' : 'Saving of diagnostic logs is off.', false);
+    if (!this.enabled) {
+      // The page says so next to the switch: a log that is not kept is not left behind either
+      var self = this;
+      return this.clearStored().then(function() {
+        self.setStatus('Saving of diagnostic logs is off. All saved logs were deleted.', false);
+      });
+    }
+    this.setStatus('Saving of diagnostic logs is on.', false);
     return typeof document !== 'undefined' ? this.refreshView() : Promise.resolve();
   };
 
@@ -389,13 +436,8 @@
     }
     self.lastViewRefreshMs = Date.now();
     return self.storage.read(self.selectedPath()).then(function(text) {
-      var filter = document.getElementById('diagnosticFilter');
-      var query = filter ? filter.value.toLowerCase() : '';
-      var visible = query ? text.split('\n').filter(function(line) {
-        return line.toLowerCase().indexOf(query) !== -1;
-      }).join('\n') : text;
       // A log of 2 MB with tens of thousands of lines hung the page, so only the end of it is shown
-      var shown = tailOfLog(visible, VIEW_TAIL_BYTES);
+      var shown = tailOfLog(text, VIEW_TAIL_BYTES);
       var viewport = document.getElementById('diagnosticLogViewport');
       if (viewport) {
         viewport.textContent = shown.text || (self.enabled
@@ -420,23 +462,53 @@
     return Promise.resolve();
   };
 
+  // The streaming PC is where the receiver usually runs, so its address is the one that is offered. A name that is not an address of
+  // four numbers cannot be shown in the cells, and the address that was set stays.
   DiagnosticLogManager.prototype.setDefaultHost = function(host) {
+    var octets = parseIpv4Octets(host);
+    if (octets) {
+      this.receiver.octets = octets;
+      this.renderReceiver();
+    }
+  };
+
+  // Puts the numbers of the receiver into the cells of the page
+  DiagnosticLogManager.prototype.renderReceiver = function() {
     if (typeof document === 'undefined') {
       return;
     }
-    var field = document.getElementById('diagnosticHost');
-    if (field && host) {
-      field.value = host;
+    var hostCells = document.querySelectorAll('#diagnosticHost .diagnostic-cell');
+    for (var i = 0; i < hostCells.length; i++) {
+      hostCells[i].textContent = String(this.receiver.octets[i]);
     }
+    var digits = portDigits(this.receiver.port);
+    var portCells = document.querySelectorAll('#diagnosticPort .diagnostic-cell');
+    for (var j = 0; j < portCells.length; j++) {
+      portCells[j].textContent = digits.charAt(j);
+    }
+  };
+
+  // Up and Down on a cell: the field is the id of the row, the cell is its place in the row, the change is +1 or -1
+  DiagnosticLogManager.prototype.stepReceiverCell = function(field, cell, delta) {
+    if (field === 'diagnosticHost' && cell >= 0 && cell < this.receiver.octets.length) {
+      this.receiver.octets[cell] = stepCellValue(this.receiver.octets[cell], delta, 256);
+    } else if (field === 'diagnosticPort' && cell >= 0 && cell < PORT_DIGITS) {
+      this.receiver.port = stepPortDigit(this.receiver.port, cell, delta);
+    }
+    this.renderReceiver();
+  };
+
+  // The typing of a field ended
+  DiagnosticLogManager.prototype.finishReceiverEdit = function() {
+    this.receiver.port = clampPort(this.receiver.port);
+    this.renderReceiver();
   };
 
   DiagnosticLogManager.prototype.exportSelected = function() {
     var self = this;
-    var hostField = document.getElementById('diagnosticHost');
-    var portField = document.getElementById('diagnosticPort');
     var destination;
     try {
-      destination = validateDiagnosticDestination(hostField.value, portField.value);
+      destination = validateDiagnosticDestination(self.receiver.octets.join('.'), self.receiver.port);
     } catch (error) {
       self.setStatus(error.message, true);
       return Promise.resolve({ok: false, error: error.message});
@@ -471,10 +543,15 @@
   };
 
   DiagnosticLogManager.prototype.clearAll = function() {
-    var self = this;
     if (typeof window !== 'undefined' && !window.confirm('Clear all diagnostic logs?')) {
       return Promise.resolve(false);
     }
+    return this.clearStored();
+  };
+
+  // Deletes the log of the current session and of the previous one, and what the native side still holds
+  DiagnosticLogManager.prototype.clearStored = function() {
+    var self = this;
     self.pending = '';
     // What the native side still holds is cleared too
     try {
@@ -507,6 +584,11 @@
     var enabledSwitch = document.getElementById('diagnosticLogsEnabledSwitch');
     if (!enabledSwitch) return;
     enabledSwitch.checked = this.enabled;
+    var options = document.getElementById('diagnosticOptions');
+    if (options) {
+      if (this.enabled) options.classList.remove('hide-container');
+      else options.classList.add('hide-container');
+    }
     var wrapper = enabledSwitch.parentElement;
     if (wrapper && wrapper.MaterialSwitch) {
       if (this.enabled) wrapper.MaterialSwitch.on();
@@ -519,12 +601,10 @@
     var self = this;
     var current = document.getElementById('diagnosticCurrentSessionBtn');
     var previous = document.getElementById('diagnosticPreviousSessionBtn');
-    var filter = document.getElementById('diagnosticFilter');
     var send = document.getElementById('sendDiagnosticLogsBtn');
     var clear = document.getElementById('clearDiagnosticLogsBtn');
     if (current) current.addEventListener('click', function() { self.selectSession('current'); });
     if (previous) previous.addEventListener('click', function() { self.selectSession('previous'); });
-    if (filter) filter.addEventListener('input', function() { self.refreshView(); });
     if (send) send.addEventListener('click', function() { self.exportSelected(); });
     if (clear) clear.addEventListener('click', function() { self.clearAll(); });
     var enabledSwitch = document.getElementById('diagnosticLogsEnabledSwitch');
@@ -532,8 +612,7 @@
       enabledSwitch.addEventListener('change', function() { self.setEnabled(enabledSwitch.checked); });
     }
     self.updateEnabledSwitch();
-    var port = document.getElementById('diagnosticPort');
-    if (port && !port.value) port.value = '48150';
+    self.renderReceiver();
     self.updateSessionButtons();
   };
 
@@ -545,6 +624,11 @@
     SESSION_LIMIT_BYTES: SESSION_LIMIT_BYTES,
     ENABLED_KEY: ENABLED_KEY,
     validateDiagnosticDestination: validateDiagnosticDestination,
+    parseIpv4Octets: parseIpv4Octets,
+    stepCellValue: stepCellValue,
+    portDigits: portDigits,
+    stepPortDigit: stepPortDigit,
+    clampPort: clampPort,
     buildDiagnosticExport: buildDiagnosticExport,
     DiagnosticLogManager: DiagnosticLogManager,
     MemoryStorage: MemoryStorage,

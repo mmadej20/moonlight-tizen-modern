@@ -33,7 +33,13 @@ static char GetModifierFlags(const EmscriptenKeyboardEvent &event) {
   return flags;
 }
 
+// While the stream menu is open the keyboard and the mouse belong to the menu: nothing is pressed, moved or scrolled on the host.
+// What is let go (a key up, a mouse button up) still goes through, so that nothing stays pressed on the host.
 EM_BOOL MoonlightInstance::HandleMouseDown(const EmscriptenMouseEvent &event) {
+  if (MenuGate().IsCaptured()) {
+    return EM_FALSE;
+  }
+
   if (!m_MouseLocked.load()) {
     LockMouse();
     m_MouseLastPosX = event.screenX;
@@ -46,7 +52,7 @@ EM_BOOL MoonlightInstance::HandleMouseDown(const EmscriptenMouseEvent &event) {
 }
 
 EM_BOOL MoonlightInstance::HandleMouseMove(const EmscriptenMouseEvent &event) {
-  if (!m_MouseLocked.load()) {
+  if (MenuGate().IsCaptured() || !m_MouseLocked.load()) {
     return EM_FALSE;
   }
 
@@ -69,7 +75,7 @@ EM_BOOL MoonlightInstance::HandleMouseUp(const EmscriptenMouseEvent &event) {
 }
 
 EM_BOOL MoonlightInstance::HandleWheel(const EmscriptenWheelEvent &event) {
-  if (!m_MouseLocked.load()) {
+  if (MenuGate().IsCaptured() || !m_MouseLocked.load()) {
     return EM_FALSE;
   }
 
@@ -83,7 +89,7 @@ EM_BOOL MoonlightInstance::HandleWheel(const EmscriptenWheelEvent &event) {
 }
 
 EM_BOOL MoonlightInstance::HandleKeyDown(const EmscriptenKeyboardEvent &event) {
-  if (!m_MouseLocked.load()) {
+  if (MenuGate().IsCaptured() || !m_MouseLocked.load()) {
     return EM_FALSE;
   }
 
@@ -174,11 +180,15 @@ EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userDa
 void MoonlightInstance::ReportMouseMovement() {
   const int32_t mouseDeltaX = m_MouseDeltaX.exchange(0);
   const int32_t mouseDeltaY = m_MouseDeltaY.exchange(0);
+  const float accumulatedTicks = m_AccumulatedTicks.exchange(0);
+  if (MenuGate().IsCaptured()) {
+    return;
+  }
+
   if (mouseDeltaX != 0 || mouseDeltaY != 0) {
     LiSendMouseMoveEvent(mouseDeltaX, mouseDeltaY);
   }
 
-  const float accumulatedTicks = m_AccumulatedTicks.exchange(0);
   if (accumulatedTicks != 0) {
     // We can have fractional ticks here, so multiply by WHEEL_DELTA
     // to get actual scroll distance and use the high-res variant.

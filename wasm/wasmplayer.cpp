@@ -2,7 +2,9 @@
 #include "media_track_diagnostics.hpp"
 #include "video_timing.hpp"
 
+#include <algorithm>
 #include <condition_variable>
+#include <cstdio>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -94,7 +96,9 @@ static AdaptiveSpinWindow s_AdaptiveSpinWindow(
   kPacingSpinWindowAlpha
 );
 
-static std::chrono::time_point<std::chrono::steady_clock> s_firstAppend;
+// Where presentation time zero plays, as an offset that follows the frames of the last two seconds (see video_timing.hpp). It used to be
+// the arrival of the first frame, for good, so a late first frame became the delay of the whole stream. The cap is set by the frame rate.
+static PlayoutAnchor s_PlayoutAnchor(50000);
 
 static bool s_hasFirstFrame = false;
 static bool s_HasSubmittedVideoConfig = false;
@@ -106,6 +110,8 @@ static bool s_HasLastFrameNumber = false;
 
 static std::string s_StatString = "";
 
+// When the last frame of the stream arrived, to measure the gap to the next one (0 before the first)
+static uint64_t s_LastFrameCallbackMs = 0;
 static VIDEO_STATS m_ActiveWndVideoStats;
 static VIDEO_STATS m_LastWndVideoStats;
 static VIDEO_STATS m_GlobalVideoStats;
@@ -510,10 +516,14 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
     kPacingSpinWindowAlpha
   );
 
+  // Every stream starts with an empty window, and holds a frame for three frame intervals at most
+  s_PlayoutAnchor = PlayoutAnchor(PlayoutMaxBufferUs(static_cast<int64_t>(std::llround(1000000.0 / static_cast<double>(redrawRate)))));
+
   // Flag indicating whether this is the first frame of video to be decoded
   s_hasFirstFrame = false;
   s_HasSubmittedVideoConfig = false;
   s_HasLastFrameNumber = false;
+  s_LastFrameCallbackMs = 0;
   m_LastFrameNumber = 0;
   total_bytes = 0;
 
@@ -597,15 +607,20 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   const TimeStamp packetPts(packetPtsSeconds);
 
   AdaptiveSpinWindow candidateAdaptiveSpinWindow = s_AdaptiveSpinWindow;
-  auto candidateFirstAppend = s_firstAppend;
+  PlayoutAnchor candidatePlayoutAnchor = s_PlayoutAnchor;
+  auto candidateFirstAppend = std::chrono::steady_clock::time_point();
   const auto pacingStart = std::chrono::steady_clock::now();
+  // When the frame arrived, minus its timestamp: the offset that the anchor of the pacing follows
+  const int64_t packetPtsUs = static_cast<int64_t>(std::llround(packetPtsSeconds * 1000000.0));
+  const int64_t arrivalOffsetUs = std::chrono::duration_cast<std::chrono::microseconds>(pacingStart.time_since_epoch()).count() - packetPtsUs;
   if (!s_hasFirstFrame || timestampUpdate.resetPacing) {
-    candidateFirstAppend = pacingStart
-      - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-          std::chrono::duration<double>(packetPtsSeconds));
+    candidatePlayoutAnchor.Reset();
   }
 
   if (s_FramePacingEnabled) {
+    const int64_t anchorOffsetUs = candidatePlayoutAnchor.Observe(arrivalOffsetUs);
+    candidateFirstAppend = std::chrono::steady_clock::time_point(
+      std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::microseconds(anchorOffsetUs)));
     const auto targetTime = candidateFirstAppend
       + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
           std::chrono::duration<double>(packetPtsSeconds))
@@ -654,10 +669,19 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   std::unique_lock<std::mutex> statsLock(s_VideoStatsMutex);
   bool postStats = false;
   std::string statMessage;
+  char windowLine[400];
+  windowLine[0] = 0;
 
   if (m_ActiveWndVideoStats.measurementStartTimestamp == 0) {
     m_ActiveWndVideoStats.measurementStartTimestamp = callbackTimeMs;
   }
+  if (s_LastFrameCallbackMs != 0 && callbackTimeMs > s_LastFrameCallbackMs) {
+    m_ActiveWndVideoStats.maxFrameGapMs = MAX(
+      m_ActiveWndVideoStats.maxFrameGapMs,
+      static_cast<uint32_t>(callbackTimeMs - s_LastFrameCallbackMs)
+    );
+  }
+  s_LastFrameCallbackMs = callbackTimeMs;
   if (s_HasLastFrameNumber && decodeUnit->frameNumber > m_LastFrameNumber + 1) {
     const uint32_t droppedFrames = decodeUnit->frameNumber - (m_LastFrameNumber + 1);
     m_ActiveWndVideoStats.networkDroppedFrames += droppedFrames;
@@ -690,9 +714,16 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   m_ActiveWndVideoStats.totalAssemblyTimeUs += std::chrono::duration_cast<std::chrono::microseconds>(
     assemblyEnd - assemblyStart
   ).count();
-  m_ActiveWndVideoStats.totalPacerTimeUs += std::chrono::duration_cast<std::chrono::microseconds>(
+  const uint64_t pacerTimeUs = std::chrono::duration_cast<std::chrono::microseconds>(
     pacingEnd - pacingStart
   ).count();
+  m_ActiveWndVideoStats.totalPacerTimeUs += pacerTimeUs;
+  m_ActiveWndVideoStats.maxPacerTimeUs = MAX(m_ActiveWndVideoStats.maxPacerTimeUs, pacerTimeUs);
+  // How far behind the best case the pacing holds the frames now (nothing without pacing)
+  m_ActiveWndVideoStats.maxPlayoutBufferUs = MAX(
+    m_ActiveWndVideoStats.maxPlayoutBufferUs,
+    s_FramePacingEnabled ? static_cast<uint32_t>(candidatePlayoutAnchor.BufferUs()) : 0u
+  );
   total_bytes += decodeUnit->fullLength;
 
   const bool includeVideoConfig = !s_HasSubmittedVideoConfig
@@ -744,9 +775,7 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     [&] {
       s_TimestampState = candidateTimestampState;
       s_AdaptiveSpinWindow = candidateAdaptiveSpinWindow;
-      if (!s_hasFirstFrame || timestampUpdate.resetPacing) {
-        s_firstAppend = candidateFirstAppend;
-      }
+      s_PlayoutAnchor = candidatePlayoutAnchor;
       if (!s_hasFirstFrame) {
         s_hasFirstFrame = true;
       }
@@ -754,9 +783,11 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
         s_HasSubmittedVideoConfig = true;
       }
       m_ActiveWndVideoStats.submittedFrames++;
-      m_ActiveWndVideoStats.totalSubmitTimeUs += std::chrono::duration_cast<std::chrono::microseconds>(
+      const uint64_t submitTimeUs = std::chrono::duration_cast<std::chrono::microseconds>(
         submitEnd - submitStart
       ).count();
+      m_ActiveWndVideoStats.totalSubmitTimeUs += submitTimeUs;
+      m_ActiveWndVideoStats.maxSubmitTimeUs = MAX(m_ActiveWndVideoStats.maxSubmitTimeUs, submitTimeUs);
     }
   );
   if (pacingCommitOutcome == PacingCommitOutcome::AppendFailed) {
@@ -780,6 +811,30 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       postStats = true;
       std::fill(s_StatString.begin(), s_StatString.end(), 0);
     }
+    {
+      // The record of the window, for the diagnostic log. Its fields are key=value so that it can be parsed, like the audio one
+      const uint64_t received = std::max<uint64_t>(1, m_ActiveWndVideoStats.receivedFrames);
+      const uint64_t submitted = std::max<uint64_t>(1, m_ActiveWndVideoStats.submittedFrames);
+      snprintf(
+        windowLine, sizeof(windowLine),
+        "VideoPipelineStats windowMs=%llu received=%u submitted=%u networkDropped=%u "
+        "avgQueueUs=%llu avgAssemblyUs=%llu avgPacerUs=%llu maxPacerUs=%llu avgSubmitUs=%llu maxSubmitUs=%llu "
+        "maxFrameGapMs=%u playoutBufferMs=%.1f bitrateMbps=%.1f\n",
+        static_cast<unsigned long long>(windowDurationMs),
+        m_ActiveWndVideoStats.receivedFrames,
+        m_ActiveWndVideoStats.submittedFrames,
+        m_ActiveWndVideoStats.networkDroppedFrames,
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.totalQueueTimeUs / received),
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.totalAssemblyTimeUs / received),
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.totalPacerTimeUs / received),
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.maxPacerTimeUs),
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.totalSubmitTimeUs / submitted),
+        static_cast<unsigned long long>(m_ActiveWndVideoStats.maxSubmitTimeUs),
+        m_ActiveWndVideoStats.maxFrameGapMs,
+        static_cast<double>(m_ActiveWndVideoStats.maxPlayoutBufferUs) / 1000.0,
+        static_cast<double>(bitrateMbps)
+      );
+    }
     AddVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);
     memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(m_ActiveWndVideoStats));
     memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
@@ -788,6 +843,9 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   }
 
   statsLock.unlock();
+  if (windowLine[0] != 0) {
+    ClLogMessage("%s", windowLine);
+  }
   if (postStats) {
     PostToJs(statMessage);
   }
@@ -805,6 +863,10 @@ void MoonlightInstance::AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
   dst.totalAssemblyTimeUs += src.totalAssemblyTimeUs;
   dst.totalPacerTimeUs += src.totalPacerTimeUs;
   dst.totalSubmitTimeUs += src.totalSubmitTimeUs;
+  dst.maxPacerTimeUs = MAX(dst.maxPacerTimeUs, src.maxPacerTimeUs);
+  dst.maxSubmitTimeUs = MAX(dst.maxSubmitTimeUs, src.maxSubmitTimeUs);
+  dst.maxFrameGapMs = MAX(dst.maxFrameGapMs, src.maxFrameGapMs);
+  dst.maxPlayoutBufferUs = MAX(dst.maxPlayoutBufferUs, src.maxPlayoutBufferUs);
 
   // Update minimum host processing latency if it's not set or if the source has a valid smaller value
   if (dst.minHostProcessingLatency == 0) {

@@ -55,7 +55,7 @@ var codecWarning = false; // Flag indicating whether the video codec warning mes
 var repeatAction = null; // Flag indicating whether the repeat action is set, initial value is null
 var lastInvokeTime = 0; // Flag indicating the last invoke time, initial value is 0
 var repeatTimeout = null; // Flag indicating whether the repeat timeout is set, initial value is null
-var navigationTimeout = null; // Flag indicating whether the navigation timeout is set, initial value is null
+var lastNavigationTime = 0; // The time of the last navigation action of the pad, initial value is 0
 const BUILD_TYPE = '__BUILD_TYPE__'; // Placeholder for build type, which should be replaced during the build process
 const BUILD_COMMIT = '__BUILD_COMMIT__'; // Placeholder for build commit, which should be replaced during the build process
 const REPO_OWNER = '__REPO_OWNER__'; // Placeholder for repository owner, which should be replaced during the build process
@@ -68,7 +68,7 @@ var _isSmartHubSupported = false; // Flag indicating if Smart Hub Preview is sup
 const REPEAT_DELAY = 350; // Repeat delay set to 350ms (milliseconds)
 const REPEAT_INTERVAL = 100; // Repeat interval set to 100ms (milliseconds)
 const ACTION_THRESHOLD = 0.5; // Threshold for initial navigation set to 0.5
-const NAVIGATION_DELAY = 150; // Navigation delay set to 150ms (milliseconds)
+const NAVIGATION_COOLDOWN = 100; // A navigation action of the pad that follows another one within 100ms is ignored
 const UPDATE_TIMESTAMP = 'lastUpdateCheck'; // Use the update check timestamp key to determine the last update check
 const UPDATE_VERSION = 'latestUpdateVersion'; // // Use the update version key to cache the latest version found
 const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // Automatic check for updates interval is set to 24 hours
@@ -126,6 +126,7 @@ function attachListeners() {
   $('#jitterSlider').on('input', saveAudioJitter);
   $('#playHostAudioSwitch').on('click', savePlayHostAudio);
   $('#decryptHostAudioSwitch').on('click', saveDecryptHostAudio);
+  $('#volumeBarSwitch').on('click', saveVolumeBar);
   $('.videoCodecMenu li').on('click', saveVideoCodec);
   $('#hdrModeSwitch').on('click', saveHdrMode);
   $('#fullRangeSwitch').on('click', saveFullRange);
@@ -168,11 +169,16 @@ function attachListeners() {
     changes.forEach((change) => {
       const { type, index, pressed, value } = change;
       if (type === 'button') {
+        // The Select button closes the stream menu (the menu keeps the press that opened it from closing it at once)
+        if (index === 8) {
+          StreamMenu.onSelect(pressed);
+        }
         // Handle button mapping
         const buttonMapping = {
-          0: () => delayedNavigation(() => Navigation.accept()),
-          1: () => delayedNavigation(() => Navigation.back()),
-          8: () => delayedNavigation(() => Navigation.move()),
+          0: () => throttledNavigation(() => Navigation.accept()),
+          1: () => throttledNavigation(() => Navigation.back()),
+          2: () => throttledNavigation(() => Navigation.press()),
+          3: () => throttledNavigation(() => Navigation.menu()),
         };
         // Handle D-Pad mapping
         const dPadMapping = {
@@ -203,10 +209,10 @@ function attachListeners() {
       } else if (type === 'axis') {
         // Handle axis mapping
         const axisMapping = {
-          0: (value) => value < -ACTION_THRESHOLD ? (delayedNavigation(() => Navigation.left()), () => Navigation.left()) : 
-            value > ACTION_THRESHOLD ? (delayedNavigation(() => Navigation.right()), () => Navigation.right()) : null,
-          1: (value) => value < -ACTION_THRESHOLD ? (delayedNavigation(() => Navigation.up()), () => Navigation.up()) : 
-            value > ACTION_THRESHOLD ? (delayedNavigation(() => Navigation.down()), () => Navigation.down()) : null,
+          0: (value) => value < -ACTION_THRESHOLD ? (throttledNavigation(() => Navigation.left()), () => Navigation.left()) : 
+            value > ACTION_THRESHOLD ? (throttledNavigation(() => Navigation.right()), () => Navigation.right()) : null,
+          1: (value) => value < -ACTION_THRESHOLD ? (throttledNavigation(() => Navigation.up()), () => Navigation.up()) : 
+            value > ACTION_THRESHOLD ? (throttledNavigation(() => Navigation.down()), () => Navigation.down()) : null,
         };
         // Handle axis value
         if (axisMapping[index]) {
@@ -279,48 +285,74 @@ function repeatActionHandler() {
   }
 }
 
-// Delays navigation-related callback execution after a specified delay
-function delayedNavigation(callback) {
-  // Clear any existing navigation timeout
-  clearTimeout(navigationTimeout);
-  // Set a new navigation timeout with the provided callback and delay
-  navigationTimeout = setTimeout(callback, NAVIGATION_DELAY);
+// Runs a navigation action of the pad at once, and ignores another one that follows within the cooldown: a button that
+// bounces, or a stick that is pushed and let go quickly, must not act twice. The pad used to wait 150 ms before every action.
+function throttledNavigation(callback) {
+  const now = Date.now();
+  if (now - lastNavigationTime < NAVIGATION_COOLDOWN) {
+    return;
+  }
+  lastNavigationTime = now;
+  callback();
 }
 
-// Updates the host status indicator based on the host's online and paired status
+// Updates the card of a host: its state, the status pill and the action of the A button
 function updateHostStatusIndicator(host) {
-  // Find the desired host cell using the server UUID
-  var hostCell = document.querySelector('#host-' + host.serverUid);
-  var indicator = document.querySelector('#host-status-' + host.serverUid);
+  var card = document.getElementById('host-container-' + host.serverUid);
+  var pill = document.getElementById('host-status-' + host.serverUid);
+  var action = document.getElementById('host-action-' + host.serverUid);
 
-  // Update the host cell inactive styling class
-  if (hostCell) {
-    // Check if the host is currently online
-    if (host.online) {
-      // If the host is online, show it as active
-      hostCell.classList.remove('host-cell-inactive');
-    } else {
-      // If the host is offline, show it as inactive
-      hostCell.classList.add('host-cell-inactive');
+  // The card has one of four states, which the style of the card follows
+  var state = 'unknown';
+  if (host.online === true && host.paired) {
+    state = 'online';
+  } else if (host.online === true) {
+    state = 'unpaired';
+  } else if (host.online === false) {
+    state = 'offline';
+  }
+  if (card) {
+    card.setAttribute('data-state', state);
+  }
+
+  // The status pill says the state in words, and its color and shape say it again
+  if (pill) {
+    var labels = { online: 'Online', unpaired: 'Not paired', offline: 'Offline' };
+    var modifiers = { online: ' ui-pill--ok', unpaired: ' ui-pill--warn', offline: ' ui-pill--mute' };
+    pill.style.display = labels[state] ? '' : 'none';
+    pill.className = 'ui-pill' + (modifiers[state] || '');
+    pill.textContent = '';
+    if (labels[state]) {
+      var dot = document.createElement('span');
+      dot.className = 'ui-pill__dot';
+      var text = document.createElement('span');
+      text.textContent = t(labels[state]);
+      pill.appendChild(dot);
+      pill.appendChild(text);
     }
   }
 
-  // If the indicator element is not found, exit the function early
-  if (!indicator) {
-    return;
-  }
-  // Set the appropriate status indicator based on the host status
-  if (host.online === undefined || host.online === null) {
-    indicator.style.display = 'none';
-  } else if (!host.online) {
-    indicator.style.display = 'block';
-    indicator.innerHTML = 'warning';
-  } else if (host.online && !host.paired) {
-    indicator.style.display = 'block';
-    indicator.innerHTML = 'lock';
-  } else {
-    indicator.style.display = 'none';
-    indicator.innerHTML = '';
+  // What the A button does with this card: open the library, pair, or wake the computer
+  if (action) {
+    var actionLabel = '';
+    if (state === 'online') {
+      actionLabel = 'Open library';
+    } else if (state === 'unpaired') {
+      actionLabel = 'Pair with PIN';
+    } else if (state === 'offline' && host.autoWolEnabled === true) {
+      actionLabel = 'Wake PC';
+    }
+    action.textContent = '';
+    if (actionLabel) {
+      var glyph = document.createElement('span');
+      glyph.className = 'ui-glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.textContent = 'A';
+      var label = document.createElement('span');
+      label.textContent = t(actionLabel);
+      action.appendChild(glyph);
+      action.appendChild(label);
+    }
   }
 }
 
@@ -459,7 +491,6 @@ function snackbarLogLong(...args) {
 // Handle layout elements when displaying the Hosts view
 function showHostsMode() {
   console.log('%c[index.js, showHostsMode]', 'color: green;', 'Entering "Show Hosts" mode.');
-  $('#header-title').html(t('Hosts'));
   $('#header-logo').show();
   $('#main-header').show();
   $('.nav-menu-parent').show();
@@ -468,7 +499,7 @@ function showHostsMode() {
   $('#supportBtn').show();
   $('#main-content').children().not('#listener, #loadingSpinner, #wasmSpinner').show();
   $('#settings-list').hide();
-  $('#game-grid').hide();
+  $('#apps-screen').hide();
   $('#goBackBtn').hide();
   $('#restoreDefaultsBtn').hide();
   $('#quitRunningAppBtn').hide();
@@ -498,8 +529,7 @@ function showHosts() {
 
   // Hide the main header and content before showing a loading screen
   $('#main-header').children().hide();
-  $('#main-header').css({'backgroundColor': 'transparent', 'boxShadow': 'none'});
-  $('#settings-list, #game-grid').hide();
+  $('#settings-list, #apps-screen').hide();
 
   // Show a spinner while the host list loads
   $('#wasmSpinner').css('display', 'inline-block');
@@ -512,7 +542,6 @@ function showHosts() {
 
     // Show the main header after the loading screen is complete
     $('#main-header').children().show();
-    $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
 
     // Navigate to the Hosts view
     showHostsMode();
@@ -520,7 +549,8 @@ function showHosts() {
 
   setTimeout(() => {
     var lastOpenedHost = localStorage.getItem('lastOpenedHost');
-    if (lastOpenedHost && window.Views && Views.Hosts && Views.Hosts.view) {
+    // `Views` is a constant of the page, not a property of window: the check used to be `window.Views` and never passed
+    if (lastOpenedHost && typeof Views !== 'undefined' && Views.Hosts && Views.Hosts.view) {
       var children = Views.Hosts.view.func();
       for (var i = 0; i < children.length; i++) {
         if (children[i].id === 'host-' + lastOpenedHost) {
@@ -538,7 +568,7 @@ function restoreUiAfterWasmLoad() {
   Navigation.stop();
 
   $('#main-header').children().not('#goBackBtn, #restoreDefaultsBtn, #quitRunningAppBtn').show();
-  $('#main-content').children().not('#listener, #wasmSpinner, #settings-list, #game-grid').show();
+  $('#main-content').children().not('#listener, #wasmSpinner, #settings-list, #apps-screen').show();
   $('#wasmSpinner').hide();
   $('#loadingSpinner').css('display', 'none');
 
@@ -1242,33 +1272,40 @@ function autoWolDialog(host, onSuccess, onCancel) {
 
 // Add the new NvHTTP Host object inside the host grid
 function addHostToGrid(host, ismDNSDiscovered) {
-  // Create the host container with the appropriate attributes for the host card
+  // Create the host card with the appropriate attributes; its state is set by updateHostStatusIndicator()
   var hostContainer = $('<div>', {
     id: 'host-container-' + host.serverUid,
-    class: 'host-container mdl-card mdl-shadow--4dp',
+    class: 'host-container ui-card ui-fx',
     role: 'link',
     tabindex: 0,
-    'aria-label': host.hostname
+    'aria-label': host.hostname,
+    'data-state': 'unknown'
   });
 
-  // Create the host cell to serve as a holder for the host box
+  // The top row: the icon of a computer and the status pill
   var hostCell = $('<div>', {
     id: 'host-' + host.serverUid,
-    class: 'mdl-card__title mdl-card--expand'
+    class: 'ui-card__top'
   });
-
-  // Create the host title wrapper to hold the host title text
-  var hostTitle = $('<div>', {
-    class: 'host-title mdl-card__title-text'
+  var hostIcon = $('<div>', { class: 'ui-card__icon' }).html(
+    '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>');
+  var hostStatusIndicator = $('<span>', {
+    id: 'host-status-' + host.serverUid,
+    class: 'ui-pill'
   });
+  hostCell.append(hostIcon, hostStatusIndicator);
 
-  // Create the host text placeholder that will contain the host name
-  var hostText = $('<span>', {
-    class: 'host-text',
-    text: host.hostname
+  // The name and the address of the host
+  var hostTitle = $('<div>', { class: 'host-title' });
+  hostTitle.append($('<span>', { class: 'host-text', text: host.hostname }));
+  var hostAddress = $('<div>', { class: 'host-address', text: host.address });
+  var hostMain = $('<div>', { class: 'ui-card__main' }).append(hostTitle, hostAddress);
+
+  // The foot: what the A button does, and the button that opens the menu of the host (the X button)
+  var hostAction = $('<div>', {
+    id: 'host-action-' + host.serverUid,
+    class: 'host-action'
   });
-
-  // Create the host menu button with the appropriate attributes for the host menu
   var hostMenu = $('<div>', {
     id: 'hostMenuButton-' + host.serverUid,
     class: 'host-menu',
@@ -1276,39 +1313,12 @@ function addHostToGrid(host, ismDNSDiscovered) {
     tabindex: 0,
     'aria-label': host.hostname + ' menu'
   });
+  hostMenu.append(
+    $('<span>', { class: 'ui-glyph', 'aria-hidden': 'true', text: 'X' }),
+    $('<span>', { text: t('Options') }));
+  var hostFoot = $('<div>', { class: 'ui-card__foot' }).append(hostAction, hostMenu);
 
-  // Create the host center icon to indicate the host's status (online/offline/unpaired)
-  var hostStatusIndicator = $('<i>', {
-    id: 'host-status-' + host.serverUid,
-    class: 'material-icons host-center-icon'
-  });
-
-  // Append the host text to the host title wrapper
-  hostTitle.append(hostText);
-
-  // Handle animation state based on host title text length
-  if (host.hostname.length <= 26) {
-    // For host title text of 26 characters or less, disable scrolling text animation
-    hostText.addClass('disable-animation');
-  } else {
-    // For host title text longer than 26 characters, enable scrolling text animation
-    hostText.removeClass('disable-animation');
-  }
-
-  // Append the host title to the host cell
-  hostCell.append(hostTitle);
-
-  // Append the host cell to the host container
-  hostContainer.append(hostCell);
-
-  // Append the host menu button to the host container
-  hostContainer.append(hostMenu);
-
-  // Append the host status indicator to the host container
-  hostContainer.append(hostStatusIndicator);
-
-  // Set initial status
-  updateHostStatusIndicator(host);
+  hostContainer.append(hostCell, hostMain, hostFoot);
 
   // Attach the click event listener to the host container
   hostContainer.off('click');
@@ -1334,11 +1344,14 @@ function addHostToGrid(host, ismDNSDiscovered) {
     hostMenuDialog(host);
   });
 
-  // Append the host container to the host grid
-  $('#host-grid').append(hostContainer);
+  // The add host card stays the last one in the row
+  $('#addHostContainer').before(hostContainer);
 
   // Store the host object in the hosts array using its server UID as the key
   hosts[host.serverUid] = host;
+
+  // Set initial status
+  updateHostStatusIndicator(host);
 
   // Update the host's external IPv4 address if it was discovered via mDNS
   if (ismDNSDiscovered) {
@@ -1739,14 +1752,13 @@ function appSupportDialog() {
 // Handle layout elements when displaying the Settings view
 function showSettingsMode() {
   console.log('%c[index.js, showSettingsMode]', 'color: green;', 'Entering "Show Settings" mode.');
-  $('#header-title').html(t('Settings'));
   $('#header-logo').show();
   $('#main-header').show();
   $('#goBackBtn').show();
   $('#restoreDefaultsBtn').show();
   $('#main-content').children().not('#listener, #loadingSpinner, #wasmSpinner').show();
-  $('#host-grid').hide();
-  $('#game-grid').hide();
+  $('#hosts-screen').hide();
+  $('#apps-screen').hide();
   $('.nav-menu-parent').hide();
   $('#updateAppBtn').hide();
   $('#settingsBtn').hide();
@@ -1757,6 +1769,8 @@ function showSettingsMode() {
   $('#main-content').removeClass('fullscreen');
   $('#listener').removeClass('fullscreen');
 
+  tidySettingHints();
+  updateSettingsTitle();
   stopPollingHosts();
   Navigation.start();
   // Register showSettingsMode to re-run every time the language changes
@@ -1772,8 +1786,7 @@ function showSettings() {
 
   // Hide the main header and content before showing a loading screen
   $('#main-header').children().hide();
-  $('#main-header').css({'backgroundColor': 'transparent', 'boxShadow': 'none'});
-  $('#host-grid, #game-grid').hide();
+  $('#hosts-screen, #apps-screen').hide();
 
   // Show a spinner while the setting list loads
   $('#wasmSpinner').css('display', 'inline-block');
@@ -1786,7 +1799,6 @@ function showSettings() {
 
     // Show the main header after the loading screen is complete
     $('#main-header').children().show();
-    $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
 
     // Show the settings list section
     $('#settings-list').removeClass('hide-container');
@@ -1797,6 +1809,23 @@ function showSettings() {
     Navigation.push(Views.Settings);
     showSettingsMode();
   }, 500);
+}
+
+// The title above the options is the name of the chosen category
+function updateSettingsTitle() {
+  const selected = document.querySelector('.settings-category.selected label');
+  document.getElementById('settings-title').textContent = selected ? selected.textContent : '';
+}
+
+// The hints of the options are written as "- text" in the strings, and the new interface shows the text without the dash
+function tidySettingHints() {
+  document.querySelectorAll('.settings-options .mdl-list__item-text-body').forEach(function(hint) {
+    const text = hint.textContent;
+    const tidy = text.replace(/^\s*-\s+/, '').trim();
+    if (tidy !== text) {
+      hint.textContent = tidy;
+    }
+  });
 }
 
 // Reset the current settings view by clearing the selection and hiding the right pane
@@ -1841,6 +1870,7 @@ function handleSettingsView(category) {
   if (selectedCategory) {
     // Mark the category as selected
     selectedCategory.classList.add('selected');
+    updateSettingsTitle();
   } else {
     // Otherwise, exit early
     return;
@@ -2010,6 +2040,36 @@ function formatUpdateTimestamp(ms) {
   return `${day}/${month}/${year} ${hour}:${minute}`;
 }
 
+// The bar of the volume: a speaker, a track and a number, for a moment. It changes opacity and the scale of its fill only
+var volumeBarTimer = null;
+function showVolumeBar(state) {
+  // The menu has a volume row of its own
+  if (StreamMenu.isOpen()) {
+    StreamMenu.refresh();
+    return;
+  }
+  const bar = document.getElementById('volume-bar');
+  if (!bar || !isInGame || !VolumeControl.handlesKeys()) {
+    return;
+  }
+  const volume = Math.max(0, Math.min(100, Number(state.volume) || 0));
+  document.getElementById('volume-bar-fill').style.transform = 'scaleX(' + (state.muted ? 0 : volume / 100) + ')';
+  document.getElementById('volume-bar-value').textContent = state.muted ? '0' : String(volume);
+  bar.classList.toggle('is-muted', !!state.muted);
+  bar.classList.add('is-visible');
+  clearTimeout(volumeBarTimer);
+  volumeBarTimer = setTimeout(hideVolumeBar, 1800);
+}
+
+function hideVolumeBar() {
+  clearTimeout(volumeBarTimer);
+  volumeBarTimer = null;
+  const bar = document.getElementById('volume-bar');
+  if (bar) {
+    bar.classList.remove('is-visible');
+  }
+}
+
 // Show the Update App button when a new update is found
 function updateAppButton(latestVersion) {
   // Prevent adding duplicate buttons if one already exists
@@ -2022,13 +2082,12 @@ function updateAppButton(latestVersion) {
   var updateAppBtn = $('<button>', {
     type: 'button',
     id: 'updateAppBtn',
-    class: 'mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect',
+    class: 'ui-btn ui-fx',
     'aria-label': 'Update App'
   });
-  // Create the badge icon dynamically
-  var updateAppBtnBadge = $('<div>', {
-    class: 'navigation-button-icons material-icons mdl-badge mdl-badge--overlap',
-    'data-badge': '1',
+  // Create the icon dynamically
+  var updateAppBtnBadge = $('<i>', {
+    class: 'material-icons',
     text: 'update'
   });
   // Create the button text dynamically
@@ -2054,17 +2113,11 @@ function updateAppButton(latestVersion) {
   updateAppBtn.append(updateAppBtnBadge, updateAppBtnText);
   // Insert elements after the existing layout spacer
   $('.mdl-layout-spacer').after(updateAppBtn, updateAppBtnTooltip, extraLayoutSpacer);
-  // Upgrade newly added elements for MDL styling
-  componentHandler.upgradeElement(updateAppBtn[0]);
+  // Upgrade the tooltip for MDL (the button is one of our own pills)
   componentHandler.upgradeElement(updateAppBtnTooltip[0]);
   componentHandler.upgradeDom();
   // Smoothly fade-in the button after inserting
-  setTimeout(() => {
-    updateAppBtn.css({
-      opacity: 1,
-      transform: 'translateY(0)'
-    });
-  }, 1200);
+  setTimeout(() => updateAppBtn.addClass('is-shown'), 1200);
   // Attach the click event listener to the Update App button
   updateAppBtn.off('click');
   updateAppBtn.on('click', function() {
@@ -2510,13 +2563,12 @@ function sortTitles(list, sortOrder) {
 // Handle layout elements when displaying the Apps view
 function showAppsMode() {
   console.log('%c[index.js, showAppsMode]', 'color: green;', 'Entering "Show Apps" mode.');
-  $('#header-title').html(t('Apps'));
   $('#header-logo').show();
   $('#main-header').show();
   $('#goBackBtn').show();
   $('#quitRunningAppBtn').show();
   $('#main-content').children().not('#listener, #loadingSpinner, #wasmSpinner').show();
-  $('#host-grid').hide();
+  $('#hosts-screen').hide();
   $('#settings-list').hide();
   $('.nav-menu-parent').hide();
   $('#updateAppBtn').hide();
@@ -2528,11 +2580,14 @@ function showAppsMode() {
   $('#main-content').removeClass('fullscreen');
   $('#listener').removeClass('fullscreen');
   $('#loadingSpinner').css('display', 'none');
-  $('body').css('backgroundColor', '#282C38');
+  $('body').css('background', '');
   $('#wasm_module').css('display', 'none');
 
   var streamWasShown = isInGame;
   isInGame = false;
+  VolumeControl.stop();
+  LagWatch.stop();
+  hideVolumeBar();
   if (streamWasShown) {
     // The stream is over: silence the controllers and write what the rumble throttle did
     rumbleThrottle.stopAll();
@@ -2577,8 +2632,7 @@ function showApps(host) {
 
     // Hide the main header before showing a loading screen
     $('#main-header').children().hide();
-    $('#main-header').css({'backgroundColor': 'transparent', 'boxShadow': 'none'});
-    $('#host-grid, #settings-list').hide();
+    $('#hosts-screen, #settings-list').hide();
 
     // Show a spinner while the app list loads
     $('#wasmSpinner').css('display', 'inline-block');
@@ -2604,17 +2658,17 @@ function showApps(host) {
 
         // Show the main header after the loading screen is complete
         $('#main-header').children().show();
-        $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
 
-        // Show the game grid section
-        $('#game-grid').show();
+        // Show the apps screen
+        $('#apps-screen').show();
 
         if (appList.length == 0) {
           console.warn('%c[index.js, showApps]', 'Warning: Your app list is empty. Please add some apps to your list!');
-          var emptyAppListImg = new Image();
-          emptyAppListImg.src = 'static/res/applist_empty.svg';
-          $('#game-grid').html(emptyAppListImg);
-          snackbarLogLong('Your list is currently empty. Please add your favorite apps to the list.');
+          $('#apps-count').text('');
+          $('#game-grid').append($('<div>', {
+            class: 'ui-empty',
+            text: t('Your list is currently empty. Please add your favorite apps to the list.')
+          }));
           Views.Apps.view.reset();
           showAppsMode();
           resolve([]);
@@ -2627,6 +2681,7 @@ function showApps(host) {
         const sortOrder = sortAppsListSwitch.checked ? 'DESC' : 'ASC';
         // If game grid is populated, sort the app list
         const sortedAppList = sortTitles(appList, sortOrder);
+        $('#apps-count').text(t('Apps: %1$d', sortedAppList.length));
 
         if (_isSmartHubSupported) {
           var oldApps = (_previewApps[host.serverUid] && _previewApps[host.serverUid].apps) || [];
@@ -2677,49 +2732,36 @@ function showApps(host) {
           // To mitigate this, we ensure that we don't add a duplicate box art.
           // This isn't perfect: there's lots of RTTs before the logic prevents anything.
           if ($('#game-container-' + app.id).length === 0) {
-            // Create the game container with the appropriate attributes for the game card
+            // A tile: the box art with the title under it
             var gameContainer = $('<div>', {
               id: 'game-container-' + app.id,
-              class: 'game-container mdl-card mdl-shadow--4dp',
+              class: 'game-container ui-tile',
               role: 'link',
               tabindex: 0,
               'aria-label': app.title
             });
 
-            // Create the game cell to serve as a holder for the game box
-            var gameCell = $('<div>', {
+            // The box art holds the placeholder, the picture once it is loaded, and the badge of the running app
+            var gameArt = $('<div>', {
               id: 'game-' + app.id,
-              class: 'mdl-card__title mdl-card--expand'
+              class: 'ui-tile__art'
             });
+            gameArt.append($('<span>', {
+              class: 'ui-pill ui-pill--ok ui-tile__badge',
+              text: t('Running')
+            }));
 
-            // Create the game title wrapper to hold the game title text
+            // The title is under the box art, on two lines at most
             var gameTitle = $('<div>', {
-              class: 'game-title mdl-card__title-text'
+              class: 'game-title ui-tile__cap'
             });
-
-            // Create the game text placeholder that will contain the game name
-            var gameText = $('<span>', {
+            gameTitle.append($('<span>', {
               class: 'game-text',
               text: app.title
-            });
+            }));
 
-            // Append the game text to the game title wrapper
-            gameTitle.append(gameText);
-
-            // Handle animation state based on game title text length
-            if (app.title.length <= 20) {
-              // For game title text of 20 characters or less, disable scrolling text animation
-              gameText.addClass('disable-animation');
-            } else {
-              // For game title text longer than 20 characters, enable scrolling text animation
-              gameText.removeClass('disable-animation');
-            }
-
-            // Append the game title to the game cell
-            gameCell.append(gameTitle);
-
-            // Append the game cell to the game container
-            gameContainer.append(gameCell);
+            gameContainer.append(gameArt);
+            gameContainer.append(gameTitle);
 
             // Attach the click event listener to the game container
             gameContainer.off('click');
@@ -2743,6 +2785,8 @@ function showApps(host) {
           }
           // Load box art
           var boxArtPlaceholderImg = new Image();
+          // The picture is decoded off the main thread, so that moving through the list does not wait for it
+          boxArtPlaceholderImg.decoding = 'async';
           var appEntry = (_isSmartHubSupported && _previewApps[host.serverUid]) ? _previewApps[host.serverUid].apps.find(function(a) {
             return a.id === app.id;
           }) : null;
@@ -2813,7 +2857,7 @@ function showApps(host) {
               boxArtPlaceholderImg.classList.add('fade-in');
             }
           };
-          $(gameContainer).append(boxArtPlaceholderImg);
+          $('#game-' + app.id).append(boxArtPlaceholderImg);
           boxArtPromises.push(boxArtPromise);
         });
 
@@ -2831,8 +2875,11 @@ function showApps(host) {
           });
         });
 
+        // The list starts on the first app, unless an app runs or was the last one opened. Both the reset that came after this
+        // choice and the check of `window.Views` (see showHosts) made it void, so the list always started on the first app
+        Views.Apps.view.reset();
         var appToSelect = (host.currentGame != 0) ? host.currentGame : localStorage.getItem('lastOpenedApp_' + host.serverUid);
-        if (appToSelect && window.Views && Views.Apps && Views.Apps.view) {
+        if (appToSelect && typeof Views !== 'undefined' && Views.Apps && Views.Apps.view && typeof Views.Apps.view.func === 'function') {
           var children = Views.Apps.view.func();
           for (var i = 0; i < children.length; i++) {
             if (children[i].id === 'game-container-' + appToSelect) {
@@ -2843,7 +2890,6 @@ function showApps(host) {
         }
 
         // Navigate to the Apps view
-        Views.Apps.view.reset();
         showAppsMode();
         resolve(sortedAppList);
 
@@ -2875,13 +2921,13 @@ function showApps(host) {
 
         // Show the main header after the loading screen is complete
         $('#main-header').children().show();
-        $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
 
         console.error('%c[index.js, showApps]', 'color: green;', 'Error: Failed to get app list from ' + host.hostname + '. Host object: ', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-        var errorAppListImg = new Image();
-        errorAppListImg.src = 'static/res/applist_error.svg';
-        $('#game-grid').html(errorAppListImg);
-        snackbarLogLong('Unable to retrieve your list of apps at this time. Please refresh the list of apps or try again later!');
+        $('#apps-count').text('');
+        $('#game-grid').append($('<div>', {
+          class: 'ui-empty',
+          text: t('Unable to retrieve your list of apps at this time. Please refresh the list of apps or try again later!')
+        }));
 
         // Navigate to the Apps view
         Views.Apps.view.reset();
@@ -2892,13 +2938,16 @@ function showApps(host) {
 }
 
 // Show a confirmation with the Quit App dialog before stopping the running app
-function quitAppDialog() {
-  if (api.currentGame === 0) {
+// The stream menu asks it with hooks: {title, onCancel(), onConfirm()}. It knows which app it streams, while the data of the host may
+// not have caught up with the launch yet. A click on the button of the library passes the event, which is not such an object.
+function quitAppDialog(options) {
+  var hooks = options && typeof options.onConfirm === 'function' ? options : null;
+  if (!hooks && api.currentGame === 0) {
     // If no app is running, show snackbar message
     snackbarLog('No app is currently running.');
     return;
   } else {
-    api.getAppById(api.currentGame).then(function(currentGame) {
+    (hooks ? Promise.resolve({ title: hooks.title }) : api.getAppById(api.currentGame)).then(function(currentGame) {
       // Find the existing overlay and dialog elements
       var quitAppOverlay = document.querySelector('#quitAppDialogOverlay');
       var quitAppDialog = document.querySelector('#quitAppDialog');
@@ -2921,6 +2970,9 @@ function quitAppDialog() {
         isDialogOpen = false;
         Navigation.pop();
         Navigation.switch();
+        if (hooks && typeof hooks.onCancel === 'function') {
+          hooks.onCancel();
+        }
       });
 
       // Quit the running app if the Continue button is pressed
@@ -2931,6 +2983,9 @@ function quitAppDialog() {
         quitAppDialog.close();
         isDialogOpen = false;
         Navigation.pop();
+        if (hooks) {
+          hooks.onConfirm();
+        }
         stopGame(api).then(function() {
           Navigation.switch();
         }).catch(function(error) {
@@ -2950,6 +3005,128 @@ function logDiagnostic(line) {
   } catch (error) {
     // The log is an aid. A problem with it must never get in the way of the application.
   }
+}
+
+// What the stream menu says about the stream that runs: the app, the computer, and the settings of the stream
+var currentStream = null;
+
+// The stream menu: hold Select on the pad, or press the green key of the remote. What is in it and what the items do is in
+// stream_menu.js; this is the page around it (the panel, the controls that it takes, the quit dialog)
+const StreamMenu = StreamMenuSupport.createMenu({
+  module: function() { return typeof Module !== 'undefined' ? Module : null; },
+  volume: VolumeControl,
+  enter: enterStreamMenu,
+  leave: leaveStreamMenu,
+  render: renderStreamMenu,
+  statsOn: function() { return $('#performanceStatsSwitch').prop('checked'); },
+  mouseEnabled: function() { return $('#mouseEmulationSwitch').prop('checked'); },
+  disconnect: function() {
+    StreamMenu.close();
+    Module.stopStream();
+  },
+  quit: quitFromStreamMenu,
+  log: logDiagnostic
+});
+
+// Whether the view of the menu is on the stack of the navigation: only a view that was pushed is popped
+var streamMenuPushed = false;
+
+// The menu takes the controls: the loop that reads the pads for the interface (paused for the stream) runs again, from fresh
+// snapshots because the Select that opened the menu is still down, and the navigation works on the menu
+function enterStreamMenu() {
+  const menu = document.getElementById('stream-menu');
+  if (!menu) return;
+  const stream = currentStream || { title: '', host: '', summary: [] };
+  document.getElementById('stream-menu-sub').textContent = [stream.title, stream.host].filter(Boolean).join(' · ');
+  const chips = document.getElementById('stream-menu-chips');
+  chips.textContent = '';
+  stream.summary.forEach(function(text) {
+    const chip = document.createElement('span');
+    chip.className = 'ui-streammenu__chip';
+    chip.textContent = text;
+    chips.appendChild(chip);
+  });
+  if (typeof Controller !== 'undefined' && Controller) {
+    Controller.resync();
+    Controller.startWatching();
+    isUiGamepadPaused = false;
+  }
+  Navigation.start();
+  Views.StreamMenu.view.reset();
+  Navigation.push(Views.StreamMenu);
+  streamMenuPushed = true;
+  Navigation.focus();
+  hideVolumeBar();
+  menu.classList.add('is-open');
+  menu.setAttribute('aria-hidden', 'false');
+  logDiagnostic('Stream menu opened');
+}
+
+// The controls go back to what they were during a stream: the loop of the pads is paused, the navigation is stopped
+function leaveStreamMenu() {
+  // The stream may have ended while the quit dialog asked: it goes away with the menu that it was over
+  const quitDialog = document.querySelector('#quitAppDialog');
+  if (quitDialog && quitDialog.open) {
+    document.querySelector('#quitAppDialogOverlay').style.display = 'none';
+    quitDialog.close();
+    isDialogOpen = false;
+    Navigation.pop();
+  }
+  if (streamMenuPushed) {
+    streamMenuPushed = false;
+    Navigation.pop();
+  }
+  if (typeof Controller !== 'undefined' && Controller) {
+    Controller.stopWatching();
+    isUiGamepadPaused = true;
+  }
+  Navigation.stop();
+  const menu = document.getElementById('stream-menu');
+  if (menu) {
+    menu.classList.remove('is-open');
+    menu.setAttribute('aria-hidden', 'true');
+  }
+  logDiagnostic('Stream menu closed');
+}
+
+// Draws what changes in the menu: the volume row and the two toggles
+function renderStreamMenu(model) {
+  const cells = document.querySelectorAll('#stream-menu-cells .ui-streammenu__cell');
+  model.items.forEach(function(item) {
+    if (item.id === 'volume') {
+      const level = item.muted ? 0 : Math.max(0, Math.min(100, Number(item.volume) || 0));
+      cells.forEach(function(cell, index) {
+        cell.classList.toggle('is-on', index < Math.round(level / 10));
+      });
+      document.getElementById('stream-menu-volume').textContent = level + '%';
+    } else if (item.id === 'stats' || item.id === 'mouse') {
+      const prefix = item.id === 'stats' ? 'stats' : 'mouse';
+      document.getElementById('stream-menu-' + prefix + '-toggle').classList.toggle('is-on', !!item.on);
+      document.getElementById('stream-menu-' + prefix + '-text').textContent = t(item.on ? 'On' : 'Off');
+      // A switch that the setting keeps off says so under its name
+      if (item.id === 'mouse') {
+        document.getElementById('stream-menu-mouse-note').textContent = item.enabled ? '' : t('Off in settings');
+      }
+      document.getElementById(item.id === 'stats' ? 'streamMenuStats' : 'streamMenuMouse').classList.toggle('is-disabled', !item.enabled);
+    }
+  });
+}
+
+// Quit the game and disconnect: the dialog of the library asks first, over the video (the panel steps aside), and a cancel
+// brings the panel back
+function quitFromStreamMenu() {
+  const menu = document.getElementById('stream-menu');
+  menu.classList.remove('is-open');
+  quitAppDialog({
+    title: currentStream ? currentStream.title : '',
+    onCancel: function() {
+      menu.classList.add('is-open');
+    },
+    onConfirm: function() {
+      StreamMenu.close();
+      Module.stopStream();
+    }
+  });
 }
 
 // Times the stages between pressing an app and the connection being up
@@ -3016,6 +3193,11 @@ function showStreamMode() {
   }
 
   isInGame = true;
+
+  // The volume of the TV is written to the diagnostic log while streaming; with the bar of Moonlight on, its keys are taken from
+  // the system too, so that the bar of the system does not show over the stream. The main thread is watched for late timers
+  VolumeControl.start(isVolumeBarEnabled());
+  LagWatch.start();
 
   // The native input thread reads the controllers during the stream, so the loop that polls them for menu
   // navigation only costs the main thread work. It resumes together with the app list.
@@ -3193,6 +3375,20 @@ function startGame(host, appID) {
 
       // Hide on-screen overlays until the streaming session begins
       $('#connection-warnings, #performance-stats').css('background', 'transparent').text('');
+
+      // What the stream menu says about this stream
+      currentStream = {
+        title: appToStart.title,
+        host: host.hostname,
+        summary: StreamMenuSupport.describeStream({
+          width: parseInt(streamWidth, 10),
+          height: parseInt(streamHeight, 10),
+          fps: parseInt(frameRate, 10),
+          codec: videoCodec,
+          hdr: !!hdrMode,
+          bitrateMbps: bitrate / 1000
+        })
+      };
 
       // Shows a loading message to launch the application and start stream mode
       $('#loadingSpinnerMessage').text(t('Starting %1$s...', appToStart.title));
@@ -4110,6 +4306,19 @@ function saveOptimizeBitrate() {
   }, 100);
 }
 
+function saveVolumeBar() {
+  setTimeout(() => {
+    const chosenVolumeBar = $('#volumeBarSwitch').parent().hasClass('is-checked');
+    console.log('%c[index.js, saveVolumeBar]', 'color: green;', 'Saving volume bar state: ' + chosenVolumeBar);
+    storeData('volumeBar', chosenVolumeBar, null);
+  }, 100);
+}
+
+// The volume bar of Moonlight takes the volume keys from the system while streaming: on by default
+function isVolumeBarEnabled() {
+  return $('#volumeBarSwitch').parent().hasClass('is-checked');
+}
+
 function saveDisableWarnings() {
   setTimeout(() => {
     const chosenDisableWarnings = $('#disableWarningsSwitch').parent().hasClass('is-checked');
@@ -4243,6 +4452,10 @@ function restoreDefaultsSettingsValues() {
   document.querySelector('#optimizeBitrateBtn').MaterialSwitch.off();
   storeData('optimizeBitrate', defaultOptimizeBitrate, null);
 
+  const defaultVolumeBar = true;
+  document.querySelector('#volumeBarBtn').MaterialSwitch.on();
+  storeData('volumeBar', defaultVolumeBar, null);
+
   const defaultDisableWarnings = false;
   document.querySelector('#disableWarningsBtn').MaterialSwitch.off();
   storeData('disableWarnings', defaultDisableWarnings, null);
@@ -4270,6 +4483,7 @@ function initSamsungKeys() {
       //'SmartHub',      // F5
       'Source',          // F6
       'ChannelList',     // F7
+      'Info',            // Opens the stream menu (the green key does too)
       //'VolumeMute',    // F8
       //'VolumeDown',    // F9
       //'VolumeUp',      // F10
@@ -4292,7 +4506,7 @@ function initSpecialKeys() {
   // Listen for keydown events on the video element
   videoElement.addEventListener('keydown', function(e) {
     // Check if the 'Back' key has been pressed and the streaming is currently active
-    if (e.key === 'XF86Back' && isInGame === true) {
+    if (e.key === 'XF86Back' && isInGame === true && !StreamMenu.isOpen()) {
       // Send the Escape key (ESC) to the host while streaming
       sendEscapeKeyToHost();
       // Simulate mouse to move focus back to the streaming session
@@ -4598,6 +4812,15 @@ function loadUserDataCb() {
       document.querySelector('#optimizeBitrateBtn').MaterialSwitch.off();
     } else {
       document.querySelector('#optimizeBitrateBtn').MaterialSwitch.on();
+    }
+  });
+
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored volumeBar preferences.');
+  getData('volumeBar', function(previousValue) {
+    if (previousValue.volumeBar == null || previousValue.volumeBar == true) {
+      document.querySelector('#volumeBarBtn').MaterialSwitch.on(); // On by default
+    } else {
+      document.querySelector('#volumeBarBtn').MaterialSwitch.off();
     }
   });
 
@@ -5170,6 +5393,7 @@ window.addEventListener('gamepadconnected', function(e) {
   const gamepadIndex = connectedGamepad.index;
   const rumbleFeedbackSwitch = document.getElementById('rumbleFeedbackSwitch');
   console.log('%c[index.js, gamepadconnected]', 'color: green;', 'Gamepad connected:\n' + JSON.stringify(connectedGamepad), connectedGamepad);
+  logDiagnostic('Gamepad connected: ' + describeGamepad(connectedGamepad));
   snackbarLog('Gamepad %1$s has been connected.', gamepadIndex);
   // Check if the rumble feedback switch is checked
   if (rumbleFeedbackSwitch.checked) {

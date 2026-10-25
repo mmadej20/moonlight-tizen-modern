@@ -71,8 +71,23 @@ function createFakeBrowser() {
 }
 
 function run() {
-  const { createGamepadController } = require('../wasm/platform/gamepad.js');
+  const { createGamepadController, describeGamepad } = require('../wasm/platform/gamepad.js');
   assert.strictEqual(typeof createGamepadController, 'function', 'gamepad module exposes the injectable controller factory');
+
+  // The log line of a connected pad names it and the vibration effects of the browser
+  assert.strictEqual(
+    describeGamepad({ id: 'Flydigi Vader 4 Pro (STANDARD GAMEPAD Vendor: 04b4 Product: 2412)', index: 1, mapping: 'standard',
+      buttons: new Array(17), axes: [0, 0, 0, 0], vibrationActuator: { type: 'dual-rumble', effects: ['dual-rumble', 'trigger-rumble'] } }),
+    'id="Flydigi Vader 4 Pro (STANDARD GAMEPAD Vendor: 04b4 Product: 2412)" index=1 mapping="standard" buttons=17 axes=4 ' +
+      'vibrationEffects=dual-rumble,trigger-rumble (type dual-rumble)'
+  );
+  assert.strictEqual(
+    describeGamepad({ id: 'pad', index: 0, mapping: '', buttons: [], axes: [], vibrationActuator: { type: 'dual-rumble' } }),
+    'id="pad" index=0 mapping="" buttons=0 axes=0 vibrationEffects=not listed (type dual-rumble)',
+    'a browser that does not list the effects says so'
+  );
+  assert.strictEqual(describeGamepad({ id: 'pad', index: 0, buttons: [], axes: [] }),
+    'id="pad" index=0 mapping="" buttons=0 axes=0 vibrationEffects=none', 'a pad without an actuator says none');
 
   const fake = createFakeBrowser();
   const events = [];
@@ -144,6 +159,39 @@ function run() {
   assert.strictEqual(fake.listenerCount('gamepadconnected'), 1, 'restarting does not duplicate listeners');
   controller.stopWatching();
   assert.strictEqual(fake.pendingFrameCount(), 0, 'a restarted controller stops cleanly');
+
+  // The stream menu watches the pads again in the middle of a stream, with a button of the pad still down (the Select that opened
+  // it). The snapshots taken before the stream would report that as a press: after resync() the pads are looked at afresh
+  const staleFake = createFakeBrowser();
+  const staleEvents = [];
+  staleFake.addEventListener('gamepadinputchanged', (event) => staleEvents.push(event));
+  const staleController = createGamepadController(staleFake);
+  staleController.startWatching();
+  staleFake.runFrame();
+  staleController.stopWatching();
+  staleFake.gamepads[0].buttons[0] = { pressed: true, value: 1 };
+  staleController.startWatching();
+  staleFake.runFrame();
+  assert.strictEqual(staleEvents.length, 1, 'without resync the old snapshot reports a button that went down in the meantime');
+  staleController.stopWatching();
+
+  const resyncFake = createFakeBrowser();
+  const resyncEvents = [];
+  resyncFake.addEventListener('gamepadinputchanged', (event) => resyncEvents.push(event));
+  const resyncController = createGamepadController(resyncFake);
+  resyncController.startWatching();
+  resyncFake.runFrame();
+  resyncController.stopWatching();
+  resyncFake.gamepads[0].buttons[0] = { pressed: true, value: 1 };
+  resyncController.resync();
+  resyncController.startWatching();
+  resyncFake.runFrame();
+  assert.strictEqual(resyncEvents.length, 0, 'after resync a button that is down is not a change');
+  resyncFake.gamepads[0].buttons[0] = { pressed: false, value: 0 };
+  resyncFake.runFrame();
+  assert.strictEqual(resyncEvents.length, 1, 'its release is a change');
+  assert.deepStrictEqual(resyncEvents[0].detail.changes, [{ type: 'button', index: 0, pressed: false }]);
+  resyncController.stopWatching();
 
   const hiddenFake = createFakeBrowser();
   hiddenFake.hidden = true;

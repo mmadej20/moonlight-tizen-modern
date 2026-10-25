@@ -149,12 +149,69 @@ function focusElement(target) {
     if (listener && typeof listener.focus === 'function') {
       listener.focus();
     }
+    keepInView(element);
     return;
   }
   // If the element supports focus, add focus to it
   if (typeof element.focus === 'function') {
     element.focus();
   }
+  keepInView(element);
+}
+
+// Bring an element of a row to the middle of the window of the row. The row is a strip that is moved under the window with a
+// transform, which the compositor does: it stays smooth when the page is busy, which the scroll of the browser did not
+function centerInRow(target, behavior) {
+  if (target === undefined || target === null) return;
+  const element = resolveElement(target);
+  const strip = element ? element.parentElement : null;
+  const view = strip ? strip.parentElement : null;
+  if (!view) return;
+  const room = Math.max(0, strip.offsetWidth - view.clientWidth);
+  const offset = Math.round(Math.min(room, Math.max(0, element.offsetLeft + element.offsetWidth / 2 - view.clientWidth / 2)));
+  const transform = 'translate3d(' + (-offset) + 'px, 0, 0)';
+  if (strip.style.transform === transform) return;
+  if (behavior === 'smooth') {
+    strip.style.transform = transform;
+    return;
+  }
+  // A jump: the strip does not glide for this one change
+  strip.style.transition = 'none';
+  strip.style.transform = transform;
+  void strip.offsetWidth;
+  strip.style.transition = '';
+}
+
+// Keep the row of a list that scrolls inside the window of the list. The browser does that for the element that has the focus,
+// but a switch is a box of no size at the start of its row, so a row can be cut in half and still count as visible
+function keepInView(target) {
+  if (target === undefined || target === null) return;
+  const element = resolveElement(target);
+  if (!element || typeof element.closest !== 'function') return;
+  const row = element.closest('.setting-option, .settings-category') || element;
+  const list = row.closest('.settings-options, #settings-left-pane');
+  if (!list) return;
+  const rowBox = row.getBoundingClientRect();
+  const listBox = list.getBoundingClientRect();
+  const margin = 12;
+  if (rowBox.bottom > listBox.bottom - margin) {
+    list.scrollTop += rowBox.bottom - listBox.bottom + margin;
+  } else if (rowBox.top < listBox.top + margin) {
+    list.scrollTop -= listBox.top + margin - rowBox.top;
+  }
+}
+
+// Focus a tile of a row and bring it to the middle. The focus is given without the scroll of the browser, which would only
+// make the tile visible and then fight with the move to the middle
+function focusTile(target, behavior) {
+  if (target === undefined || target === null) return;
+  const element = resolveElement(target);
+  if (!element) return;
+  blurElement(document.activeElement);
+  if (typeof element.focus === 'function') {
+    element.focus({ preventScroll: true });
+  }
+  centerInRow(element, behavior);
 }
 
 // Safely remove focus from an element
@@ -243,6 +300,55 @@ function handleIpTextFieldState(enabled) {
       listener.focus();
     }
   }
+}
+
+// The host and the port of the diagnostic receiver are numbers that the remote changes, like the address of a host (the keyboard of
+// the TV did not open for a field of text). A opens one of them with the mark on its first number, Up and Down change the number
+// under the mark, Left and Right move the mark to the next number, and A or B close it. Only one is open at a time.
+const diagnosticEdit = { field: null, cell: 0 };
+
+function diagnosticCells(fieldId) {
+  const field = fieldId ? document.getElementById(fieldId) : null;
+  return field ? Array.from(field.querySelectorAll('.diagnostic-cell')) : [];
+}
+
+// Puts the mark on the open number and takes it from the others
+function markDiagnosticCell() {
+  const field = diagnosticEdit.field ? document.getElementById(diagnosticEdit.field) : null;
+  if (!field) return;
+  field.classList.add('editing');
+  diagnosticCells(diagnosticEdit.field).forEach((cell, index) => {
+    cell.classList.toggle(hoveredClassName, index === diagnosticEdit.cell);
+  });
+}
+
+function startDiagnosticEdit(fieldId) {
+  diagnosticEdit.field = fieldId;
+  diagnosticEdit.cell = 0;
+  markDiagnosticCell();
+}
+
+// Closes the open field, if there is one. Tells whether there was one, so that B closes the field before it leaves the page.
+function finishDiagnosticEdit() {
+  if (!diagnosticEdit.field) return false;
+  const field = document.getElementById(diagnosticEdit.field);
+  if (field) {
+    field.classList.remove('editing');
+    diagnosticCells(diagnosticEdit.field).forEach((cell) => cell.classList.remove(hoveredClassName));
+  }
+  diagnosticEdit.field = null;
+  DiagnosticLogs.finishReceiverEdit();
+  return true;
+}
+
+function moveDiagnosticCell(step) {
+  const count = diagnosticCells(diagnosticEdit.field).length;
+  diagnosticEdit.cell = Math.max(0, Math.min(count - 1, diagnosticEdit.cell + step));
+  markDiagnosticCell();
+}
+
+function changeDiagnosticCell(delta) {
+  DiagnosticLogs.stepReceiverCell(diagnosticEdit.field, diagnosticEdit.cell, delta);
 }
 
 // Change the value of the IP address numeric field
@@ -453,48 +559,22 @@ const Views = {
   Hosts: {
     view: new ListView(() => document.getElementById('host-grid').children),
     up: function() {
-      // If there are more rows behind, then go to the previous row
-      if (this.view.prevCardRow(5)) {
-        focusElement(this.view.current());
-      } else {
-        // If there are no more rows, check if the current item is a host
-        const currentItem = resolveElement(this.view.current());
-        if (currentItem && currentItem.id !== 'addHostContainer') {
-          // Navigate to the HostsMenuHighlight view to highlight the host's menu icon
-          Navigation.change(Views.HostsMenuHighlight);
-          focusElement(Views.HostsMenuHighlight.view.current());
-        } else {
-          // Set focus on the first navigation item in HostsNav view when transitioning from Add Host container
-          Navigation.change(Views.HostsNav);
-          focusElement(Views.HostsNav.view.current());
-        }
-      }
+      // Nothing is above the row of cards but the header
+      Navigation.change(Views.HostsNav);
+      focusElement(Views.HostsNav.view.current());
     },
-    down: function() {
-      // If there are more rows after, then go to the next row
-      if (this.view.nextCardRow(5)) {
-        focusElement(this.view.current());
-      }
-    },
+    down: function() {},
     left: function() {
-      this.view.prevCard(5);
+      this.view.prev();
       focusElement(this.view.current());
     },
     right: function() {
-      this.view.nextCard(5);
+      this.view.next();
       focusElement(this.view.current());
     },
     accept: function() {
-      const currentItem = resolveElement(this.view.current());
-      // Check if the current item is the Add Host container
-      if (currentItem && currentItem.id === 'addHostContainer') {
-        // Click the Add Host container itself to open the Add Host dialog
-        clickElement(currentItem);
-      } else {
-        // If the current item has children, click the first child element (the host card)
-        const hostCard = currentItem.children ? currentItem.children[0] : null;
-        clickElement(hostCard);
-      }
+      // The card itself handles the click: it opens the library, starts the pairing or the Add Host dialog
+      clickElement(this.view.current());
     },
     back: function() {
       // Show the Exit Moonlight dialog and push the view
@@ -502,28 +582,21 @@ const Views = {
     },
     press: function() {
       const currentItem = resolveElement(this.view.current());
-      // Check if the current item is not the Add Host container
+      // Check if the current item is not the Add Host card
       if (currentItem && currentItem.id !== 'addHostContainer') {
-        // If the current item has children, set focus on the second child element (the menu button)
-        const menuButton = currentItem.children ? currentItem.children[1] : null;
+        // Click the Host Menu button of the card, show the Host Menu dialog and push the view
+        const menuButton = currentItem.querySelector('.host-menu');
         focusElement(menuButton);
-        // Click the Host Menu button, show the Host Menu dialog and push the view
-        setTimeout(() => clickElement(menuButton), 250);
+        clickElement(menuButton);
       }
     },
+    menu: function() {
+      // The Y button: the settings of the application
+      clickElement('settingsBtn');
+    },
     switch: function() {
-      const currentItem = resolveElement(this.view.current());
-      // Check if the current item is the Add Host container
-      if (currentItem && currentItem.id === 'addHostContainer') {
-        // Set focus on the Add Host container itself
-        focusElement(currentItem);
-      } else {
-        // Scroll to the current Host card row to ensure is visible when switching back from another view
-        this.view.currentCardRow(5);
-        // If the current item has children, set focus on the first child element (the host card)
-        const hostCard = currentItem.children ? currentItem.children[0] : null;
-        focusElement(hostCard);
-      }
+      // Put the focus back on the card, for example when switching back from another view
+      focusElement(this.view.current());
     },
     enter: function() {
       mark(this.view.current());
@@ -537,9 +610,9 @@ const Views = {
   HostsNav: {
     view: new ListView(() => {
       if (document.getElementById('updateAppBtn')) {
-        return ['updateAppBtn', 'settingsBtn', 'supportBtn'];
+        return ['updateAppBtn', 'supportBtn', 'settingsBtn'];
       } else {
-        return ['settingsBtn', 'supportBtn'];
+        return ['supportBtn', 'settingsBtn'];
       }
     }),
     up: function() {},
@@ -564,54 +637,6 @@ const Views = {
       // Navigate to the Hosts view
       Navigation.change(Views.Hosts);
       // Set focus on the first navigation item in Hosts view when transitioning from HostsNav view
-      focusElement(Views.Hosts.view.current());
-    },
-    press: function() {},
-    switch: function() {
-      focusElement(this.view.current());
-    },
-    enter: function() {
-      mark(this.view.current());
-    },
-    leave: function() {
-      unmark(this.view.current());
-    },
-  },
-  HostsMenuHighlight: {
-    view: new ListView(() => {
-      // Return the menu button of the currently selected host
-      const currentHost = resolveElement(Views.Hosts.view.current());
-      if (currentHost && currentHost.id !== 'addHostContainer') {
-        const menuButton = currentHost.children ? currentHost.children[1] : null;
-        return menuButton ? [menuButton] : [];
-      }
-      return [];
-    }),
-    up: function() {
-      // Navigate to the HostsNav view (Settings button)
-      Navigation.change(Views.HostsNav);
-      focusElement(Views.HostsNav.view.current());
-    },
-    down: function() {
-      // Return to the Hosts view
-      Navigation.change(Views.Hosts);
-      focusElement(Views.Hosts.view.current());
-    },
-    left: function() {},
-    right: function() {},
-    accept: function() {
-      // Open the host menu dialog (same behavior as CH+)
-      const currentHost = resolveElement(Views.Hosts.view.current());
-      if (currentHost && currentHost.id !== 'addHostContainer') {
-        const menuButton = currentHost.children ? currentHost.children[1] : null;
-        if (menuButton) {
-          clickElement(menuButton);
-        }
-      }
-    },
-    back: function() {
-      // Return to the Hosts view
-      Navigation.change(Views.Hosts);
       focusElement(Views.Hosts.view.current());
     },
     press: function() {},
@@ -1303,7 +1328,8 @@ const Views = {
       // and neither is shown when the audio output is disabled
       isAudioOutputDisabled() ? null : isWebAudioBackendSelected() ? 'selectAudioJitter' : 'audioSyncBtn',
       'playHostAudioBtn',
-      isAudioOutputDisabled() ? null : 'decryptHostAudioBtn'
+      isAudioOutputDisabled() ? null : 'decryptHostAudioBtn',
+      'volumeBarBtn'
     ].filter(Boolean)),
     up: function() {
       this.view.prevOption();
@@ -1553,17 +1579,28 @@ const Views = {
     },
   },
   DiagnosticSettings: {
-    view: new ListView(() => [
-      'diagnosticHost',
-      'diagnosticPort',
-      'sendDiagnosticLogsBtn',
-      'clearDiagnosticLogsBtn',
-      'diagnosticCurrentSessionBtn',
-      'diagnosticPreviousSessionBtn',
-      'diagnosticFilter',
-      'diagnosticLogViewport'
-    ]),
+    // The switch that saves the logs is the first row, and the rest is there only while the logs are saved
+    view: new ListView(() => {
+      const options = document.getElementById('diagnosticOptions');
+      if (options && options.classList.contains('hide-container')) {
+        return ['diagnosticLogsEnabledBtn'];
+      }
+      return [
+        'diagnosticLogsEnabledBtn',
+        'diagnosticHost',
+        'diagnosticPort',
+        'sendDiagnosticLogsBtn',
+        'clearDiagnosticLogsBtn',
+        'diagnosticCurrentSessionBtn',
+        'diagnosticLogViewport'
+      ];
+    }),
     up: function() {
+      // In an open field Up raises the number, as it does for the address of a host
+      if (diagnosticEdit.field) {
+        changeDiagnosticCell(1);
+        return;
+      }
       if (this.view.current() === 'diagnosticLogViewport') {
         const viewport = resolveElement('diagnosticLogViewport');
         if (viewport.scrollTop > 0) {
@@ -1575,6 +1612,10 @@ const Views = {
       focusElement(this.view.current());
     },
     down: function() {
+      if (diagnosticEdit.field) {
+        changeDiagnosticCell(-1);
+        return;
+      }
       if (this.view.current() === 'diagnosticLogViewport') {
         const viewport = resolveElement('diagnosticLogViewport');
         if (viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight) {
@@ -1585,12 +1626,49 @@ const Views = {
       this.view.nextOption();
       focusElement(this.view.current());
     },
-    left: function() {},
-    right: function() {},
+    // The two buttons of the session row are one control: left is the current session, right is the previous one. In an open field
+    // the keys move the mark between its numbers
+    left: function() {
+      if (diagnosticEdit.field) {
+        moveDiagnosticCell(-1);
+        return;
+      }
+      if (this.view.current() === 'diagnosticCurrentSessionBtn') {
+        clickElement('diagnosticCurrentSessionBtn');
+      }
+    },
+    right: function() {
+      if (diagnosticEdit.field) {
+        moveDiagnosticCell(1);
+        return;
+      }
+      if (this.view.current() === 'diagnosticCurrentSessionBtn') {
+        clickElement('diagnosticPreviousSessionBtn');
+      }
+    },
     accept: function() {
-      clickElement(this.view.current());
+      const current = this.view.current();
+      // A closes the open field, and opens the field that has the mark
+      if (finishDiagnosticEdit()) {
+        return;
+      }
+      if (current === 'diagnosticHost' || current === 'diagnosticPort') {
+        startDiagnosticEdit(current);
+        return;
+      }
+      if (current === 'diagnosticCurrentSessionBtn') {
+        // A switches to the session that is not shown
+        const showsCurrent = resolveElement('diagnosticCurrentSessionBtn').classList.contains('selected');
+        clickElement(showsCurrent ? 'diagnosticPreviousSessionBtn' : 'diagnosticCurrentSessionBtn');
+        return;
+      }
+      clickElement(current);
     },
     back: function() {
+      // B first closes an open field
+      if (finishDiagnosticEdit()) {
+        return;
+      }
       blurElement(this.view.current());
       resetSettingsView();
       Navigation.change(Views.Settings);
@@ -1604,6 +1682,7 @@ const Views = {
       mark(this.view.current());
     },
     leave: function() {
+      finishDiagnosticEdit();
       unmark(this.view.current());
     },
   },
@@ -1744,32 +1823,53 @@ const Views = {
       setTimeout(() => blurElement(this.view.current()), 100);
     },
   },
+  StreamMenu: {
+    // The items that can be used, in the order of the panel. The first press of down from "Back to game" goes one item down and no
+    // further than the last one, which ends the game: the list does not wrap
+    view: new ListView(() => StreamMenu.model().items.filter((item) => item.enabled).map((item) => streamMenuButtons[item.id])),
+    up: function() {
+      this.view.prev();
+    },
+    down: function() {
+      this.view.next();
+    },
+    left: function() {
+      StreamMenu.adjust(streamMenuItemOf(this.view.current()), -1);
+    },
+    right: function() {
+      StreamMenu.adjust(streamMenuItemOf(this.view.current()), 1);
+    },
+    accept: function() {
+      StreamMenu.activate(streamMenuItemOf(this.view.current()));
+    },
+    back: function() {
+      StreamMenu.close();
+    },
+    press: function() {},
+    switch: function() {},
+    enter: function() {
+      mark(this.view.current());
+    },
+    leave: function() {
+      unmark(this.view.current());
+    },
+  },
   Apps: {
     view: new ListView(() => document.getElementById('game-grid').children),
     up: function() {
-      // If there are more rows behind, then go to the previous row
-      if (this.view.prevCardRow(6)) {
-        focusElement(this.view.current());
-      } else {
-        // If there are no more rows, navigate to the AppsNav view
-        Navigation.change(Views.AppsNav);
-        // Set focus on the first navigation item in AppsNav view when transitioning from Apps view
-        focusElement(Views.AppsNav.view.current());
-      }
+      // Nothing is above the row of tiles but the header
+      Navigation.change(Views.AppsNav);
+      // Set focus on the first navigation item in AppsNav view when transitioning from Apps view
+      focusElement(Views.AppsNav.view.current());
     },
-    down: function() {
-      // If there are more rows after, then go to the next row
-      if (this.view.nextCardRow(6)) {
-        focusElement(this.view.current());
-      }
-    },
+    down: function() {},
     left: function() {
-      this.view.prevCard(6);
-      focusElement(this.view.current());
+      this.view.prev();
+      focusTile(this.view.current(), 'smooth');
     },
     right: function() {
-      this.view.nextCard(6);
-      focusElement(this.view.current());
+      this.view.next();
+      focusTile(this.view.current(), 'smooth');
     },
     accept: function() {
       clickElement(this.view.current());
@@ -1779,10 +1879,13 @@ const Views = {
     },
     press: function() {},
     switch: function() {
-      this.view.currentCardRow(6);
+      // Bring the current tile to the middle of the row, for example when coming back from the stream
+      centerInRow(this.view.current(), 'auto');
     },
     enter: function() {
       mark(this.view.current());
+      // The list opens on the tile that is current, for example the app that runs
+      centerInRow(this.view.current(), 'auto');
     },
     leave: function() {
       unmark(this.view.current());
@@ -1797,8 +1900,8 @@ const Views = {
     down: function() {
       // Navigate to the Apps view
       Navigation.change(Views.Apps);
-      // Set focus on the first navigation item in Apps view when transitioning from AppsNav view
-      focusElement(Views.Apps.view.current());
+      // Set focus on the current tile in Apps view when transitioning from AppsNav view
+      focusTile(Views.Apps.view.current(), 'smooth');
     },
     left: function() {
       this.view.prev();
@@ -1977,6 +2080,20 @@ const Views = {
   },
 };
 
+// The buttons of the stream menu by the id of their item
+const streamMenuButtons = {
+  resume: 'streamMenuResume',
+  volume: 'streamMenuVolume',
+  stats: 'streamMenuStats',
+  mouse: 'streamMenuMouse',
+  disconnect: 'streamMenuDisconnect',
+  quit: 'streamMenuQuit',
+};
+
+function streamMenuItemOf(buttonId) {
+  return Object.keys(streamMenuButtons).find((item) => streamMenuButtons[item] === buttonId);
+}
+
 const Navigation = (function() {
   let hasFocus = false;
 
@@ -2088,11 +2205,14 @@ const Navigation = (function() {
     accept: runOp('accept'),
     back: runOp('back'),
     press: runOp('press'),
+    menu: runOp('menu'),
     switch: runOp('switch'),
     push: Stack.push,
     change: Stack.change,
     pop: Stack.pop,
     start: State.start,
     stop: State.stop,
+    // Makes sure that the next key is not spent on giving the focus back: for a view that opens in the middle of something else
+    focus: focus,
   };
 })();

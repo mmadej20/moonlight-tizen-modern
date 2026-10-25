@@ -29,17 +29,19 @@ function remoteControllerHandler(e) {
       // Go back or cancel the operation
       Navigation.back();
       break;
+    // The volume keys come here only while the application has taken them from the system (during a stream, with the bar of
+    // Moonlight): then the application changes the volume and shows its bar. Otherwise the system handles them and shows its own
     case tvKey.KEY_VOLUME_UP:
       // Increase the volume
-      tizen.tvaudiocontrol.setVolumeUp();
+      VolumeControl.up();
       break;
     case tvKey.KEY_VOLUME_DOWN:
       // Decrease the volume
-      tizen.tvaudiocontrol.setVolumeDown();
+      VolumeControl.down();
       break;
     case tvKey.KEY_VOLUME_MUTE:
-      // Mute the volume
-      tizen.tvaudiocontrol.setMute();
+      // Mute or unmute
+      VolumeControl.toggleMute();
       break;
     case tvKey.KEY_CHANNEL_UP:
       // Triggers the press action
@@ -59,6 +61,13 @@ function remoteControllerHandler(e) {
       // Toggle performance stats overlay
       if (isInGame === true) {
         Module.toggleStats();
+      }
+      break;
+    case tvKey.KEY_GREEN:
+    case tvKey.KEY_INFO:
+      // Open or close the stream menu
+      if (isInGame === true) {
+        StreamMenu.toggle();
       }
       break;
     default:

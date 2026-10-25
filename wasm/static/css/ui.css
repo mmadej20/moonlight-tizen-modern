@@ -1,0 +1,2084 @@
+/* =============================
+   Interface of Moonlight Tizen
+   Tokens and components of the redesign. Everything here is prefixed `ui-`, so that it can live next to the old
+   stylesheet while the screens are moved over one by one. The target is a 1920x1080 TV on Tizen 9.
+
+   What makes it smooth on a TV: focus is shown by an outline layer that only changes opacity and transform (both stay
+   on the compositor), nothing animates a shadow, a blur or a layout property, and the large cards are `contain`ed so a
+   change inside one never lays out the page.
+============================= */
+
+:root {
+    --ui-bg: #080C15;
+    --ui-surface: #131823;
+    --ui-surface-raised: #1F2733;
+    --ui-panel: #0E141E;
+    --ui-line: #3A4353;
+    --ui-text: #EFF2F7;
+    --ui-mute: #B4BBC8;
+    --ui-moon: #F5DE87;
+    --ui-ink: #1B1505;
+    --ui-ok: #4AE2AC;
+    --ui-warn: #F9B64F;
+    --ui-bad: #FE8B83;
+    --ui-ring: rgba(245, 222, 135, 0.22);
+    --ui-scrim: rgba(8, 12, 21, 0.6);
+    --ui-glow: rgba(32, 46, 71, 0.55);
+    --ui-moon-wash: rgba(245, 222, 135, 0.14);
+    --ui-font-display: 'Bricolage Grotesque', system-ui, sans-serif;
+    --ui-font: 'Figtree', system-ui, sans-serif;
+    --ui-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* A screen: the dark ground with a soft light in the upper right corner, and the margins of a TV (safe area) */
+.ui-screen {
+    background: radial-gradient(900px 560px at 88% -8%, var(--ui-glow), transparent 70%), var(--ui-bg);
+    color: var(--ui-text);
+    font-family: var(--ui-font);
+    padding: 64px 96px 56px;
+    box-sizing: border-box;
+}
+
+.ui-title {
+    margin: 0;
+    font: 700 72px/1.05 var(--ui-font-display);
+    letter-spacing: -0.02em;
+}
+
+.ui-subtitle {
+    font: 500 28px/1.3 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+/* Focus. An element with `ui-fx` shows its outline layer when the remote or the pad is on it (`hovered`, set by the
+   navigation), when the browser focuses it, and when the pointer is over it. */
+.ui-fx {
+    position: relative;
+    transition: transform 0.2s var(--ui-ease);
+}
+
+.ui-fx::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    border: 6px solid var(--ui-ring);
+    border-radius: calc(var(--ui-r, 32px) + 8px);
+    opacity: 0;
+    transform: scale(0.97);
+    transition: opacity 0.2s var(--ui-ease), transform 0.2s var(--ui-ease);
+    pointer-events: none;
+}
+
+.ui-fx:hover::after, .ui-fx:focus::after, .ui-fx.hovered::after {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.ui-fx:hover, .ui-fx:focus, .ui-fx.hovered {
+    transform: scale(1.02);
+    outline: none;
+}
+
+.ui-btn.ui-fx:hover, .ui-btn.ui-fx:focus, .ui-btn.ui-fx.hovered {
+    transform: scale(1.04);
+}
+
+/* A button of the pad drawn as a circle with its letter (A, B, X, Y), or as a rounded badge for a longer name */
+.ui-glyph {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    font: 700 20px/1 var(--ui-font);
+}
+
+.ui-glyph--wide {
+    width: auto;
+    min-width: 52px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 12px;
+    font-size: 18px;
+}
+
+.ui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    --ui-r: 32px;
+    height: 64px;
+    padding: 0 28px;
+    box-sizing: border-box;
+    border-radius: var(--ui-r);
+    border: 2px solid var(--ui-line);
+    background: var(--ui-surface-raised);
+    color: var(--ui-text);
+    font: 600 26px/1 var(--ui-font);
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.ui-btn--primary {
+    background: var(--ui-moon);
+    border-color: var(--ui-moon);
+    color: var(--ui-ink);
+}
+
+.ui-btn svg {
+    flex: none;
+}
+
+.ui-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    height: 40px;
+    padding: 0 16px;
+    box-sizing: border-box;
+    border-radius: 20px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-scrim);
+    font: 600 22px/1 var(--ui-font);
+}
+
+.ui-pill--ok {
+    color: var(--ui-ok);
+    border-color: var(--ui-ok);
+}
+
+.ui-pill--warn {
+    color: var(--ui-warn);
+    border-color: var(--ui-warn);
+}
+
+.ui-pill--mute {
+    color: var(--ui-mute);
+}
+
+.ui-pill__dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.ui-pill--mute .ui-pill__dot {
+    background: none;
+    border: 2.5px solid currentColor;
+    box-sizing: border-box;
+}
+
+.ui-pill--warn .ui-pill__dot {
+    border-radius: 0;
+    transform: rotate(45deg);
+}
+
+.ui-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 40px;
+    padding: 0 16px;
+    box-sizing: border-box;
+    border-radius: 12px;
+    background: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 22px/1 var(--ui-font);
+}
+
+.ui-card {
+    display: flex;
+    flex-direction: column;
+    --ui-r: 32px;
+    box-sizing: border-box;
+    padding: 36px;
+    border-radius: var(--ui-r);
+    border: 2px solid var(--ui-line);
+    background: var(--ui-surface);
+    color: var(--ui-text);
+    contain: layout style;
+}
+
+.ui-card.hovered, .ui-card:focus {
+    background: var(--ui-surface-raised);
+    border-color: var(--ui-moon);
+}
+
+/* The hints at the foot of a screen: which pad button does what */
+.ui-hints {
+    display: flex;
+    align-items: center;
+    gap: 44px;
+    font: 500 24px/1 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+.ui-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.ui-hint .ui-glyph {
+    color: var(--ui-text);
+}
+
+/* =============================
+   Page shell: the background of the whole application, and the header that every screen shares
+============================= */
+body {
+    background: radial-gradient(900px 560px at 88% -8%, var(--ui-glow), transparent 70%), var(--ui-bg);
+    background-attachment: fixed;
+    color: var(--ui-text);
+    font-family: var(--ui-font);
+    scroll-behavior: smooth;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.ui-header.mdl-layout__header {
+    min-height: 0;
+    padding: 64px 96px 0;
+    box-sizing: border-box;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+}
+
+.ui-header .ui-header__row {
+    height: 64px;
+    min-height: 64px;
+    padding: 0;
+    gap: 16px;
+}
+
+.ui-brand {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-left: 0;
+}
+
+#header-logo {
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+#header-title {
+    color: var(--ui-text);
+    font: 700 40px/1 var(--ui-font-display);
+    letter-spacing: -0.01em;
+    text-transform: none;
+    text-shadow: none;
+}
+
+.ui-header__nav {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* The header buttons are shown and hidden by the application with show() and hide() */
+.ui-header .ui-btn {
+    margin: 0;
+}
+
+/* =============================
+   Hosts: where are we playing today
+============================= */
+/* The screen is as tall as the window below the header (64 px of margin and 64 px of header), so the hints sit at the bottom */
+#hosts-screen {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 128px);
+    box-sizing: border-box;
+}
+
+#hosts-heading {
+    margin: 72px 96px 0;
+}
+
+#host-grid {
+    display: flex;
+    flex: 1;
+    gap: 20px;
+    margin: 0;
+    padding: 52px 96px 24px;
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+/* The row has room for the focus outline: the scroll area would clip it otherwise */
+#host-grid > .ui-card {
+    flex: 1 1 0;
+    min-width: 380px;
+    max-width: 560px;
+    min-height: 420px;
+    max-height: 520px;
+    cursor: pointer;
+}
+
+#host-grid > #addHostContainer {
+    flex: 0 0 200px;
+    min-width: 200px;
+    align-items: center;
+    justify-content: center;
+    border-style: dashed;
+    background: transparent;
+    color: var(--ui-mute);
+}
+
+#addHostContainer.hovered, #addHostContainer:focus, #addHostContainer:hover {
+    color: var(--ui-text);
+}
+
+.ui-card__add {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    font: 600 24px/1.2 var(--ui-font);
+    text-align: center;
+}
+
+.ui-card__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ui-card__icon {
+    display: grid;
+    place-items: center;
+    width: 88px;
+    height: 88px;
+    border-radius: 24px;
+    background: var(--ui-bg);
+    color: var(--ui-mute);
+}
+
+.host-container[data-state="online"] .ui-card__icon {
+    background: var(--ui-moon-wash);
+    color: var(--ui-moon);
+}
+
+#host-grid .host-title {
+    margin-top: 28px;
+    font: 700 48px/1.05 var(--ui-font-display);
+    letter-spacing: -0.01em;
+    color: var(--ui-text);
+}
+
+/* A long name wraps onto a second line and then ends in an ellipsis, so there is nothing that scrolls */
+#host-grid .host-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    word-break: break-word;
+}
+
+.host-address {
+    margin-top: 10px;
+    font: 500 26px/1.3 var(--ui-font);
+    color: var(--ui-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The buttons of a card sit in one column and are as wide as the card allows, so that they line up whatever their text is.
+   They show only on the card that is highlighted (the pad or the remote is on it, or the pointer is over it): the other cards
+   stay quiet. The space stays reserved, so nothing moves when the highlight does. */
+.ui-card__foot {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    margin-top: auto;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s var(--ui-ease), transform 0.2s var(--ui-ease);
+}
+
+.host-container.hovered .ui-card__foot,
+.host-container:hover .ui-card__foot,
+.host-container:focus .ui-card__foot,
+.host-container:focus-within .ui-card__foot {
+    opacity: 1;
+    transform: none;
+}
+
+.host-action, .host-menu {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    height: 56px;
+    padding: 0 24px;
+    box-sizing: border-box;
+    border-radius: 28px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-surface-raised);
+    color: var(--ui-text);
+    font: 600 24px/1 var(--ui-font);
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.host-action:empty {
+    display: none;
+}
+
+/* An offline host is quieter: the card keeps its place but does not compete with the ones that can be used */
+.host-container[data-state="offline"] .host-title,
+.host-container[data-state="offline"] .host-address {
+    color: var(--ui-mute);
+}
+
+#hosts-hints, #apps-hints {
+    padding: 8px 96px 56px;
+}
+
+/* A row that scrolls has no bar: the card that has the focus is brought into view */
+#host-grid::-webkit-scrollbar {
+    display: none;
+}
+
+/* =============================
+   Library: the apps of a host in one row
+============================= */
+#apps-screen {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 128px);
+    box-sizing: border-box;
+}
+
+#apps-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+    margin: 72px 96px 0;
+}
+
+/* The row is a strip under a window. The window clips (nothing can scroll it, not even the focus), the strip is moved with a
+   transform by the navigation, so the compositor does the move and it stays smooth. The room above and below the tiles is for
+   the tile that grows and for its outline: the window clips what leaves it */
+#game-row {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: clip;
+}
+
+#game-grid {
+    position: relative;
+    display: flex;
+    box-sizing: border-box;
+    width: max-content;
+    min-width: 100%;
+    height: 100%;
+    gap: 40px;
+    margin: 0;
+    padding: 56px 96px 64px;
+    align-items: center;
+    justify-content: flex-start;
+    transition: transform 0.32s var(--ui-ease);
+    will-change: transform;
+}
+
+/* A tile does not change its size when it has the focus (that would lay out the row): it grows with a transform around the
+   middle of its box art, and the outline is a layer that only changes opacity and transform, as everywhere else */
+.ui-tile {
+    position: relative;
+    flex: none;
+    width: 260px;
+    cursor: pointer;
+    transform-origin: 50% 195px;
+    transition: transform 0.2s var(--ui-ease);
+    contain: layout style;
+}
+
+.ui-tile::after {
+    content: "";
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    left: -8px;
+    height: 406px;
+    box-sizing: border-box;
+    border: 6px solid var(--ui-ring);
+    border-radius: 36px;
+    opacity: 0;
+    transform: scale(0.97);
+    transition: opacity 0.2s var(--ui-ease), transform 0.2s var(--ui-ease);
+    pointer-events: none;
+}
+
+.ui-tile:hover::after, .ui-tile:focus::after, .ui-tile.hovered::after {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* The old stylesheet gives every highlighted element a grey wash: a tile has its own outline instead */
+.ui-tile:hover, .ui-tile:focus, .ui-tile.hovered {
+    transform: scale(1.12);
+    outline: none;
+    background: none;
+}
+
+.ui-tile__art {
+    position: relative;
+    width: 260px;
+    height: 390px;
+    box-sizing: border-box;
+    border-radius: 28px;
+    border: 2px solid var(--ui-line);
+    overflow: hidden;
+    background: url('../res/placeholder_game.svg') center / cover no-repeat var(--ui-surface);
+}
+
+.ui-tile__art img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.ui-tile__art img.fade-in {
+    opacity: 1;
+}
+
+.ui-tile:hover .ui-tile__art, .ui-tile:focus .ui-tile__art, .ui-tile.hovered .ui-tile__art {
+    border-color: var(--ui-moon);
+}
+
+/* The title keeps the room of two lines whatever it is, so that no tile is taller than the others */
+.ui-tile__cap {
+    height: 60px;
+    margin-top: 18px;
+    font: 600 26px/1.15 var(--ui-font);
+    color: var(--ui-mute);
+    overflow: hidden;
+}
+
+.ui-tile__cap .game-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    word-break: break-word;
+}
+
+.ui-tile:hover .ui-tile__cap, .ui-tile:focus .ui-tile__cap, .ui-tile.hovered .ui-tile__cap {
+    color: var(--ui-text);
+}
+
+/* The app that runs on the host: a green frame and a badge on the box art */
+.ui-tile__badge {
+    display: none;
+    position: absolute;
+    z-index: 1;
+    top: 16px;
+    left: 16px;
+}
+
+.ui-tile__badge::before {
+    content: "";
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.ui-tile.current-game-active .ui-tile__art {
+    border-color: var(--ui-ok);
+}
+
+.ui-tile.current-game-active .ui-tile__badge {
+    display: inline-flex;
+}
+
+/* The list is empty, or could not be fetched: the words stay on the screen, so there is no message that fades away.
+   The message is a child of the row like a tile is, so the navigation may mark it, and it must not get the grey wash. */
+.ui-empty, .ui-empty.hovered {
+    background: none;
+}
+
+.ui-empty {
+    max-width: 960px;
+    margin: auto;
+    text-align: center;
+    font: 500 32px/1.4 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+/* =============================
+   Settings: the categories on the left, the options of the chosen category on the right
+   The markup is the one of the old interface (the navigation looks for the controls by their order inside a row), so a
+   row is a grid: the title and the hint on the left, the control on the right. A row is highlighted as a whole.
+============================= */
+#settings-list {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 128px);
+    margin: 0;
+    box-sizing: border-box;
+}
+
+#settings-body {
+    display: flex;
+    flex: 1;
+    gap: 32px;
+    min-height: 0;
+    padding: 40px 96px 0;
+}
+
+#settings-left-pane {
+    flex: none;
+    width: 380px;
+    padding: 0;
+    overflow-y: auto;
+}
+
+.settings-categories {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 4px 24px;
+}
+
+.settings-category {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    min-height: 68px;
+    margin: 0;
+    padding: 12px 24px;
+    box-sizing: border-box;
+    border-radius: 22px;
+    border: 2px solid transparent;
+    background: transparent;
+    color: var(--ui-mute);
+    font: 600 28px/1.1 var(--ui-font);
+    cursor: pointer;
+}
+
+.settings-category .settings-category-icons {
+    margin: 0;
+    font-size: 32px;
+    color: inherit;
+}
+
+.settings-category label {
+    position: static;
+    margin: 0;
+    font: inherit;
+    letter-spacing: 0;
+    color: inherit;
+    cursor: pointer;
+}
+
+.settings-category.selected {
+    background: var(--ui-surface-raised);
+    border-color: var(--ui-line);
+    color: var(--ui-text);
+    transform: none;
+    box-shadow: none;
+}
+
+.settings-category.selected .settings-category-icons {
+    color: var(--ui-moon);
+}
+
+.settings-category.hovered, .settings-category:hover, .settings-category:focus,
+.settings-category.selected:hover, .settings-category.selected:focus {
+    background: var(--ui-surface-raised);
+    border-color: var(--ui-moon);
+    color: var(--ui-text);
+    transform: none;
+    box-shadow: none;
+    outline: none;
+}
+
+#settings-right-pane {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+#settings-title {
+    flex: none;
+    margin: 0 8px 20px;
+    font: 700 48px/1.05 var(--ui-font-display);
+    letter-spacing: -0.01em;
+    color: var(--ui-text);
+}
+
+/* The options of a category scroll inside the pane: the title stays. The room around is for the outline of a row */
+.settings-options {
+    display: none;
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 4px 8px 32px;
+    overflow-y: auto;
+}
+
+.setting-option {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 32px;
+    row-gap: 6px;
+    min-height: 96px;
+    margin: 0 0 12px;
+    padding: 20px 28px;
+    box-sizing: border-box;
+    border-radius: 24px;
+    border: 2px solid transparent;
+    background: var(--ui-surface);
+}
+
+.setting-option:has(.hovered, :focus, .is-focused) {
+    background: var(--ui-surface-raised);
+    border-color: var(--ui-moon);
+}
+
+.setting-option > label {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0;
+    font: 600 28px/1.15 var(--ui-font);
+    letter-spacing: 0;
+    color: var(--ui-text);
+}
+
+.setting-option > .mdl-list__item-text-body {
+    grid-column: 1;
+    grid-row: 2;
+    display: block;
+    margin: 0;
+    font: 500 22px/1.3 var(--ui-font);
+    letter-spacing: 0;
+    color: var(--ui-mute);
+}
+
+.setting-option > .mdl-list__item-text-body:empty {
+    display: none;
+}
+
+/* A row without a hint centers its title against its control */
+.setting-option > label:has(+ .mdl-list__item-text-body:empty) {
+    grid-row: 1 / span 2;
+}
+
+.setting-option > div[id$="Menu"] {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+}
+
+.setting-option .badge {
+    margin: 0;
+    padding: 0 12px;
+    height: 32px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--ui-bg);
+    color: var(--ui-warn);
+    font: 600 20px/32px var(--ui-font);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* A field that opens a menu: the value and a chevron */
+.setting-option .mdl-button[id^="select"] {
+    display: block;
+    width: 420px;
+    height: 56px;
+    min-width: 0;
+    padding: 0 56px 0 20px;
+    box-sizing: border-box;
+    border-radius: 16px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-bg) url('../res/ic_arrow_drop_down_48px.svg') right 12px center / 36px no-repeat;
+    color: var(--ui-text);
+    font: 600 26px/52px var(--ui-font);
+    letter-spacing: 0;
+    text-align: left;
+    text-indent: 0;
+    text-transform: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A button that does something */
+.setting-option #removeAllHostsBtn, .setting-option #navigationGuideBtn,
+.setting-option #checkUpdatesBtn, .setting-option #restartAppBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    width: auto;
+    max-width: 680px;
+    height: auto;
+    min-height: 56px;
+    padding: 10px 24px;
+    box-sizing: border-box;
+    border-radius: 16px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 24px/1.2 var(--ui-font);
+    letter-spacing: 0;
+    text-align: center;
+    text-indent: 0;
+    text-transform: none;
+    white-space: normal;
+}
+
+.setting-option #removeAllHostsBtn {
+    color: var(--ui-bad);
+    border-color: var(--ui-bad);
+}
+
+.setting-option #removeAllHostsIcon, .setting-option #navigationGuideIcon,
+.setting-option #checkUpdatesIcon, .setting-option #restartApplicationIcon {
+    order: -1;
+    float: none;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    filter: none;
+}
+
+/* The information about the system is a panel under the title, not a field at the right */
+.setting-option > #systemInfoMenu {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    margin-top: 12px;
+}
+
+.setting-option #systemInfoBtn {
+    display: block;
+    width: 100%;
+    height: auto;
+    padding: 18px 28px;
+    box-sizing: border-box;
+    border-radius: 16px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-bg);
+    color: var(--ui-mute);
+    font: 500 22px/1.4 var(--ui-font);
+    letter-spacing: 0;
+    text-align: left;
+    text-transform: none;
+    white-space: pre-line;
+}
+
+.setting-option .mdl-button.hovered, .setting-option .mdl-button:hover, .setting-option .mdl-button:focus {
+    border-color: var(--ui-moon);
+    outline: none;
+}
+
+.setting-option #removeAllHostsBtn.hovered, .setting-option #removeAllHostsBtn:hover, .setting-option #removeAllHostsBtn:focus {
+    border-color: var(--ui-bad);
+}
+
+/* A switch: a track and a thumb, the thumb moves with a transform. The sentence that was beside it is the hint of the row
+   now (a row that had no hint shows it there), so here it is only for the screen reader */
+.setting-option .mdl-switch {
+    display: block;
+    width: 96px;
+    height: 56px;
+    margin: 0;
+    padding: 0;
+}
+
+.setting-option > div[id$="Menu"] .mdl-switch__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+.settings-options .mdl-switch__track {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 96px;
+    height: 56px;
+    margin: 0;
+    border-radius: 28px;
+    background: var(--ui-line);
+    transition: background-color 0.2s var(--ui-ease);
+}
+
+.settings-options .mdl-switch__thumb {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    border-radius: 50%;
+    background: var(--ui-text);
+    box-shadow: none;
+    transition: transform 0.2s var(--ui-ease), background-color 0.2s var(--ui-ease);
+}
+
+.settings-options .mdl-switch.is-checked .mdl-switch__track {
+    background: var(--ui-moon);
+    box-shadow: none;
+}
+
+.settings-options .mdl-switch.is-checked .mdl-switch__thumb {
+    left: 6px;
+    transform: translateX(40px);
+    background: var(--ui-ink);
+}
+
+.settings-options .mdl-switch__focus-helper, .settings-options .mdl-switch__ripple-container {
+    display: none;
+}
+
+.settings-options .mdl-switch.hovered, .settings-options .mdl-switch.is-focused, .settings-options .mdl-switch.is-disabled {
+    background: none;
+    box-shadow: none;
+}
+
+.settings-options .mdl-switch.is-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* The menu of a field opens under its row, at the right edge, where the fields are. MDL sets the place and the size of the
+   container itself, so what it sets is replaced here: the width of the container, and the side that it is aligned to */
+.setting-option .mdl-menu__container {
+    top: calc(100% - 8px) !important;
+    right: 28px !important;
+    left: auto !important;
+    width: 520px !important;
+    height: auto !important;
+}
+
+.setting-option .mdl-menu__container:has(.mdl-slider) {
+    width: 760px !important;
+}
+
+.setting-option .mdl-menu__outline {
+    width: 100% !important;
+    border-radius: 20px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-surface-raised);
+    box-shadow: none;
+    box-sizing: border-box;
+}
+
+.setting-option .mdl-menu {
+    width: 100% !important;
+    padding: 8px 0;
+}
+
+.setting-option .mdl-menu__item {
+    height: 56px;
+    padding: 0 28px;
+    color: var(--ui-text);
+    font: 600 24px/56px var(--ui-font);
+    letter-spacing: 0;
+    text-indent: 0;
+    text-align: left;
+}
+
+.setting-option .mdl-menu__item.hovered, .setting-option .mdl-menu__item:hover, .setting-option .mdl-menu__item:focus {
+    background: var(--ui-moon-wash);
+    color: var(--ui-moon);
+}
+
+.setting-option .mdl-menu__item[disabled] {
+    opacity: 0.4;
+}
+
+/* The menus of a slider: the lowest value, the slider and the highest value */
+.setting-option .mdl-menu.videoBitrateMenu, .setting-option .mdl-menu.audioJitterMenu {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    height: 96px;
+    padding: 0 28px;
+    box-sizing: border-box;
+}
+
+#bitrateLowestValue, #bitrateHighestValue, #jitterLowestValue, #jitterHighestValue {
+    margin: 0;
+    color: var(--ui-mute);
+    font: 600 22px/1 var(--ui-font);
+}
+
+#bitrateLowestValue.hovered, #bitrateHighestValue.hovered, #jitterLowestValue.hovered, #jitterHighestValue.hovered {
+    background: none;
+}
+
+.setting-option .mdl-slider__container {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    height: 32px;
+}
+
+.setting-option .mdl-slider {
+    width: 100%;
+}
+
+.setting-option .mdl-slider__background-flex {
+    top: 50%;
+    height: 12px;
+    margin-top: -6px;
+    border-radius: 6px;
+}
+
+.setting-option .mdl-slider__background-lower {
+    background: var(--ui-moon);
+}
+
+.setting-option .mdl-slider__background-upper {
+    background: var(--ui-line);
+}
+
+.setting-option .mdl-slider::-webkit-slider-thumb {
+    background: var(--ui-moon);
+}
+
+/* Logs: the rows are like the others. The host and the port of the receiver are numbers in cells, like the address of a host: the
+   row that has the mark shows its cells with the color of the moon, and the field that A opened shows the one cell that Up and Down
+   change, with a ring around it */
+.diagnostic-cells {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.diagnostic-cell {
+    box-sizing: border-box;
+    min-width: 56px;
+    height: 56px;
+    padding: 0 12px;
+    border-radius: 16px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 26px/52px var(--ui-font);
+    letter-spacing: 0;
+    text-align: center;
+}
+
+#diagnosticHost .diagnostic-cell {
+    min-width: 104px;
+}
+
+.diagnostic-dot {
+    color: var(--ui-mute);
+    font: 600 26px/1 var(--ui-font);
+}
+
+.diagnostic-cells.hovered .diagnostic-cell {
+    border-color: var(--ui-moon);
+}
+
+.diagnostic-cells.editing .diagnostic-cell {
+    border-color: var(--ui-line);
+}
+
+.diagnostic-cells.editing .diagnostic-cell.hovered {
+    border-color: var(--ui-moon);
+    background: var(--ui-surface-raised);
+    outline: 6px solid var(--ui-ring);
+}
+
+#sendDiagnosticLogsBtn:focus, #clearDiagnosticLogsBtn:focus,
+.diagnostic-session-button:focus, #diagnosticLogViewport:focus {
+    outline: none;
+    border-color: var(--ui-moon);
+    box-shadow: none;
+}
+
+/* The buttons of the row of the logs that are sent and cleared are buttons that do something, like the ones of the About page */
+.setting-option #sendDiagnosticLogsBtn, .setting-option #clearDiagnosticLogsBtn {
+    min-width: 200px;
+    height: 56px;
+    padding: 0 28px;
+    box-sizing: border-box;
+    border-radius: 16px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 24px/52px var(--ui-font);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.setting-option #clearDiagnosticLogsBtn {
+    color: var(--ui-bad);
+    border-color: var(--ui-bad);
+}
+
+/* The session: two buttons in one frame, the shown one is filled */
+.diagnostic-session-actions {
+    display: flex;
+    gap: 8px;
+    padding: 6px;
+    border-radius: 22px;
+    background: var(--ui-bg);
+}
+
+.diagnostic-session-button {
+    min-height: 52px;
+    padding: 0 24px;
+    border: 0;
+    border-radius: 16px;
+    background: transparent;
+    color: var(--ui-mute);
+    font: 600 24px/52px var(--ui-font);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.diagnostic-session-button.selected {
+    background: var(--ui-moon);
+    color: var(--ui-ink);
+}
+
+/* The message about what was sent or cleared sits under the row that sent it */
+.setting-option > .diagnostic-status {
+    grid-column: 1 / -1;
+    grid-row: 3;
+}
+
+.diagnostic-status {
+    min-height: 0;
+    color: var(--ui-ok);
+    font: 500 22px/1.3 var(--ui-font);
+}
+
+.diagnostic-status:empty {
+    display: none;
+}
+
+.diagnostic-error {
+    color: var(--ui-bad);
+}
+
+/* The log is a panel under its title, as wide as the row */
+.setting-option > #diagnosticLogMenu {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    margin-top: 12px;
+}
+
+#diagnosticSummary {
+    margin-bottom: 10px;
+    color: var(--ui-mute);
+    font: 500 22px/1.3 var(--ui-font);
+}
+
+#diagnosticLogViewport {
+    box-sizing: border-box;
+    width: 100%;
+    height: 340px;
+    margin: 0;
+    padding: 16px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--ui-text);
+    background: var(--ui-bg);
+    border: 2px solid var(--ui-line);
+    border-radius: 16px;
+    font: 18px/1.4 monospace;
+}
+
+#settings-hints {
+    padding: 16px 96px 56px;
+}
+
+/* =============================
+   Dialogs, the loading spinner, the message at the foot of the screen and the update button
+   A dialog is a card on a dark scrim. Its buttons are the pills of the interface: the one that goes on is filled, the one
+   that goes back is framed. The focus of a dialog button is a plain outline: there are two or three buttons on the screen,
+   so nothing here needs a layer of its own.
+============================= */
+.dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(8, 12, 21, 0.78);
+}
+
+.mdl-dialog {
+    box-sizing: border-box;
+    width: 720px;
+    max-width: calc(100vw - 192px);
+    height: fit-content;
+    max-height: calc(100vh - 128px);
+    padding: 40px;
+    overflow-y: auto;
+    border: 2px solid var(--ui-line);
+    border-radius: 32px;
+    background: var(--ui-surface);
+    color: var(--ui-text);
+    box-shadow: none;
+    font-family: var(--ui-font);
+}
+
+.large-dialog {
+    width: 1500px;
+}
+
+.mdl-dialog__title {
+    margin: 0 0 20px;
+    padding: 0;
+    font: 700 44px/1.1 var(--ui-font-display);
+    letter-spacing: -0.01em;
+    color: var(--ui-text);
+}
+
+.mdl-dialog__content {
+    padding: 0;
+    color: var(--ui-mute);
+    font: 500 28px/1.4 var(--ui-font);
+}
+
+.mdl-dialog__content p, .mdl-dialog__content ul {
+    margin: 0;
+    font: 500 28px/1.4 var(--ui-font);
+    letter-spacing: 0;
+}
+
+.mdl-dialog__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 16px;
+    margin-top: 36px;
+    padding: 0;
+}
+
+.mdl-dialog button.mdl-button.mdl-button--raised.mdl-button--colored {
+    width: auto;
+    min-width: 0;
+    height: 64px;
+    margin: 0;
+    padding: 0 36px;
+    border-radius: 32px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-surface-raised);
+    color: var(--ui-text);
+    box-shadow: none;
+    font: 600 26px/60px var(--ui-font);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.mdl-dialog .mdl-button .mdl-button__ripple-container {
+    display: none;
+}
+
+/* The button that goes on is filled: Continue, Yes, Exit, Restart, and the Close of a dialog that has nothing else to offer */
+.mdl-dialog button.mdl-button.mdl-button--raised.mdl-button--colored[id^="continue"], .mdl-dialog button#closeAppSupport.mdl-button,
+.mdl-dialog button#closeNavGuide.mdl-button, .mdl-dialog button#closeUpdateApp.mdl-button, .mdl-dialog button#closeHostMenu.mdl-button,
+.mdl-dialog button#closeHostDetails.mdl-button, #warningDialog.single-button button#closeWarning.mdl-button {
+    background: var(--ui-moon);
+    border-color: var(--ui-moon);
+    color: var(--ui-ink);
+}
+
+.mdl-dialog .mdl-button:hover, .mdl-dialog .mdl-button:focus, .mdl-dialog .mdl-button.hovered {
+    outline: 6px solid var(--ui-ring);
+    outline-offset: 0;
+    border-color: var(--ui-moon);
+}
+
+.mdl-dialog .mdl-button[disabled], .mdl-dialog .mdl-button.mdl-button--disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+#continueWarning {
+    display: none;
+}
+
+/* The menu of a host: the choices are a column of wide buttons */
+dialog[id^="hostMenuDialog-"] .mdl-dialog__content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+dialog[id^="hostMenuDialog-"] .mdl-dialog__content button.mdl-button.mdl-button--raised.mdl-button--colored {
+    width: 100%;
+    text-align: left;
+}
+
+#pairingDialogText, #deleteHostDialogText, .host-details-text, #appSupportDialogText, #autoWolDialogText, #navGuideDialogText,
+#updateAppDialogText, #restoreDefaultsDialogText, #quitAppDialogText, #warningDialogText, #restartAppDialogText, #exitAppDialogText {
+    font: 500 28px/1.4 var(--ui-font);
+    letter-spacing: 0;
+}
+
+/* The fields of the dialog that adds a host */
+#ipAddressInputField {
+    display: block;
+    margin: 0;
+}
+
+.mdl-textfield {
+    width: 100%;
+    padding: 0;
+}
+
+.mdl-textfield--floating-label .mdl-textfield__label, .select-option-field-floating-label .mdl-textfield__label,
+.mdl-textfield--floating-label.is-focused .mdl-textfield__label, .mdl-textfield--floating-label.is-dirty .mdl-textfield__label,
+.mdl-textfield--floating-label.has-placeholder .mdl-textfield__label, .mdl-textfield--floating-label.is-invalid .mdl-textfield__label {
+    position: static;
+    display: block;
+    width: auto;
+    margin: 0 0 12px;
+    color: var(--ui-mute);
+    font: 600 24px/1.2 var(--ui-font);
+    letter-spacing: 0;
+    visibility: visible;
+    pointer-events: none;
+}
+
+.mdl-textfield__label::after {
+    display: none;
+}
+
+.mdl-textfield__input, #ipAddressTextInput {
+    box-sizing: border-box;
+    width: 100%;
+    height: 64px;
+    padding: 0 20px;
+    border: 2px solid var(--ui-line);
+    border-radius: 16px;
+    background: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 28px/1 var(--ui-font);
+    letter-spacing: 0;
+    text-indent: 0;
+}
+
+.mdl-textfield__input.hovered, .mdl-textfield__input:hover, .mdl-textfield__input:focus {
+    border-color: var(--ui-moon);
+    box-shadow: none;
+    outline: none;
+}
+
+.mdl-textfield.is-invalid .mdl-textfield__input:hover, .mdl-textfield.is-invalid .mdl-textfield__input:focus {
+    border-color: var(--ui-bad);
+    box-shadow: none;
+}
+
+#ipAddressTextInput::placeholder {
+    color: var(--ui-mute);
+}
+
+#ipAddressSelectFields {
+    display: none;
+    margin: 0;
+}
+
+.select-option-field {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 0;
+}
+
+.select-option-field > .mdl-textfield__label {
+    flex: 0 0 100%;
+}
+
+.ip-address-select-field, .ip-address-select-field.hovered, #ipAddressField1, #ipAddressField2, #ipAddressField3, #ipAddressField4 {
+    width: 132px;
+    height: 64px;
+    margin: 0 !important;
+    border: 2px solid var(--ui-line);
+    border-radius: 16px;
+    background-color: var(--ui-bg);
+    color: var(--ui-text);
+    font: 600 28px/1 var(--ui-font);
+    letter-spacing: 0;
+    text-indent: 10px;
+    cursor: pointer;
+}
+
+/* The mark of the number that is selected. The four numbers are also named by id above, and an id outweighs a class, so they are named
+   here too: without that the border of the selected number kept the color of the others and nothing showed which one it was */
+.ip-address-select-field.hovered, .ip-address-select-field:hover,
+#ipAddressField1.hovered, #ipAddressField2.hovered, #ipAddressField3.hovered, #ipAddressField4.hovered {
+    border-color: var(--ui-moon);
+    background-color: var(--ui-surface-raised);
+    outline: 6px solid var(--ui-ring);
+    box-shadow: none;
+}
+
+#supportQrCode {
+    display: block;
+    width: 320px;
+    height: 320px;
+    margin: 12px 0 0;
+    border-radius: 20px;
+    box-shadow: none;
+}
+
+/* The guide to the controls: three colors tell the remote, the keyboard and the pad apart */
+#navGuideDialogText {
+    margin: 20px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.navGuideContainer {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 28px 4px 0;
+    font: 600 24px/1.2 var(--ui-font);
+}
+
+.navGuideLabel {
+    width: 20px;
+    height: 20px;
+    margin-right: 12px;
+    border-radius: 50%;
+    box-shadow: none;
+}
+
+.navGuideRemoteColor {
+    background-color: var(--ui-moon);
+}
+
+.navGuideKeyboardColor {
+    background-color: var(--ui-bad);
+}
+
+.navGuideGamepadColor {
+    background-color: var(--ui-ok);
+}
+
+.navGuideLabelText {
+    color: var(--ui-text);
+    font: 700 24px/1.2 var(--ui-font);
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.navGuideDialogControls {
+    padding: 8px 0;
+    font: 500 24px/1.4 var(--ui-font);
+    letter-spacing: 0;
+}
+
+.navGuideRemoteText, .navGuideKeyboardText, .navGuideGamepadText {
+    font: 700 24px/1.4 var(--ui-font);
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.navGuideRemoteText {
+    color: var(--ui-moon);
+}
+
+.navGuideKeyboardText {
+    color: var(--ui-bad);
+}
+
+.navGuideGamepadText {
+    color: var(--ui-ok);
+}
+
+/* The switch of the dialog that wakes a PC: the sentence on the left, the toggle on the right */
+#autoWolCheckboxContainer {
+    width: 100%;
+    margin: 28px 0 0;
+}
+
+#autoWolCheckboxContainer .mdl-switch {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 56px;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+#autoWolCheckboxContainer .mdl-switch__label {
+    left: 0;
+    margin: 0;
+    padding: 0;
+    color: var(--ui-text);
+    font: 600 26px/1.2 var(--ui-font);
+    letter-spacing: 0;
+}
+
+#autoWolCheckboxContainer .mdl-switch__track {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: auto;
+    width: 96px;
+    height: 56px;
+    margin: 0;
+    border-radius: 28px;
+    background: var(--ui-line);
+    transition: background-color 0.2s var(--ui-ease);
+}
+
+#autoWolCheckboxContainer .mdl-switch__thumb {
+    position: absolute;
+    top: 6px;
+    left: calc(100% - 90px);
+    right: auto;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    border-radius: 50%;
+    background: var(--ui-text);
+    box-shadow: none;
+    transition: transform 0.2s var(--ui-ease), background-color 0.2s var(--ui-ease);
+}
+
+#autoWolCheckboxContainer .mdl-switch.is-checked .mdl-switch__track {
+    background: var(--ui-moon);
+    box-shadow: none;
+}
+
+#autoWolCheckboxContainer .mdl-switch.is-checked .mdl-switch__thumb {
+    left: calc(100% - 90px);
+    transform: translateX(40px);
+    background: var(--ui-ink);
+}
+
+#autoWolCheckboxContainer .mdl-switch.hovered, #autoWolCheckboxContainer .mdl-switch.is-focused {
+    background: none;
+    box-shadow: none;
+}
+
+#autoWolCheckboxContainer .mdl-switch__focus-helper, #autoWolCheckboxContainer .mdl-switch__ripple-container {
+    display: none;
+}
+
+/* The loading screen: the logo, the bar and a message */
+#wasmSpinnerMessage, #loadingSpinnerMessage {
+    margin: 36px;
+    color: var(--ui-text);
+    font: 600 32px/1.3 var(--ui-font);
+    letter-spacing: 0;
+    text-align: center;
+}
+
+.mdl-progress {
+    border-radius: 8px;
+    background: var(--ui-line);
+}
+
+.mdl-progress > .progressbar, .mdl-progress > .bufferbar, .mdl-progress > .auxbar {
+    border-radius: 8px;
+}
+
+.mdl-progress > .progressbar, .mdl-progress.mdl-progress__indeterminate > .bar1, .mdl-progress.mdl-progress__indeterminate > .bar3 {
+    background-color: var(--ui-moon);
+}
+
+/* MDL draws the buffer of a bar with a pale gradient and a mask of dots: a loading bar has no buffer */
+.mdl-progress > .bufferbar {
+    display: none;
+}
+
+.mdl-progress > .auxbar {
+    background-image: none !important;
+    -webkit-mask: none !important;
+    mask: none !important;
+}
+
+/* The message at the foot of the screen, and the tooltip of the update button */
+.mdl-snackbar {
+    min-width: 0;
+    max-width: 1200px;
+    border: 2px solid var(--ui-line);
+    border-bottom: 0;
+    border-radius: 28px 28px 0 0;
+    background: var(--ui-surface-raised);
+    box-shadow: none;
+}
+
+.mdl-snackbar__text {
+    padding: 24px 40px;
+    color: var(--ui-text);
+    font: 600 28px/1.3 var(--ui-font);
+    letter-spacing: 0;
+    text-align: center;
+}
+
+.mdl-tooltip {
+    top: 144px !important;
+    max-width: 320px;
+    padding: 12px 20px;
+    border: 2px solid var(--ui-line);
+    border-radius: 16px;
+    background-color: var(--ui-surface-raised);
+    color: var(--ui-text);
+    box-shadow: none;
+    font: 600 24px/1.3 var(--ui-font);
+    letter-spacing: 0;
+}
+
+/* The button of a new update shows in the header, a little after the page */
+#updateAppBtn {
+    height: 64px;
+    padding: 0 28px;
+    border-color: var(--ui-warn);
+    background: var(--ui-surface-raised);
+    color: var(--ui-warn);
+    opacity: 0;
+    transition: opacity 0.3s var(--ui-ease), transform 0.2s var(--ui-ease);
+}
+
+#updateAppBtn.is-shown {
+    opacity: 1;
+}
+
+#updateAppBtn .material-icons {
+    margin: 0;
+    font-size: 32px;
+}
+
+#updateAppBtnText {
+    font: 600 26px/1 var(--ui-font);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* =============================
+   The page: the loading screen in the middle, and the stream with its two overlays
+============================= */
+#listener {
+    height: 0;
+    margin-top: 0;
+    overflow: hidden;
+}
+
+#wasmSpinner, #loadingSpinner {
+    position: fixed;
+    bottom: 50%;
+    left: 50%;
+    display: none;
+    width: 35%;
+    height: 10px;
+    margin: 0 auto;
+    transform: translate(-50%, -50%);
+}
+
+#wasmSpinner {
+    z-index: 2;
+}
+
+#loadingSpinner {
+    z-index: 1;
+}
+
+/* The moon above the bar: the spinner is a positioned box, so the moon is placed by it */
+#wasmSpinnerLogo {
+    position: absolute;
+    bottom: 56px;
+    left: 50%;
+    width: 160px;
+    height: 160px;
+    margin-left: -80px;
+    fill: var(--ui-moon);
+    animation: fadeInOut 3s infinite;
+}
+
+@keyframes fadeInOut {
+    0%, 100% {
+        transform: scale(0.8);
+    }
+    50% {
+        transform: scale(1);
+    }
+}
+
+#snackButton {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+.hide-container {
+    display: none !important;
+}
+
+.fullscreen {
+    position: relative !important;
+    height: 100vh !important;
+    z-index: 1 !important;
+    margin: auto !important;
+    padding: 0 !important;
+    border: none !important;
+    overflow: hidden !important;
+}
+
+#connection-warnings, #performance-stats {
+    position: absolute;
+    top: 10px;
+    z-index: 3;
+    padding: 8px;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ui-text);
+    line-height: 1.2;
+    white-space: pre-wrap;
+}
+
+#connection-warnings {
+    right: 10px;
+    font-size: 1.85rem;
+    font-weight: 600;
+}
+
+#performance-stats {
+    left: 10px;
+    font-size: 1.65rem;
+    font-weight: 500;
+}
+
+/* The switch of the dialog that wakes a PC has no highlight of its own besides this */
+#autoWolCheckboxContainer .mdl-switch.hovered .mdl-switch__track {
+    outline: 6px solid var(--ui-ring);
+}
+
+/* =============================
+   The volume bar of Moonlight, over the stream. The system draws its own bar over the stream when it handles the volume keys, so
+   while streaming the application takes them and shows this one. It changes opacity and the scale of its fill only: no blur,
+   no shadow, nothing that the picture under it would have to be mixed with again and again.
+============================= */
+.ui-volume {
+    position: fixed;
+    bottom: 72px;
+    left: 50%;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 16px 32px;
+    border: 2px solid var(--ui-line);
+    border-radius: 40px;
+    background: var(--ui-surface-raised);
+    color: var(--ui-text);
+    transform: translateX(-50%);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s var(--ui-ease), visibility 0s linear 0.2s;
+}
+
+.ui-volume.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.2s var(--ui-ease);
+}
+
+.ui-volume__track {
+    width: 420px;
+    height: 12px;
+    border-radius: 6px;
+    background: var(--ui-line);
+    overflow: hidden;
+}
+
+.ui-volume__fill {
+    width: 100%;
+    height: 100%;
+    background: var(--ui-moon);
+    transform: scaleX(0);
+    transform-origin: left;
+}
+
+.ui-volume__value {
+    min-width: 64px;
+    font: 700 32px/1 var(--ui-font);
+    text-align: right;
+}
+
+.ui-volume.is-muted .ui-volume__fill {
+    background: var(--ui-mute);
+}
+
+#volume-bar-cross {
+    display: none;
+}
+
+.ui-volume.is-muted #volume-bar-cross {
+    display: inline;
+}
+
+.ui-volume.is-muted #volume-bar-waves {
+    display: none;
+}
+
+/* =============================
+   The stream menu. It opens over the stream (Select held on the pad, or the green key) and takes the controls until it closes.
+   The panel is opaque, so that the video does not mix with it. Opening changes opacity and a transform only.
+============================= */
+.ui-streammenu {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 6;
+    background: rgba(1, 3, 9, 0.62);
+    color: var(--ui-text);
+    font-family: var(--ui-font);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s var(--ui-ease), visibility 0s linear 0.2s;
+}
+
+.ui-streammenu.is-open {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.2s var(--ui-ease);
+}
+
+/* The overlay of the statistics is in the upper left corner, so the state of the stream waits above the hints */
+.ui-streammenu__stats {
+    position: absolute;
+    bottom: 128px;
+    left: 96px;
+    padding: 20px 28px;
+    border-radius: 22px;
+    border: 2px solid var(--ui-line);
+    background: var(--ui-scrim);
+}
+
+.ui-streammenu__statstitle {
+    font: 600 24px/1 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+.ui-streammenu__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.ui-streammenu__chip {
+    display: inline-flex;
+    align-items: center;
+    height: 40px;
+    padding: 0 16px;
+    border-radius: 12px;
+    background: var(--ui-surface-raised);
+    font: 600 22px/1 var(--ui-font);
+}
+
+.ui-streammenu__hints {
+    position: absolute;
+    bottom: 56px;
+    left: 96px;
+    color: var(--ui-text);
+}
+
+.ui-streammenu__panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    width: 680px;
+    padding: 64px 48px 56px;
+    box-sizing: border-box;
+    border-left: 2px solid var(--ui-line);
+    background: var(--ui-panel);
+    transform: translateX(48px);
+    transition: transform 0.24s var(--ui-ease);
+}
+
+.ui-streammenu.is-open .ui-streammenu__panel {
+    transform: none;
+}
+
+.ui-streammenu__head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font: 700 48px/1 var(--ui-font-display);
+    letter-spacing: -0.01em;
+}
+
+.ui-streammenu__sub {
+    margin: 12px 0 0 50px;
+    font: 500 24px/1.2 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+.ui-streammenu__list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 36px;
+}
+
+.ui-streammenu__list--end {
+    margin-top: auto;
+    padding-top: 24px;
+    border-top: 2px solid var(--ui-line);
+}
+
+.ui-streammenu__item {
+    --ui-r: 22px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    width: 100%;
+    min-height: 84px;
+    margin: 0;
+    padding: 12px 24px;
+    box-sizing: border-box;
+    border-radius: var(--ui-r);
+    border: 2px solid transparent;
+    background: transparent;
+    color: var(--ui-text);
+    font: 600 28px/1.15 var(--ui-font);
+    text-align: left;
+    cursor: pointer;
+}
+
+.ui-streammenu__item:hover, .ui-streammenu__item:focus, .ui-streammenu__item.hovered {
+    background: var(--ui-surface-raised);
+    border-color: var(--ui-moon);
+    outline: none;
+}
+
+.ui-streammenu__item.is-disabled {
+    opacity: 0.45;
+}
+
+.ui-streammenu__item--danger {
+    color: var(--ui-bad);
+}
+
+.ui-streammenu__icon {
+    flex: none;
+}
+
+.ui-streammenu__label {
+    flex: 1;
+    min-width: 0;
+}
+
+.ui-streammenu__title, .ui-streammenu__note {
+    display: block;
+}
+
+.ui-streammenu__note:empty {
+    display: none;
+}
+
+.ui-streammenu__note {
+    margin-top: 4px;
+    font: 500 22px/1.2 var(--ui-font);
+    color: var(--ui-mute);
+}
+
+.ui-streammenu__key {
+    color: var(--ui-mute);
+}
+
+.ui-streammenu__cells {
+    display: flex;
+    gap: 4px;
+}
+
+.ui-streammenu__cell {
+    width: 12px;
+    height: 30px;
+    border-radius: 5px;
+    background: var(--ui-line);
+}
+
+.ui-streammenu__cell.is-on {
+    background: var(--ui-moon);
+}
+
+.ui-streammenu__percent {
+    min-width: 64px;
+    text-align: right;
+}
+
+.ui-streammenu__state {
+    font: 600 24px/1 var(--ui-font);
+}
+
+.ui-streammenu__toggle {
+    position: relative;
+    flex: none;
+    width: 84px;
+    height: 48px;
+    border-radius: 24px;
+    background: var(--ui-line);
+    transition: background-color 0.2s var(--ui-ease);
+}
+
+.ui-streammenu__toggle::after {
+    content: "";
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--ui-text);
+    transition: transform 0.2s var(--ui-ease), background-color 0.2s var(--ui-ease);
+}
+
+.ui-streammenu__toggle.is-on {
+    background: var(--ui-moon);
+}
+
+.ui-streammenu__toggle.is-on::after {
+    transform: translateX(36px);
+    background: var(--ui-ink);
+}

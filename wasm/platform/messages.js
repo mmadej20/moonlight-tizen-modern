@@ -268,14 +268,20 @@ function handleMessage(msg) {
   console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Message data: ', msg);
   // If it's a recognized event, notify the appropriate function
   if (msg.indexOf('streamTerminated: ') === 0) {
+    // A menu that is open goes first: it gives the controls back and leaves the views as they were before the stream
+    StreamMenu.close();
     // Release the audio scheduler of the Web Audio backend, which is a no-op for the EMSS backend
     stopAudioScheduler();
+    // The stream is over: the volume keys go back to the system, and the watch of the main thread stops
+    VolumeControl.stop();
+    LagWatch.stop();
+    hideVolumeBar();
     // Remove the on-screen overlays
     $('#connection-warnings, #performance-stats').css('display', 'none');
     // Remove the video stream now
     $('#listener').removeClass('fullscreen');
     $('#loadingSpinner').css('display', 'none');
-    $('body').css('backgroundColor', '#282C38');
+    $('body').css('background', '');
     $('#wasm_module').css('display', 'none');
     // Show a termination snackbar message if the termination was unexpected
     var errorCode = parseInt(msg.replace('streamTerminated: ', ''));
@@ -324,7 +330,7 @@ function handleMessage(msg) {
     }
     // Prepare the screen for video stream
     $('#loadingSpinner').css('display', 'none');
-    $('body').css('backgroundColor', 'transparent');
+    $('body').css('background', 'transparent');
     $('#wasm_module').css('display', '');
     $('#wasm_module').focus();
   } else if (msg.indexOf('ProgressMsg: ') === 0) {
@@ -336,6 +342,14 @@ function handleMessage(msg) {
   } else if (msg.indexOf('DialogMsg: ') === 0) {
     // Show dialog message using the warning dialog
     warningDialog(t('Connection Error'), translateBackendMessage(msg.replace('DialogMsg: ', '')));
+  } else if (msg === 'streamMenuOpen') {
+    // The pad held Select for a second: the native side has taken the input already, the menu takes the controls
+    if (isInGame === true) {
+      StreamMenu.open();
+    } else if (typeof Module !== 'undefined') {
+      // Not in a stream (it ended meanwhile): the native side must not keep the input from anyone
+      Module.setInputCaptured(false);
+    }
   } else if (msg === 'displayVideo') {
     // Show the video stream now
     $('#listener').addClass('fullscreen');
@@ -357,6 +371,7 @@ function handleMessage(msg) {
     // Hide the performance statistics overlay
     $('#performance-stats').css('background', 'transparent');
     $('#performance-stats').text('');
+    StreamMenu.refresh();
   } else if (msg.indexOf('StatMsg: ') === 0) {
     // Toggle the performance stats switch and save the state
     if (!$('#performanceStatsSwitch').prop('checked')) {
@@ -367,6 +382,7 @@ function handleMessage(msg) {
     // Show the performance statistics overlay
     $('#performance-stats').css('background', 'rgba(0, 0, 0, 0.5)');
     $('#performance-stats').text(translateBackendMessage(msg.replace('StatMsg: ', '')));
+    StreamMenu.refresh();
   } else if (msg.indexOf('controllerRumble: ') === 0) {
     const eventData = msg.split(' ')[1].split(',');
     const gamepadIdx = parseInt(eventData[0]);
