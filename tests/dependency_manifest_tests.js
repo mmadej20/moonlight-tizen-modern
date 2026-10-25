@@ -107,8 +107,8 @@ assert(!dockerfile.includes('/wasm/static/js/jquery-4.0.0.min.js'));
 assert(dockerfile.includes('AS builder'));
 assert(dockerfile.includes('FROM scratch AS artifact'));
 assert(dockerfile.includes('COPY --from=builder /home/moonlight/Moonlight*.wgt /home/moonlight/'));
-assert(config.includes('version="1.0.0"'));
-assert.strictEqual(pkg.version, '1.0.0');
+assert(config.includes('version="1.0.1"'));
+assert.strictEqual(pkg.version, '1.0.1');
 assert.strictEqual(lock.version, pkg.version);
 
 // The application asks GitHub for the latest release of this repository. A release build gets the owner and the name from the workflow,

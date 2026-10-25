@@ -2,6 +2,14 @@
 
 All notable changes to Moonlight Tizen Modern are documented in this file. This project is a fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen): its version numbers start again at 1.0.0, and what happened before the fork is kept below under [Upstream changelog](#upstream-changelog).
 
+## v1.0.1
+
+### Fixed
+- The on-screen keyboard did not open for the text field of the Add Host dialog. Since upstream v1.18 the handler of the remote stops the native click that the TV sends after Enter, and that click is what opens the keyboard for a text field. Enter on a text field now keeps it, and every other element is handled as before
+
+### Added
+- The focus, click and blur of that text field are written to the diagnostic log, with whether the click was sent by the TV itself
+
 ## v1.0.0
 
 The first release of the fork. It is based on upstream v1.19.0 (plus the Embind fix that upstream accepted afterwards), and this is everything that differs from it.
