@@ -98,13 +98,7 @@ target_include_directories(h264bitstream PUBLIC
     h264bitstream)
 target_compile_features(h264bitstream PUBLIC c_std_99)
 
-# Opus decodes the audio of the stream, on a thread of its own. It was built with fixed-point arithmetic, which spends several integer
-# operations on what a float does in one, and decoding 5 ms of audio took 1.26 ms on the TV (a quarter of the time of the audio
-# thread). The float build is the default. -DMOONLIGHT_OPUS_FIXED_POINT=ON (docker build --build-arg OPUS_FIXED_POINT=ON) builds the
-# fixed-point one again, and every stream log says which of the two it came from.
-option(MOONLIGHT_OPUS_FIXED_POINT "Build Opus with fixed-point arithmetic instead of float" OFF)
-
-set(MOONLIGHT_OPUS_COMMON_SOURCES
+add_library(opus STATIC
     opus/celt/bands.c
     opus/celt/celt.c
     opus/celt/celt_decoder.c
@@ -200,20 +194,6 @@ set(MOONLIGHT_OPUS_COMMON_SOURCES
     opus/silk/tables_pulses_per_block.c
     opus/silk/VAD.c
     opus/silk/VQ_WMat_EC.c
-    opus/src/analysis.c
-    opus/src/mlp.c
-    opus/src/mlp_data.c
-    opus/src/opus.c
-    opus/src/opus_decoder.c
-    opus/src/opus_encoder.c
-    opus/src/opus_multistream.c
-    opus/src/opus_multistream_decoder.c
-    opus/src/opus_multistream_encoder.c
-    opus/src/repacketizer.c
-)
-
-# The part of the encoder of SILK that depends on the arithmetic (the application only decodes, but the library is built whole)
-set(MOONLIGHT_OPUS_FIXED_SOURCES
     opus/silk/fixed/apply_sine_window_FIX.c
     opus/silk/fixed/autocorr_FIX.c
     opus/silk/fixed/burg_modified_FIX.c
@@ -237,63 +217,28 @@ set(MOONLIGHT_OPUS_FIXED_SOURCES
     opus/silk/fixed/schur_FIX.c
     opus/silk/fixed/vector_ops_FIX.c
     opus/silk/fixed/warped_autocorrelation_FIX.c
+    opus/src/analysis.c
+    opus/src/mlp.c
+    opus/src/mlp_data.c
+    opus/src/opus.c
+    opus/src/opus_decoder.c
+    opus/src/opus_encoder.c
+    opus/src/opus_multistream.c
+    opus/src/opus_multistream_decoder.c
+    opus/src/opus_multistream_encoder.c
+    opus/src/repacketizer.c
 )
-
-set(MOONLIGHT_OPUS_FLOAT_SOURCES
-    opus/silk/float/LPC_analysis_filter_FLP.c
-    opus/silk/float/LPC_inv_pred_gain_FLP.c
-    opus/silk/float/LTP_analysis_filter_FLP.c
-    opus/silk/float/LTP_scale_ctrl_FLP.c
-    opus/silk/float/apply_sine_window_FLP.c
-    opus/silk/float/autocorrelation_FLP.c
-    opus/silk/float/burg_modified_FLP.c
-    opus/silk/float/bwexpander_FLP.c
-    opus/silk/float/corrMatrix_FLP.c
-    opus/silk/float/encode_frame_FLP.c
-    opus/silk/float/energy_FLP.c
-    opus/silk/float/find_LPC_FLP.c
-    opus/silk/float/find_LTP_FLP.c
-    opus/silk/float/find_pitch_lags_FLP.c
-    opus/silk/float/find_pred_coefs_FLP.c
-    opus/silk/float/inner_product_FLP.c
-    opus/silk/float/k2a_FLP.c
-    opus/silk/float/noise_shape_analysis_FLP.c
-    opus/silk/float/pitch_analysis_core_FLP.c
-    opus/silk/float/process_gains_FLP.c
-    opus/silk/float/regularize_correlations_FLP.c
-    opus/silk/float/residual_energy_FLP.c
-    opus/silk/float/scale_copy_vector_FLP.c
-    opus/silk/float/scale_vector_FLP.c
-    opus/silk/float/schur_FLP.c
-    opus/silk/float/sort_FLP.c
-    opus/silk/float/warped_autocorrelation_FLP.c
-    opus/silk/float/wrappers_FLP.c
-)
-
-if(MOONLIGHT_OPUS_FIXED_POINT)
-    set(MOONLIGHT_OPUS_SOURCES ${MOONLIGHT_OPUS_COMMON_SOURCES} ${MOONLIGHT_OPUS_FIXED_SOURCES})
-    set(MOONLIGHT_OPUS_ARITHMETIC_INCLUDE opus/silk/fixed)
-    set(MOONLIGHT_OPUS_ARITHMETIC_DEFINITIONS FIXED_POINT)
-    set(MOONLIGHT_OPUS_TEXT "fixed-point")
-else()
-    set(MOONLIGHT_OPUS_SOURCES ${MOONLIGHT_OPUS_COMMON_SOURCES} ${MOONLIGHT_OPUS_FLOAT_SOURCES})
-    set(MOONLIGHT_OPUS_ARITHMETIC_INCLUDE opus/silk/float)
-    set(MOONLIGHT_OPUS_ARITHMETIC_DEFINITIONS "")
-    set(MOONLIGHT_OPUS_TEXT "float")
-endif()
-
-add_library(opus STATIC ${MOONLIGHT_OPUS_SOURCES})
 target_include_directories(opus PUBLIC
     opus/include
     opus/src
     opus/silk
     opus/celt
-    ${MOONLIGHT_OPUS_ARITHMETIC_INCLUDE})
+    opus/silk/fixed)
 target_compile_definitions(opus PUBLIC
      USE_ALLOCA
      HAVE_LRINT
      HAVE_LRINTF
-     ${MOONLIGHT_OPUS_ARITHMETIC_DEFINITIONS}
+     FIXED_POINT
      OPUS_BUILD)
 
 add_executable(moonlight-wasm
@@ -329,7 +274,6 @@ set_target_properties(moonlight-wasm
 target_compile_features(moonlight-wasm PUBLIC cxx_std_17)
 # The level goes into the module, so that every stream log says which build it came from
 target_compile_definitions(moonlight-wasm PRIVATE MOONLIGHT_OPT_LEVEL_TEXT="${MOONLIGHT_OPT_LEVEL}")
-target_compile_definitions(moonlight-wasm PRIVATE MOONLIGHT_OPUS_TEXT="${MOONLIGHT_OPUS_TEXT}")
 set_target_properties(moonlight-wasm
     PROPERTIES
         LINK_FLAGS

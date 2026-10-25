@@ -29,9 +29,6 @@ extern char* g_UniqueId;
 #ifndef MOONLIGHT_OPT_LEVEL_TEXT
 #define MOONLIGHT_OPT_LEVEL_TEXT "unknown"
 #endif
-#ifndef MOONLIGHT_OPUS_TEXT
-#define MOONLIGHT_OPUS_TEXT "unknown"
-#endif
 
 // Requests the Wasm module to connect to the specified server
 #define MSG_START_REQUEST "startRequest"
@@ -417,7 +414,6 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   PostToJs("Setting the Performance statistics to: " + std::to_string(performanceStats));
   ClLogMessage("Experimental RFI recovery requested: %s\n", speculativeRfi ? "enabled" : "disabled");
   ClLogMessage("Build optimization: %s\n", MOONLIGHT_OPT_LEVEL_TEXT);
-  ClLogMessage("Opus decoder: %s\n", MOONLIGHT_OPUS_TEXT);
 
   // Populate the stream configuration
   LiInitializeStreamConfiguration(&m_StreamConfig);
