@@ -10,7 +10,7 @@ env:
 # Defines two jobs. The first builds and pushes the Docker images, while the second extracts the artifacts and creates a GitHub pre-release.
 jobs:
   build-and-push-image:
-    if: github.ref != 'refs/heads/master'
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
@@ -78,7 +78,7 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOWER }}:forcegm
           labels: ${{ steps.meta.outputs.labels }}
   run-and-upload-release:
-    if: github.ref != 'refs/heads/master'
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     needs: build-and-push-image
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
@@ -171,16 +171,16 @@ jobs:
           tag_name: v${{ env.TIMESTAMP }}-${{ env.BRANCH }}
           release_name: "v${{ env.TIMESTAMP }}-${{ env.BRANCH }}"
           body: |
-            # Moonlight Tizen v${{ env.TIMESTAMP }}
+            # Moonlight Tizen Modern v${{ env.TIMESTAMP }}
 
-            - Ensure your setup meets the necessary [requirements](https://github.com/brightcraft/moonlight-tizen#%EF%B8%8F-prerequisites) for the best possible streaming experience.
-            - Choose one of the available [installation methods](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide) and follow the instructions to install the application on your TV.
+            - Ensure your setup meets the necessary [requirements](https://github.com/mmadej20/moonlight-tizen-modern#%EF%B8%8F-prerequisites) for the best possible streaming experience.
+            - Follow the [installation instructions](https://github.com/mmadej20/moonlight-tizen-modern#-installation) to install the application on your TV.
 
             ## What's Changed:
 
             - No release notes have been provided for this pre-release yet.
 
-            **Full Changelog**: https://github.com/brightcraft/moonlight-tizen/compare/vX.X.X...vX.X.X
+            **Full Changelog**: https://github.com/mmadej20/moonlight-tizen-modern/compare/vX.X.X...vX.X.X
 
             > [!WARNING]
             > This is a pre-release build intended for development and testing only.

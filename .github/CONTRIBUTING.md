@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to the Moonlight project! Whether you're opening an issue or proposing a pull request, your help is greatly appreciated.
+Thanks for contributing to Moonlight Tizen Modern! This repository is a fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen). Whether you're opening an issue or proposing a pull request, your help is greatly appreciated. A fix that is not specific to this fork is better sent to the upstream project as well.
 
 ## General Guidelines
 
@@ -24,8 +24,8 @@ Please provide as much information as possible. The templates will guide you thr
 
 Before making changes, consider the following:
 
-- For larger features, significant refactors, or behavior changes, **open an issue or discussion first** to review the proposed approach.
-- Check existing issues, discussions, and pull requests to avoid duplicating ongoing work.
+- For larger features, significant refactors, or behavior changes, **open an issue first** to review the proposed approach.
+- Check existing issues and pull requests to avoid duplicating ongoing work.
 - Make sure you understand the purpose of the change and how it fits with the project's current direction.
 - Keep changes focused and avoid introducing unrelated improvements in the same contribution.
 
@@ -35,7 +35,8 @@ This helps make reviews easier and ensures contributions align with the project'
 
 Before opening a pull request, make sure you can build and test your changes successfully:
 
-- Please follow the [development guide](https://github.com/brightcraft/moonlight-tizen/wiki/Development-Guide) available in the Wiki. This guide explains how to properly build Moonlight locally and run it on your device.
+- Build the package with Docker, since the WASM module compiles only there (see [Contributing](../README.md#%EF%B8%8F-contributing) in the README for the commands). The [development guide](https://github.com/brightcraft/moonlight-tizen/wiki/Development-Guide) of the upstream project explains how to run a build on your device, but it is not fully up to date with this fork.
+- Run the tests before you open a pull request: `npm run test:js` must pass, and `tools/run-native-tests.sh` (Linux or WSL) when you touch C or C++ code. Files are checked out with CRLF on Windows, so a test must accept both `\n` and `\r\n`.
 - **Test your changes** on the target Tizen device whenever possible to ensure they work correctly in the real environment.
 - When making changes to platform-specific functionality, ensure that your changes do not introduce **regressions or affect existing Tizen behavior**.
 
@@ -110,6 +111,8 @@ This repository includes several third-party dependencies required for applicati
   - `moonlight-common-c/.gitmodules`
   - `moonlight-common-c/src/Platform.h`
   - `moonlight-common-c/src/PlatformSockets.c`
+
+  This fork also carries changes of its own in `moonlight-common-c/src`: the gate of the speculative RFI (`RtpVideoQueue.c`, `RtpVideoQueuePolicy.h`), and the diagnostics of the audio and the video stream (`AudioStream.c`, `AudioTransportDiagnostics.h`, `RtpAudioQueue.c`, `VideoStream.c`, `VideoReceiveDiagnostics.h`, `VideoDepacketizer.c`). They are covered by tests; keep them small, and run `tools/run-native-tests.sh` after touching them.
 
 - `enet` (submodule of `moonlight-common-c`) — updates should generally come from the official [upstream repository](https://github.com/cgutman/enet). The same update policy and Tizen-specific exceptions described for `moonlight-common-c` also apply here.
 

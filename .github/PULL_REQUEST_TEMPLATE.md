@@ -53,6 +53,7 @@ Provide your test environment and describe how you tested your changes. If appli
 - [ ] I have tested my changes locally on my device
 - [ ] I have checked for potential regressions or unexpected behavior
 - [ ] The project builds successfully without warnings or errors
+- [ ] `npm run test:js` passes (and `tools/run-native-tests.sh` when C or C++ code changed)
 - [ ] This PR focuses on a single feature or fix without unrelated changes
 
 ---

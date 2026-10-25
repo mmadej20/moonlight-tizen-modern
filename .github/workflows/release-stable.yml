@@ -1,6 +1,6 @@
 # This workflow builds a Docker image from the repository, pushes it to GitHub Container Registry, and then triggers a second job to extract an artifact and create a GitHub release.
 name: Release (Stable)
-# Configure this workflow to be triggered manually from the GitHub Actions tab for the `master` branch.
+# Configure this workflow to be triggered manually from the GitHub Actions tab for the `main` branch.
 on:
   workflow_dispatch:
 # Defines two custom environment variables for the workflow. These are used for the Container registry domain, and a name for the Docker image that this workflow builds.
@@ -10,7 +10,7 @@ env:
 # Defines two jobs. The first builds and pushes the Docker images, while the second extracts the artifacts and creates a GitHub release.
 jobs:
   build-and-push-image:
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
@@ -76,7 +76,7 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOWER }}:forcegm
           labels: ${{ steps.meta.outputs.labels }}
   run-and-upload-release:
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     needs: build-and-push-image
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
@@ -130,22 +130,16 @@ jobs:
           tag_name: v${{ env.VERSION }}
           release_name: v${{ env.VERSION }}
           body: |
-            # Moonlight Tizen v${{ env.VERSION }}
+            # Moonlight Tizen Modern v${{ env.VERSION }}
 
-            - Ensure your setup meets the necessary [requirements](https://github.com/brightcraft/moonlight-tizen#%EF%B8%8F-prerequisites) for the best possible streaming experience.
-            - Choose one of the available [installation methods](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide) and follow the instructions to install the application on your TV.
+            - Ensure your setup meets the necessary [requirements](https://github.com/mmadej20/moonlight-tizen-modern#%EF%B8%8F-prerequisites) for the best possible streaming experience.
+            - Follow the [installation instructions](https://github.com/mmadej20/moonlight-tizen-modern#-installation) to install the application on your TV.
 
             ## What's Changed:
 
             - No release notes have been provided for this release yet.
 
-            **Full Changelog**: https://github.com/brightcraft/moonlight-tizen/compare/vX.X.X...vX.X.X
-
-            ## Support the Project:
-
-            If you find this project useful and would like to support its continued development, including new features, bug fixes, maintenance, and ongoing improvements, consider becoming a supporter. For more information on how you can help, please visit [this page](https://www.patreon.com/posts/how-to-support-151822385).
-
-            [![Patreon](https://img.shields.io/badge/Support_me_on_Patreon-F96854?style=for-the-badge&logo=patreon&logoColor=white)](https://www.patreon.com/cw/BrightCraft/membership)
+            **Full Changelog**: https://github.com/mmadej20/moonlight-tizen-modern/compare/vX.X.X...vX.X.X
           draft: false
           prerelease: false
       # Uploads the Moonlight.wgt file as a release asset in the newly created GitHub release.

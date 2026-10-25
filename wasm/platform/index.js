@@ -1961,8 +1961,8 @@ function navigationGuideDialog() {
 // Fetch the latest version and release notes from GitHub API
 function fetchLatestRelease() {
   // Check if the REPO_OWNER and REPO_NAME are set to placeholders and apply fallback values
-  const repoOwner = (REPO_OWNER === '__REPO_OWNER__') ? 'brightcraft' : REPO_OWNER;
-  const repoName = (REPO_NAME === '__REPO_NAME__') ? 'moonlight-tizen' : REPO_NAME;
+  const repoOwner = (REPO_OWNER === '__REPO_OWNER__') ? 'mmadej20' : REPO_OWNER;
+  const repoName = (REPO_NAME === '__REPO_NAME__') ? 'moonlight-tizen-modern' : REPO_NAME;
 
   // GitHub API endpoint to get the latest released version
   const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;

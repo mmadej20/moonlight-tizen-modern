@@ -1,5 +1,7 @@
 # Moonlight port for Samsung Smart TVs running Tizen OS
 
+> This file comes from the original Samsung port and is kept for the history of the project. Moonlight Tizen Modern is built with Docker: see the [README](README.md) for the build and the tests. The steps below describe the first manual build and do not use the settings of this fork.
+
 This is a fork of the `Moonlight Chrome` project adapted to run on Samsung Tizen TVs.
 Changes made:
 
