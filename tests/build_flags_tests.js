@@ -38,12 +38,12 @@ const configure = docker.slice(docker.indexOf('RUN cmake'), docker.indexOf('cmak
 assert(/-DMOONLIGHT_OPT_LEVEL=\$\{OPT_LEVEL\}/.test(configure), 'the configure step receives the level');
 assert(docker.indexOf('ARG OPT_LEVEL=-O2') < docker.indexOf('RUN cmake'), 'the argument is declared before it is used');
 
-// Opus decodes the audio with fixed-point arithmetic by default (5 ms of audio in 1.26 ms on the TV; a float build was tried and was not
-// faster there, 2026-10-22). It is one option that picks the part of SILK that depends on the arithmetic, the include directory and the
-// FIXED_POINT definition together, so the two can never be mixed, and the stream log says which one decoded the audio.
+// Opus decodes the audio with float arithmetic by default (fixed-point decoded 5 ms of audio in 1.26 ms on the TV). It is one option that
+// picks the part of SILK that depends on the arithmetic, the include directory and the FIXED_POINT definition together, so the two can never
+// be mixed, and the stream log says which one decoded the audio.
 {
   const code = cmake.replace(/#.*$/gm, '');
-  assert(/option\(MOONLIGHT_OPUS_FIXED_POINT "[^"]+" ON\)/.test(code), 'the fixed-point build is the default');
+  assert(/option\(MOONLIGHT_OPUS_FIXED_POINT "[^"]+" OFF\)/.test(code), 'the float build is the default');
   const list = (name) => {
     const match = new RegExp('set\\(' + name + '\\n([^)]*)\\)').exec(code);
     assert(match, 'missing list ' + name);
@@ -69,8 +69,8 @@ assert(docker.indexOf('ARG OPT_LEVEL=-O2') < docker.indexOf('RUN cmake'), 'the a
   assert(/target_compile_definitions\(moonlight-wasm PRIVATE MOONLIGHT_OPUS_TEXT="\$\{MOONLIGHT_OPUS_TEXT\}"\)/.test(code), 'the log gets the name');
   assert(/#ifndef MOONLIGHT_OPUS_TEXT/.test(main));
   assert(/ClLogMessage\("Opus decoder: %s\\n", MOONLIGHT_OPUS_TEXT\);/.test(main), 'every stream log names the decoder');
-  assert(/ARG OPUS_FIXED_POINT=ON/.test(docker) && /-DMOONLIGHT_OPUS_FIXED_POINT=\$\{OPUS_FIXED_POINT\}/.test(configure), 'the Docker build passes the choice through');
-  assert(docker.indexOf('ARG OPUS_FIXED_POINT=ON') < docker.indexOf('RUN cmake'));
+  assert(/ARG OPUS_FIXED_POINT=OFF/.test(docker) && /-DMOONLIGHT_OPUS_FIXED_POINT=\$\{OPUS_FIXED_POINT\}/.test(configure), 'the Docker build passes the choice through');
+  assert(docker.indexOf('ARG OPUS_FIXED_POINT=OFF') < docker.indexOf('RUN cmake'));
 }
 
 console.log('build flags tests passed');

@@ -98,13 +98,11 @@ target_include_directories(h264bitstream PUBLIC
     h264bitstream)
 target_compile_features(h264bitstream PUBLIC c_std_99)
 
-# Opus decodes the audio of the stream, on a thread of its own, and decoding 5 ms of audio takes 1.26 ms on the TV (a quarter of the time
-# of the audio thread). The decoder is built with fixed-point arithmetic, which spends several integer operations on what a float does
-# in one, so a float build was tried (2026-10-22). It did not help on the TV: decodeAvgUs was 1515 us against 1257 us (the sessions
-# differed in other settings, so the comparison is not clean), and fixed-point is the default again until a test under the same
-# conditions says otherwise. -DMOONLIGHT_OPUS_FIXED_POINT=OFF (docker build --build-arg OPUS_FIXED_POINT=OFF) builds the float
-# decoder, and every stream log says which of the two it came from.
-option(MOONLIGHT_OPUS_FIXED_POINT "Build Opus with fixed-point arithmetic instead of float" ON)
+# Opus decodes the audio of the stream, on a thread of its own. It was built with fixed-point arithmetic, which spends several integer
+# operations on what a float does in one, and decoding 5 ms of audio took 1.26 ms on the TV (a quarter of the time of the audio
+# thread). The float build is the default. -DMOONLIGHT_OPUS_FIXED_POINT=ON (docker build --build-arg OPUS_FIXED_POINT=ON) builds the
+# fixed-point one again, and every stream log says which of the two it came from.
+option(MOONLIGHT_OPUS_FIXED_POINT "Build Opus with fixed-point arithmetic instead of float" OFF)
 
 set(MOONLIGHT_OPUS_COMMON_SOURCES
     opus/celt/bands.c
