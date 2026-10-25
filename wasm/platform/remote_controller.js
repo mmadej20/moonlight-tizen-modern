@@ -1,3 +1,9 @@
+// The TV follows the Enter key with a native click. For a text field that click is what opens the on-screen keyboard, and a click
+// that a script makes does not, so a text field keeps it.
+function opensKeyboardOnClick(element) {
+  return !!element && element.tagName === 'INPUT' && /^(text|search|tel|url|email|password|number)$/i.test(element.type || 'text');
+}
+
 function remoteControllerHandler(e) {
   isGamepadActive = false;
   const keyCode = e.keyCode;
@@ -21,7 +27,10 @@ function remoteControllerHandler(e) {
       break;
     case tvKey.KEY_ENTER:
     case tvKey.KEY_REMOTE_ENTER:
-      e.preventDefault(); // Prevent native asynchronous click
+      // Stop the native asynchronous click: the interface clicks by itself, and a second click would press a button twice
+      if (!opensKeyboardOnClick(typeof document !== 'undefined' ? document.activeElement : null)) {
+        e.preventDefault();
+      }
       // Select the current item
       Navigation.accept();
       break;

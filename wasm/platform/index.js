@@ -113,6 +113,12 @@ function attachListeners() {
   $('#framePacingSwitch').on('click', saveFramePacing);
   $('#ipAddressFieldModeSwitch').on('click', saveIpAddressFieldMode);
   $('#ipAddressTextInput').on('input', updateIpAddressInputValidationState);
+  // What the TV does with this text field goes to the log: the keyboard did not open for it on one TV, and a click that the TV sent
+  // itself shows as trusted=true
+  $('#ipAddressTextInput').on('focus click blur', function(event) {
+    const nativeEvent = event.originalEvent || event;
+    logDiagnostic('Add Host text field: ' + event.type + ' trusted=' + nativeEvent.isTrusted + ' readOnly=' + this.readOnly);
+  });
   $('#sortAppsListSwitch').on('click', saveSortAppsList);
   $('#optimizeGamesSwitch').on('click', saveOptimizeGames);
   $('#removeAllHostsBtn').on('click', deleteAllHostsDialog);

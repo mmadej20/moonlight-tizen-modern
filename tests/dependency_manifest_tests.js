@@ -36,6 +36,7 @@ const expectedJavaScriptSuites = [
   'tests/pairing_cancellation_behavior_tests.js',
   'tests/pairing_ownership_wiring_tests.js',
   'tests/pairing_timeout_behavior_tests.js',
+  'tests/remote_controller_tests.js',
   'tests/rumble_throttle_tests.js',
   'tests/rumble_wiring_tests.js',
   'tests/settings_screen_tests.js',
