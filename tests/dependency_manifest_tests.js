@@ -109,4 +109,13 @@ assert(dockerfile.includes('COPY --from=builder /home/moonlight/Moonlight*.wgt /
 assert(config.includes('version="1.0.0"'));
 assert.strictEqual(pkg.version, '1.0.0');
 assert.strictEqual(lock.version, pkg.version);
+
+// The application asks GitHub for the latest release of this repository. A release build gets the owner and the name from the workflow,
+// and a build without them (a local Docker build) falls back to the same repository, never to upstream, so it cannot offer the
+// release of upstream as an update.
+const appScript = fs.readFileSync('wasm/platform/index.js', 'utf8').replace(/\r\n/g, '\n');
+assert(/REPO_OWNER === '__REPO_OWNER__'\) \? 'mmadej20' : REPO_OWNER/.test(appScript), 'the owner falls back to this repository');
+assert(/REPO_NAME === '__REPO_NAME__'\) \? 'moonlight-tizen-modern' : REPO_NAME/.test(appScript), 'the name falls back to this repository');
+assert(!/brightcraft/i.test(appScript), 'the application does not name upstream');
+assert(/REPO_OWNER=\$\{\{ github\.repository_owner \}\}/.test(stableWorkflow) && /REPO_NAME=\$\{\{ github\.event\.repository\.name \}\}/.test(stableWorkflow), 'the release build injects this repository');
 console.log('dependency_manifest_tests: PASS');
