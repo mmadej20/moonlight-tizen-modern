@@ -59,4 +59,17 @@ assert.match(nativeMainSource, /decoderCapabilitiesWithOptionalRfi\(/);
 assert.match(nativeMainSource, /Experimental RFI recovery requested/);
 assert.match(nativeMainSource, /Decoder renderer capabilities/);
 
+// The repeat of a direction that is held runs in one loop. Every change of a stick used to set another timer without dropping the one
+// that waited, and each timer started a loop of its own that ran until the stick was let go.
+{
+  const source = fs.readFileSync('wasm/platform/index.js', 'utf8').replace(/\r\n/g, '\n');
+  const timers = source.match(/repeatTimeout = setTimeout\(([^,]+), REPEAT_DELAY\);/g) || [];
+  assert.strictEqual(timers.length, 2);
+  for (const timer of timers) assert.strictEqual(timer, 'repeatTimeout = setTimeout(startRepeatLoop, REPEAT_DELAY);');
+  assert.strictEqual((source.match(/clearTimeout\(repeatTimeout\);\s*repeatTimeout = setTimeout\(startRepeatLoop, REPEAT_DELAY\);/g) || []).length, 2,
+    'the timer that waits is dropped before the next one is set');
+  assert.match(source, /function startRepeatLoop\(\) \{\s*if \(isRepeatLoopRunning \|\| !repeatAction\) \{\s*return;\s*\}\s*isRepeatLoopRunning = true;\s*requestAnimationFrame\(repeatActionHandler\);/);
+  assert.match(source, /if \(repeatAction\) \{\s*requestAnimationFrame\(repeatActionHandler\);\s*\} else \{\s*isRepeatLoopRunning = false;\s*\}/);
+}
+
 console.log('ui_reliability_wiring_tests: PASS');

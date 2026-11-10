@@ -187,6 +187,7 @@ class MoonlightInstance {
   static void AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst);
   static void FormatVideoStats(VIDEO_STATS& stats, char* output, int length);
   void TogglePerformanceStats();
+  static void DeliverStatMessage(int messageAddress);
 
   static int AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int arFlags);
   static void AudDecCleanup(void);

@@ -32,16 +32,32 @@ assert(!/s_firstAppend/.test(player), 'no anchor that is set once and never move
 assert(/static PlayoutAnchor s_PlayoutAnchor\(/.test(player));
 
 // Every stream sizes the cap by its frame rate, and starts from a clean window
-assert(/s_PlayoutAnchor = PlayoutAnchor\(PlayoutMaxBufferUs\(static_cast<int64_t>\(std::llround\(1000000\.0 \/ static_cast<double>\(redrawRate\)\)\)\)\);/.test(setup));
+assert(/const int64_t frameIntervalUs = static_cast<int64_t>\(std::llround\(1000000\.0 \/ static_cast<double>\(redrawRate\)\)\);\s*s_PlayoutAnchor = PlayoutAnchor\(PlayoutMaxBufferUs\(frameIntervalUs\), frameIntervalUs\);\s*s_HasLastFrameTiming = false;/.test(setup),
+  'the estimator knows the pace of the stream, and the first frame of a stream follows no other');
 
 // The frame works on a copy of the estimator that is committed only when the frame was appended, like the rest of the pacing state
 assert(/PlayoutAnchor candidatePlayoutAnchor = s_PlayoutAnchor;/.test(submit));
-assert(/if \(!s_hasFirstFrame \|\| timestampUpdate\.resetPacing\) \{\s*candidatePlayoutAnchor\.Reset\(\);/.test(submit), 'a new timeline starts the window again');
-assert(/s_PlayoutAnchor = candidatePlayoutAnchor;/.test(submit.slice(submit.indexOf('AppendAndCommitPacingState'))), 'committed with the frame');
+assert(/const bool newTimeline = !s_hasFirstFrame \|\| timestampUpdate\.resetPacing;\s*if \(newTimeline\) \{\s*candidatePlayoutAnchor\.Reset\(\);/.test(submit), 'a new timeline starts the window again');
+assert(/s_PlayoutAnchor = candidatePlayoutAnchor;\s*s_LastFramePtsUs = packetPtsUs;\s*s_LastFrameArrivalUs = arrivalUs;\s*s_HasLastFrameTiming = true;/.test(submit.slice(submit.indexOf('AppendAndCommitPacingState'))),
+  'committed with the frame, together with what the next frame is measured against');
 
-// The offset is the arrival time minus the timestamp, and only a stream that paces pays for the estimate
-assert(/arrivalOffsetUs = std::chrono::duration_cast<std::chrono::microseconds>\(pacingStart\.time_since_epoch\(\)\)\.count\(\) - packetPtsUs;/.test(submit));
-assert(/if \(s_FramePacingEnabled\) \{\s*const int64_t anchorOffsetUs = candidatePlayoutAnchor\.Observe\(arrivalOffsetUs\);/.test(submit));
+// The offset is the arrival time minus the timestamp. The arrival is the time that the frame was put in the queue: the time that it
+// waited there behind a frame that the pacing held is taken off, or the pacing would count its own delay as lateness of the network
+// (in the TV log of 2026-10-22 one slow moment kept the frames 40 to 60 ms behind for 10 to 15 seconds)
+assert(/const int64_t queueDelayUs = callbackTimeMs >= decodeUnit->enqueueTimeMs\s*\? static_cast<int64_t>\(callbackTimeMs - decodeUnit->enqueueTimeMs\) \* 1000\s*: 0;/.test(submit));
+assert(/const int64_t arrivalUs = std::chrono::duration_cast<std::chrono::microseconds>\(assemblyStart\.time_since_epoch\(\)\)\.count\(\) - queueDelayUs;\s*const int64_t arrivalOffsetUs = arrivalUs - packetPtsUs;/.test(submit));
+assert(!/pacingStart\.time_since_epoch/.test(submit), 'the offset is not taken when the pacing starts');
+
+// Only a stream that paces pays for the estimate. A frame that follows another one is given with its gaps, so that repeated frames
+// and frames that waited behind a late one have no vote; the first frame of a timeline is given alone
+assert(/if \(s_FramePacingEnabled\) \{[^}]*?const int64_t anchorOffsetUs = newTimeline \|\| !s_HasLastFrameTiming\s*\? candidatePlayoutAnchor\.Observe\(arrivalOffsetUs\)\s*: candidatePlayoutAnchor\.Observe\(arrivalOffsetUs, packetPtsUs - s_LastFramePtsUs, arrivalUs - s_LastFrameArrivalUs\);/.test(submit));
+assert(/int64_t Observe\(int64_t offsetUs, int64_t ptsGapUs, int64_t arrivalGapUs\)/.test(timing));
+
+// The statistics of the overlay are handed to the page without waiting for it, and dropped when the overlay was switched off meanwhile
+assert(/if \(postStats\) \{[\s\S]*?char\* statCopy = strdup\(statMessage\.c_str\(\)\);\s*if \(statCopy != nullptr\) \{\s*emscripten_async_run_in_main_runtime_thread\(\s*EM_FUNC_SIG_VI, MoonlightInstance::DeliverStatMessage, reinterpret_cast<int>\(statCopy\)\);/.test(submit));
+assert(!/PostToJs\(statMessage\)/.test(submit), 'the thread that feeds the decoder does not wait for the page');
+assert(/void MoonlightInstance::DeliverStatMessage\(int messageAddress\) \{\s*char\* message = reinterpret_cast<char\*>\(messageAddress\);\s*if \(g_Instance && g_Instance->m_PerformanceStatsEnabled\.load\(\)\) \{\s*PostToJs\(std::string\(message\)\);\s*\}\s*free\(message\);/.test(player));
+assert(/static void DeliverStatMessage\(int messageAddress\);/.test(header));
 assert(/const auto targetTime = candidateFirstAppend\s*\+ std::chrono::duration_cast<std::chrono::steady_clock::duration>\(\s*std::chrono::duration<double>\(packetPtsSeconds\)\)\s*- std::chrono::duration_cast<std::chrono::steady_clock::duration>\(kFrameTimeMargin\);/.test(submit),
   'the time to show a frame is still the anchor plus its timestamp, a little early');
 assert(/candidateFirstAppend = std::chrono::steady_clock::time_point\(\s*std::chrono::duration_cast<std::chrono::steady_clock::duration>\(std::chrono::microseconds\(anchorOffsetUs\)\)\);/.test(submit));

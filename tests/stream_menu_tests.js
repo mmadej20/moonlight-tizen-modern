@@ -220,4 +220,39 @@ assert.deepStrictEqual(
   assert.strictEqual(bare.read(), null);
 }
 
+
+// The TV is asked for its volume when the menu opens, not for every look at the model: the view of the navigation reads the model at
+// every step through the menu, and every question to the TV is a call that the page waits for. A change reaches the menu from the
+// one who made it.
+{
+  let reads = 0;
+  const tv = { volume: 40, muted: false };
+  const menu = support.createMenu({
+    module: null,
+    volume: {
+      read() { reads += 1; return { volume: tv.volume, muted: tv.muted }; },
+      adjust(steps) { tv.volume += steps; return { volume: tv.volume, muted: tv.muted, source: 'menu' }; }
+    },
+    enter() {}, leave() {}, render() {},
+    statsOn: () => false, mouseEnabled: () => true,
+    disconnect() {}, quit() {}, log() {}
+  });
+  menu.open();
+  assert.strictEqual(reads, 1, 'one question when the menu opens');
+  for (let step = 0; step < 10; step++) menu.model();
+  menu.refresh();
+  assert.strictEqual(reads, 1, 'none for moving through the menu or for a change of the statistics');
+  menu.adjust('volume', 1);
+  assert.strictEqual(reads, 1, 'the answer of the TV to the change is enough');
+  assert.strictEqual(menu.model().items[1].volume, 40 + support.VOLUME_STEP);
+  menu.refresh({ volume: 12, muted: true });
+  assert.deepStrictEqual([menu.model().items[1].volume, menu.model().items[1].muted], [12, true], 'a change made elsewhere is told to the menu');
+  menu.close();
+  tv.volume = 55;
+  menu.open();
+  assert.strictEqual(menu.model().items[1].volume, 55, 'the next opening asks again');
+  assert.strictEqual(reads, 2);
+  menu.close();
+}
+
 console.log('stream_menu_tests: PASS');

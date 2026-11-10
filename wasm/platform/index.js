@@ -62,6 +62,7 @@ var codecWarning = false; // Flag indicating whether the video codec warning mes
 var repeatAction = null; // Flag indicating whether the repeat action is set, initial value is null
 var lastInvokeTime = 0; // Flag indicating the last invoke time, initial value is 0
 var repeatTimeout = null; // Flag indicating whether the repeat timeout is set, initial value is null
+var isRepeatLoopRunning = false; // Flag indicating whether the loop that repeats the action runs, initial value is false
 var lastNavigationTime = 0; // The time of the last navigation action of the pad, initial value is 0
 const BUILD_TYPE = '__BUILD_TYPE__'; // Placeholder for build type, which should be replaced during the build process
 const BUILD_COMMIT = '__BUILD_COMMIT__'; // Placeholder for build commit, which should be replaced during the build process
@@ -213,7 +214,8 @@ function attachListeners() {
             // Set repeat action and timeout to the mapped D-Pad button
             repeatAction = dPadMapping[index];
             lastInvokeTime = Date.now();
-            repeatTimeout = setTimeout(() => requestAnimationFrame(repeatActionHandler), REPEAT_DELAY);
+            clearTimeout(repeatTimeout);
+            repeatTimeout = setTimeout(startRepeatLoop, REPEAT_DELAY);
           }
         } else {
           // Clear repeat action and timeout if button is released
@@ -233,9 +235,12 @@ function attachListeners() {
           const axisValue = axisMapping[index](value);
           if (axisValue && Math.abs(value) > ACTION_THRESHOLD) {
             // Set repeat action and timeout to the mapped axis
+            // A stick reports every small move: the repeat that waits is replaced, not joined by another one (each of them started a
+            // loop of its own that ran until the stick was let go)
             repeatAction = axisValue;
             lastInvokeTime = Date.now();
-            repeatTimeout = setTimeout(() => requestAnimationFrame(repeatActionHandler), REPEAT_DELAY);
+            clearTimeout(repeatTimeout);
+            repeatTimeout = setTimeout(startRepeatLoop, REPEAT_DELAY);
           } else {
             // Clear repeat action and timeout if axis is released
             repeatAction = null;
@@ -296,7 +301,18 @@ function repeatActionHandler() {
   // Check if repeat action is still set, then schedule the next execution frame
   if (repeatAction) {
     requestAnimationFrame(repeatActionHandler);
+  } else {
+    isRepeatLoopRunning = false;
   }
+}
+
+// Starts the loop that repeats the action, unless it runs already: one loop is enough, whatever set the action
+function startRepeatLoop() {
+  if (isRepeatLoopRunning || !repeatAction) {
+    return;
+  }
+  isRepeatLoopRunning = true;
+  requestAnimationFrame(repeatActionHandler);
 }
 
 // Runs a navigation action of the pad at once, and ignores another one that follows within the cooldown: a button that
@@ -2059,7 +2075,7 @@ var volumeBarTimer = null;
 function showVolumeBar(state) {
   // The menu has a volume row of its own
   if (StreamMenu.isOpen()) {
-    StreamMenu.refresh();
+    StreamMenu.refresh(state);
     return;
   }
   const bar = document.getElementById('volume-bar');

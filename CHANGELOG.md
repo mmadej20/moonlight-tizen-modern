@@ -17,6 +17,15 @@ All notable changes to Moonlight Tizen Modern are documented in this file. This 
 ### Changed
 - With the setting that quits the app on the host, a stream that stopped because the application went to the background keeps its app running, so that it can be resumed
 
+### Fixed
+- Frame pacing kept the picture 30 to 60 ms behind for seconds after a short disturbance. Three causes, found in a log of the TV:
+  - The time that a frame waited behind the frame that the pacing held was counted as lateness of the network, which raised the hold and made the next frames wait longer. One slow moment (the stream menu opening, a stall of 100 ms) cost 10 to 15 seconds of extra delay. The arrival of a frame is now the time that it was received
+  - While the picture is still, the host repeats the last frame with a timestamp that it makes up, so these frames look late. The frames of the move that followed were held for them. Such frames no longer count
+  - The frames that arrive together after a stall counted as that many late frames. They are one event now, and only lateness that keeps coming raises the hold
+- The statistics overlay made the thread that feeds the decoder wait for the page once a second
+- The stream menu asked the TV for its volume at every step through the menu and several times for one change of the volume. Each question is a call that the page waits for. It asks once when it opens
+- A direction held on a stick started one more repeat loop with every small move of the stick
+
 ### Removed
 - The 144 FPS option: the TV cannot start a stream at that frame rate
 

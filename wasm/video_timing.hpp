@@ -119,6 +119,20 @@ PacingCommitOutcome AppendAndCommitPacingState(
 // The anchor is now the delay that the frames of the last two seconds nearly all met: the lowest offset (arrival minus timestamp) plus the
 // jitter below which 19 frames of 20 arrived. A frame that is later than that is shown at once, and no frame is held for more than a few
 // frame intervals, so the delay follows the network instead of the worst moment of it.
+//
+// Not every frame says something about the jitter, and counting them all alike made the hold 30 to 60 ms for seconds (TV log of
+// 2026-10-22). Two kinds of frames have no vote:
+//
+// - A frame that comes slower than the pace of the stream and more than a frame interval late. While the picture is still, the host
+//   repeats the last frame a few times a second with a timestamp that it makes up (about the time of the frame before), so these frames
+//   look 30 to 55 ms late. Holding the real frames for them made every move after a still picture start late. The frame before a slow
+//   one is counted as slow too: the first repeated frame follows a real one closely by its timestamp.
+// - A frame that arrived right behind the one before it (in less than half the time between their timestamps). It waited for that
+//   frame: its delay is the same event, not a second measurement. So one stall of the network counts once, and only delays that keep
+//   coming raise the hold.
+//
+// The arrival that the caller reports must be the time the frame was received, not the time the pacing thread took it from the queue:
+// the wait behind a frame that the pacing holds is the pacing's own doing, and counted as jitter it kept the hold up for 10 to 15 seconds.
 
 // The longest that a frame may be held: three frame intervals, but not less than 20 and not more than 50 ms
 inline int64_t PlayoutMaxBufferUs(int64_t frameIntervalUs) {
@@ -130,31 +144,28 @@ class PlayoutAnchor {
   static constexpr size_t kWindowFrames = 120;       // two seconds at 60 FPS
   static constexpr int64_t kMaxRiseUsPerFrame = 1000;  // a hold that grows does so gently; it falls at once
 
-  explicit PlayoutAnchor(int64_t maxBufferUs) : m_MaxBufferUs(maxBufferUs) {}
+  // frameIntervalUs: the pace of the stream. Without it no frame counts as slow.
+  explicit PlayoutAnchor(int64_t maxBufferUs, int64_t frameIntervalUs = 0)
+      : m_MaxBufferUs(maxBufferUs), m_FrameIntervalUs(frameIntervalUs) {}
 
-  // offsetUs: when the frame arrived minus its presentation timestamp. Returns the anchor, the offset at which presentation time zero plays.
-  int64_t Observe(int64_t offsetUs) {
-    m_Offsets[m_Next] = offsetUs;
-    m_Next = (m_Next + 1) % kWindowFrames;
-    if (m_Count < kWindowFrames) {
-      ++m_Count;
+  // The first frame of a timeline. offsetUs: when the frame arrived minus its presentation timestamp. Returns the anchor, the offset at
+  // which presentation time zero plays.
+  int64_t Observe(int64_t offsetUs) { return Add(offsetUs, 0); }
+
+  // A frame that follows another one. ptsGapUs: its timestamp minus the timestamp of the frame before; arrivalGapUs: the same for the
+  // times that the two arrived.
+  int64_t Observe(int64_t offsetUs, int64_t ptsGapUs, int64_t arrivalGapUs) {
+    uint8_t kind = 0;
+    if (m_FrameIntervalUs > 0 && ptsGapUs >= m_FrameIntervalUs + m_FrameIntervalUs / 2) {
+      kind |= kSlow;
+      if (m_Count > 0) {
+        m_Kinds[(m_Next + kWindowFrames - 1) % kWindowFrames] |= kSlow;
+      }
     }
-
-    int64_t sorted[kWindowFrames];
-    std::copy(m_Offsets, m_Offsets + m_Count, sorted);
-    m_Lowest = *std::min_element(sorted, sorted + m_Count);
-    // 19 of 20, and with only a few frames the late ones are left out as well: the middle of three, the lower of two
-    const size_t index = static_cast<size_t>(0.95 * static_cast<double>(m_Count - 1));
-    std::nth_element(sorted, sorted + index, sorted + m_Count);
-    const int64_t wanted = std::min(sorted[index], m_Lowest + m_MaxBufferUs);
-
-    if (!m_HasAnchor || wanted <= m_Anchor) {
-      m_Anchor = wanted;
-    } else {
-      m_Anchor = std::min(wanted, m_Anchor + kMaxRiseUsPerFrame);
+    if (ptsGapUs > 0 && arrivalGapUs * 2 < ptsGapUs) {
+      kind |= kFollower;
     }
-    m_HasAnchor = true;
-    return m_Anchor;
+    return Add(offsetUs, kind);
   }
 
   // How far behind the best case the frames are held: the anchor above the lowest offset of the window
@@ -170,8 +181,53 @@ class PlayoutAnchor {
   }
 
  private:
+  static constexpr uint8_t kSlow = 1;      // slower than the pace of the stream, or the frame before such a frame
+  static constexpr uint8_t kFollower = 2;  // arrived right behind the frame before it
+
+  int64_t Add(int64_t offsetUs, uint8_t kind) {
+    m_Offsets[m_Next] = offsetUs;
+    m_Kinds[m_Next] = kind;
+    m_Next = (m_Next + 1) % kWindowFrames;
+    if (m_Count < kWindowFrames) {
+      ++m_Count;
+    }
+
+    m_Lowest = *std::min_element(m_Offsets, m_Offsets + m_Count);
+
+    int64_t voters[kWindowFrames];
+    size_t voterCount = 0;
+    for (size_t i = 0; i < m_Count; ++i) {
+      if (m_Kinds[i] & kFollower) {
+        continue;
+      }
+      if ((m_Kinds[i] & kSlow) && m_Offsets[i] > m_Lowest + m_FrameIntervalUs) {
+        continue;
+      }
+      voters[voterCount++] = m_Offsets[i];
+    }
+
+    // Nothing speaks of jitter: the frames are shown as they come
+    int64_t wanted = m_Lowest;
+    if (voterCount > 0) {
+      // 19 of 20, and with only a few frames the late ones are left out as well: the middle of three, the lower of two
+      const size_t index = static_cast<size_t>(0.95 * static_cast<double>(voterCount - 1));
+      std::nth_element(voters, voters + index, voters + voterCount);
+      wanted = std::min(voters[index], m_Lowest + m_MaxBufferUs);
+    }
+
+    if (!m_HasAnchor || wanted <= m_Anchor) {
+      m_Anchor = wanted;
+    } else {
+      m_Anchor = std::min(wanted, m_Anchor + kMaxRiseUsPerFrame);
+    }
+    m_HasAnchor = true;
+    return m_Anchor;
+  }
+
   int64_t m_MaxBufferUs;
+  int64_t m_FrameIntervalUs;
   int64_t m_Offsets[kWindowFrames] = {};
+  uint8_t m_Kinds[kWindowFrames] = {};
   size_t m_Count = 0;
   size_t m_Next = 0;
   bool m_HasAnchor = false;

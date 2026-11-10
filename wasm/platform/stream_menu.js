@@ -30,6 +30,19 @@
     var opened = false;
     var selectArmed = false;
     var pendingStats = null;
+    // The volume of the TV as the menu shows it. Asking the TV is a call that the page waits for, and the model is read for every
+    // step through the menu: so the TV is asked when the menu opens, and after that the menu is told what changed
+    var volumeState = null;
+
+    function readVolume() {
+      return env.volume && typeof env.volume.read === 'function' ? env.volume.read() : null;
+    }
+
+    function keepVolume(state) {
+      if (state && typeof state.volume === 'number') {
+        volumeState = {volume: state.volume, muted: !!state.muted};
+      }
+    }
 
     function nativeModule() {
       var source = env.module;
@@ -63,7 +76,7 @@
     }
 
     function model() {
-      var tv = env.volume && typeof env.volume.read === 'function' ? env.volume.read() : null;
+      var tv = opened ? volumeState : readVolume();
       var mouseEnabled = !!env.mouseEnabled();
       return {
         items: [
@@ -88,6 +101,7 @@
       opened = true;
       selectArmed = false;
       pendingStats = null;
+      volumeState = readVolume();
       // The host stops getting input first (the native side did it already when the pad opened the menu), then the page changes
       callNative('setInputCaptured', true);
       try {
@@ -160,15 +174,18 @@
       if (!opened || id !== 'volume' || !delta) {
         return;
       }
-      env.volume.adjust((delta > 0 ? 1 : -1) * VOLUME_STEP, 'menu');
+      // The change is drawn once: here when the TV answers with its new volume, or by the page when it hears of the change
+      keepVolume(env.volume.adjust((delta > 0 ? 1 : -1) * VOLUME_STEP, 'menu'));
       render();
     }
 
-    // The state of the page changed (the statistics were switched, the volume moved): draw what is true now
-    function refresh() {
+    // The state of the page changed (the statistics were switched, the volume moved): draw what is true now. volume: the new state of
+    // the TV ({volume, muted}), when that is what changed
+    function refresh(volume) {
       if (!opened) {
         return;
       }
+      keepVolume(volume);
       pendingStats = null;
       render();
     }

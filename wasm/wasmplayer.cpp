@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -13,6 +15,8 @@
 
 #include <assert.h>
 #include <pthread.h>
+
+#include <emscripten/threading.h>
 
 #include "samsung/wasm/elementary_audio_track_config.h"
 #include "samsung/wasm/elementary_media_packet.h"
@@ -99,6 +103,11 @@ static AdaptiveSpinWindow s_AdaptiveSpinWindow(
 // Where presentation time zero plays, as an offset that follows the frames of the last two seconds (see video_timing.hpp). It used to be
 // the arrival of the first frame, for good, so a late first frame became the delay of the whole stream. The cap is set by the frame rate.
 static PlayoutAnchor s_PlayoutAnchor(50000);
+
+// The timestamp and the arrival of the last frame that was appended, for the gaps to the next one
+static int64_t s_LastFramePtsUs = 0;
+static int64_t s_LastFrameArrivalUs = 0;
+static bool s_HasLastFrameTiming = false;
 
 static bool s_hasFirstFrame = false;
 static bool s_HasSubmittedVideoConfig = false;
@@ -517,7 +526,9 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   );
 
   // Every stream starts with an empty window, and holds a frame for three frame intervals at most
-  s_PlayoutAnchor = PlayoutAnchor(PlayoutMaxBufferUs(static_cast<int64_t>(std::llround(1000000.0 / static_cast<double>(redrawRate)))));
+  const int64_t frameIntervalUs = static_cast<int64_t>(std::llround(1000000.0 / static_cast<double>(redrawRate)));
+  s_PlayoutAnchor = PlayoutAnchor(PlayoutMaxBufferUs(frameIntervalUs), frameIntervalUs);
+  s_HasLastFrameTiming = false;
 
   // Flag indicating whether this is the first frame of video to be decoded
   s_hasFirstFrame = false;
@@ -610,15 +621,26 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   PlayoutAnchor candidatePlayoutAnchor = s_PlayoutAnchor;
   auto candidateFirstAppend = std::chrono::steady_clock::time_point();
   const auto pacingStart = std::chrono::steady_clock::now();
-  // When the frame arrived, minus its timestamp: the offset that the anchor of the pacing follows
+  // When the frame arrived, minus its timestamp: the offset that the anchor of the pacing follows. The arrival is the time that the
+  // receiver put the frame in the queue, not the time that this thread took it out: a frame waits in the queue behind the one that the
+  // pacing holds, and counted as lateness of the network that wait raised the hold, which made the next frames wait longer.
   const int64_t packetPtsUs = static_cast<int64_t>(std::llround(packetPtsSeconds * 1000000.0));
-  const int64_t arrivalOffsetUs = std::chrono::duration_cast<std::chrono::microseconds>(pacingStart.time_since_epoch()).count() - packetPtsUs;
-  if (!s_hasFirstFrame || timestampUpdate.resetPacing) {
+  const int64_t queueDelayUs = callbackTimeMs >= decodeUnit->enqueueTimeMs
+    ? static_cast<int64_t>(callbackTimeMs - decodeUnit->enqueueTimeMs) * 1000
+    : 0;
+  const int64_t arrivalUs = std::chrono::duration_cast<std::chrono::microseconds>(assemblyStart.time_since_epoch()).count() - queueDelayUs;
+  const int64_t arrivalOffsetUs = arrivalUs - packetPtsUs;
+  const bool newTimeline = !s_hasFirstFrame || timestampUpdate.resetPacing;
+  if (newTimeline) {
     candidatePlayoutAnchor.Reset();
   }
 
   if (s_FramePacingEnabled) {
-    const int64_t anchorOffsetUs = candidatePlayoutAnchor.Observe(arrivalOffsetUs);
+    // A frame that follows another one also says how far apart the two are, by their timestamps and by their arrival: that tells the
+    // frames that the host repeats and the frames that waited behind a late one from the frames that measure the jitter
+    const int64_t anchorOffsetUs = newTimeline || !s_HasLastFrameTiming
+      ? candidatePlayoutAnchor.Observe(arrivalOffsetUs)
+      : candidatePlayoutAnchor.Observe(arrivalOffsetUs, packetPtsUs - s_LastFramePtsUs, arrivalUs - s_LastFrameArrivalUs);
     candidateFirstAppend = std::chrono::steady_clock::time_point(
       std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::microseconds(anchorOffsetUs)));
     const auto targetTime = candidateFirstAppend
@@ -776,6 +798,9 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       s_TimestampState = candidateTimestampState;
       s_AdaptiveSpinWindow = candidateAdaptiveSpinWindow;
       s_PlayoutAnchor = candidatePlayoutAnchor;
+      s_LastFramePtsUs = packetPtsUs;
+      s_LastFrameArrivalUs = arrivalUs;
+      s_HasLastFrameTiming = true;
       if (!s_hasFirstFrame) {
         s_hasFirstFrame = true;
       }
@@ -847,7 +872,13 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     ClLogMessage("%s", windowLine);
   }
   if (postStats) {
-    PostToJs(statMessage);
+    // The overlay is drawn by the page when it gets to it: this thread, which feeds the decoder, does not wait for that. The text is
+    // copied, because it is read after this function has returned; the one who reads it frees it.
+    char* statCopy = strdup(statMessage.c_str());
+    if (statCopy != nullptr) {
+      emscripten_async_run_in_main_runtime_thread(
+        EM_FUNC_SIG_VI, MoonlightInstance::DeliverStatMessage, reinterpret_cast<int>(statCopy));
+    }
   }
 
   return DR_OK;
@@ -1041,6 +1072,16 @@ void MoonlightInstance::FormatVideoStats(VIDEO_STATS& stats, char* output, int l
     }
     offset += ret;
   }
+}
+
+// Runs on the main thread, some time after the video thread sent the statistics. They are dropped when the overlay was switched off
+// in between: the page takes a message with statistics as "the overlay is on", and would switch it back on.
+void MoonlightInstance::DeliverStatMessage(int messageAddress) {
+  char* message = reinterpret_cast<char*>(messageAddress);
+  if (g_Instance && g_Instance->m_PerformanceStatsEnabled.load()) {
+    PostToJs(std::string(message));
+  }
+  free(message);
 }
 
 void MoonlightInstance::TogglePerformanceStats() {

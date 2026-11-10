@@ -6,11 +6,198 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <vector>
 
 using namespace std::chrono_literals;
 
 static void AssertNear(double actual, double expected) {
   assert(std::fabs(actual - expected) < 0.000001);
+}
+
+// The pacing thread as the player runs it: it takes the frames from the queue one at a time, holds each until the anchor says so, and
+// appends it. A frame that arrives while another is held or appended waits in the queue.
+struct SimFrame {
+  int64_t ptsUs;
+  int64_t arrivalUs;
+  int64_t appendUs;
+};
+
+static const int64_t kSimIntervalUs = 16667;  // 60 FPS
+static const int64_t kSimNetworkUs = 5000;    // the delay of the network without jitter
+
+struct SimStream {
+  std::vector<SimFrame> frames;
+  int64_t hostUs = 0;
+  uint32_t seed = 4242;
+
+  int64_t Jitter(int64_t maxUs) {
+    seed = seed * 1664525u + 1013904223u;
+    return static_cast<int64_t>((seed >> 8) % static_cast<uint32_t>(maxUs + 1));
+  }
+
+  // A frame that the host captured now and sent at once
+  void Real(int64_t afterUs, int64_t lateUs = 0, int64_t appendUs = 1000) {
+    hostUs += afterUs;
+    frames.push_back({hostUs, hostUs + kSimNetworkUs + Jitter(3000) + lateUs, appendUs});
+  }
+
+  // A frame that the host repeats while the picture is still: its timestamp is about the time that the frame before it was sent
+  void Repeated(int64_t afterUs) {
+    const int64_t previousSentUs = hostUs;
+    hostUs += afterUs;
+    frames.push_back({previousSentUs + 2000, hostUs + kSimNetworkUs + Jitter(3000), 1000});
+  }
+};
+
+// Returns how long every frame waited between its arrival and its append. asThePlayerDid: the offset is taken when the pacing thread
+// gets the frame and every frame has a vote, which is what the player did before.
+static std::vector<int64_t> RunPacer(const std::vector<SimFrame>& frames, bool asThePlayerDid) {
+  PlayoutAnchor anchor(PlayoutMaxBufferUs(kSimIntervalUs), kSimIntervalUs);
+  std::vector<int64_t> holds;
+  int64_t pacerFreeUs = INT64_MIN;
+  for (size_t i = 0; i < frames.size(); ++i) {
+    const SimFrame& frame = frames[i];
+    const int64_t dequeueUs = std::max(frame.arrivalUs, pacerFreeUs);
+    int64_t anchorUs;
+    if (asThePlayerDid) {
+      anchorUs = anchor.Observe(dequeueUs - frame.ptsUs);
+    } else if (i == 0) {
+      anchorUs = anchor.Observe(frame.arrivalUs - frame.ptsUs);
+    } else {
+      anchorUs = anchor.Observe(
+        frame.arrivalUs - frame.ptsUs,
+        frame.ptsUs - frames[i - 1].ptsUs,
+        frame.arrivalUs - frames[i - 1].arrivalUs);
+    }
+    const int64_t submitUs = std::max(dequeueUs, anchorUs + frame.ptsUs);
+    pacerFreeUs = submitUs + frame.appendUs;
+    holds.push_back(submitUs - frame.arrivalUs);
+  }
+  return holds;
+}
+
+static int64_t MeanHold(const std::vector<int64_t>& holds, size_t from, size_t to) {
+  int64_t total = 0;
+  for (size_t i = from; i < to; ++i) total += holds[i];
+  return total / static_cast<int64_t>(to - from);
+}
+
+static int64_t WorstHold(const std::vector<int64_t>& holds, size_t from, size_t to) {
+  int64_t worst = 0;
+  for (size_t i = from; i < to; ++i) worst = std::max(worst, holds[i]);
+  return worst;
+}
+
+static void PacerSimulationTests() {
+  {
+    // A steady stream: both ways hold the frames for the jitter only
+    SimStream stream;
+    for (int i = 0; i < 1200; ++i) stream.Real(kSimIntervalUs);
+    assert(MeanHold(RunPacer(stream.frames, false), 300, 1200) < 4000);
+    assert(MeanHold(RunPacer(stream.frames, true), 300, 1200) < 4000);
+  }
+  {
+    // The TV was busy for a moment (the stream menu opened) and twelve appends took 40 ms each. The frames behind them waited in the
+    // queue, which says nothing about the network: the hold must be back to the jitter as soon as the queue is empty. It used to stay
+    // up for seconds, because the wait in the queue counted as lateness and the higher anchor made the next frames wait too.
+    SimStream stream;
+    for (int i = 0; i < 600; ++i) stream.Real(kSimIntervalUs);
+    for (int i = 0; i < 12; ++i) stream.Real(kSimIntervalUs, 0, 40000);
+    for (int i = 0; i < 900; ++i) stream.Real(kSimIntervalUs);
+    const auto now = RunPacer(stream.frames, false);
+    const auto before = RunPacer(stream.frames, true);
+    assert(MeanHold(now, 660, 900) < 4000);
+    assert(WorstHold(now, 660, 1500) < 6000);
+    assert(MeanHold(before, 660, 900) > 15000);  // what the log of the TV showed
+  }
+  {
+    // A still picture for a second and a half (a menu): the host repeats the frame every 55 ms. The move that follows must not start
+    // late: the repeated frames only look late.
+    SimStream stream;
+    for (int i = 0; i < 600; ++i) stream.Real(kSimIntervalUs);
+    for (int i = 0; i < 27; ++i) stream.Repeated(55000);
+    const size_t firstMove = stream.frames.size();
+    for (int i = 0; i < 600; ++i) stream.Real(kSimIntervalUs);
+    const auto now = RunPacer(stream.frames, false);
+    const auto before = RunPacer(stream.frames, true);
+    assert(WorstHold(now, firstMove, firstMove + 600) < 6000);
+    assert(MeanHold(before, firstMove + 30, firstMove + 110) > 25000);
+  }
+  {
+    // A still picture for half a minute: the window holds nothing but repeated frames. The first frame of the move is shown at once,
+    // and so are the ones after it.
+    SimStream stream;
+    for (int i = 0; i < 300; ++i) stream.Real(kSimIntervalUs);
+    for (int i = 0; i < 550; ++i) stream.Repeated(55000);
+    const size_t firstMove = stream.frames.size();
+    stream.Real(20000);
+    for (int i = 0; i < 300; ++i) stream.Real(kSimIntervalUs);
+    const auto now = RunPacer(stream.frames, false);
+    assert(now[firstMove] < 2000);
+    assert(WorstHold(now, firstMove, firstMove + 300) < 6000);
+  }
+  {
+    // A picture that changes now and then (a cursor that blinks): a real frame, then repeated ones. The real frames are not held for
+    // the repeated ones.
+    SimStream stream;
+    for (int i = 0; i < 300; ++i) stream.Real(kSimIntervalUs);
+    std::vector<size_t> realFrames;
+    for (int round = 0; round < 60; ++round) {
+      realFrames.push_back(stream.frames.size());
+      stream.Real(30000);
+      for (int i = 0; i < 8; ++i) stream.Repeated(55000);
+    }
+    const auto now = RunPacer(stream.frames, false);
+    for (size_t index : realFrames) assert(now[index] < 6000);
+  }
+  {
+    // One stall of the network of 150 ms: nine frames arrive together. That is one event, and the frames after it are not held for it.
+    SimStream stream;
+    for (int i = 0; i < 600; ++i) stream.Real(kSimIntervalUs);
+    for (int i = 0; i < 9; ++i) stream.Real(kSimIntervalUs, 150000 - i * kSimIntervalUs);
+    for (int i = 0; i < 600; ++i) stream.Real(kSimIntervalUs);
+    const auto now = RunPacer(stream.frames, false);
+    const auto before = RunPacer(stream.frames, true);
+    assert(WorstHold(now, 620, 1200) < 6000);
+    assert(MeanHold(before, 660, 720) > 20000);
+  }
+  {
+    // Lateness that keeps coming is jitter: every fourth frame is 20 ms late. The anchor covers it, so the frames are shown evenly
+    // (the late ones on time, the others held for them), as before.
+    SimStream stream;
+    for (int i = 0; i < 1500; ++i) stream.Real(kSimIntervalUs, i % 4 == 3 ? 20000 : 0);
+    const auto now = RunPacer(stream.frames, false);
+    int onTime = 0;
+    int counted = 0;
+    for (size_t i = 400; i < now.size(); ++i) {
+      if (i % 4 != 3) {
+        ++counted;
+        if (now[i] > 15000 && now[i] < 24000) ++onTime;
+      } else {
+        assert(now[i] < 4000);
+      }
+    }
+    assert(onTime * 100 >= counted * 95);
+  }
+  {
+    // The delay of the network goes up by 40 ms and stays there, at the full pace: the anchor follows, and nothing is held for more
+    // than the cap on the way
+    SimStream stream;
+    for (int i = 0; i < 600; ++i) stream.Real(kSimIntervalUs);
+    for (int i = 0; i < 900; ++i) stream.Real(kSimIntervalUs, 40000);
+    const auto now = RunPacer(stream.frames, false);
+    assert(WorstHold(now, 0, now.size()) <= 50000 + 1000);
+    assert(MeanHold(now, 1000, 1500) < 4000);
+  }
+  {
+    // A game at 30 FPS on a stream of 60: every frame is slower than the pace of the stream. They still have a vote while they are
+    // not more than a frame interval late, so their jitter (up to 8 ms here) is smoothed
+    SimStream stream;
+    for (int i = 0; i < 900; ++i) stream.Real(2 * kSimIntervalUs, stream.Jitter(8000));
+    const auto now = RunPacer(stream.frames, false);
+    assert(MeanHold(now, 300, 900) > 2000);
+    assert(WorstHold(now, 300, 900) <= 12000);
+  }
 }
 
 int main() {
@@ -278,4 +465,6 @@ int main() {
     assert(anchor.Observe(777777) == 777777);
     assert(anchor.BufferUs() == 0);
   }
+
+  PacerSimulationTests();
 }

@@ -156,7 +156,7 @@ function createPage(options) {
       stopStream: () => calls.push('stopStream')
     },
     VolumeControl: {
-      adjust: (steps, source) => { calls.push('volume ' + steps + ' ' + source); state.volume += steps; return null; },
+      adjust: (steps, source) => { calls.push('volume ' + steps + ' ' + source); state.volume += steps; return { volume: state.volume, muted: state.muted, source: source }; },
       read: () => ({ volume: state.volume, muted: state.muted })
     },
     Controller: {
@@ -301,8 +301,9 @@ function createPage(options) {
   assert(!page.element('streamMenuMouse').classList.contains('is-disabled'));
   page.state.mouse = false;
   page.menu.refresh();
+  // The menu asks the TV when it opens; after that the page tells it what changed (the volume bar does, with the state of the TV)
   page.state.muted = true;
-  page.menu.refresh();
+  page.menu.refresh({ volume: page.state.volume, muted: true });
   assert.strictEqual(page.element('stream-menu-volume').textContent, '0%', 'a muted TV shows no volume');
   assert.strictEqual(page.cells.filter((cell) => cell.classList.contains('is-on')).length, 0);
   page.state.muted = false;
@@ -318,7 +319,7 @@ function createPage(options) {
 assert(/if \(index === 8\) \{\s*StreamMenu\.onSelect\(pressed\);\s*\}/.test(index));
 assert(/currentStream = \{\s*title: appToStart\.title,\s*host: host\.hostname,\s*summary: StreamMenuSupport\.describeStream\(\{/.test(index));
 assert(index.indexOf('currentStream = {') < index.indexOf('      showStreamMode();'), 'the menu knows the stream before it starts');
-assert(/if \(StreamMenu\.isOpen\(\)\) \{\s*StreamMenu\.refresh\(\);\s*return;\s*\}/.test(extractFunction(index, 'showVolumeBar')), 'the bar gives way to the row of the menu');
+assert(/if \(StreamMenu\.isOpen\(\)\) \{\s*StreamMenu\.refresh\(state\);\s*return;\s*\}/.test(extractFunction(index, 'showVolumeBar')), 'the bar gives way to the row of the menu, which is told the new volume');
 
 // The Back key of the remote does not reach the host while the menu is open (Review Focus 5)
 assert(/e\.key === 'XF86Back' && isInGame === true && !StreamMenu\.isOpen\(\)/.test(index));
