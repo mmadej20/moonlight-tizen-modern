@@ -54,6 +54,7 @@ const expectedJavaScriptSuites = [
   'tests/ui_reliability_wiring_tests.js',
   'tests/upstream_ui_integration_tests.js',
   'tests/upstream_v118_integration_tests.js',
+  'tests/upstream_v120_integration_tests.js',
   'tests/volume_tests.js',
   'tests/wasm_atomics_guard_tests.js',
 ];
@@ -107,8 +108,8 @@ assert(!dockerfile.includes('/wasm/static/js/jquery-4.0.0.min.js'));
 assert(dockerfile.includes('AS builder'));
 assert(dockerfile.includes('FROM scratch AS artifact'));
 assert(dockerfile.includes('COPY --from=builder /home/moonlight/Moonlight*.wgt /home/moonlight/'));
-assert(config.includes('version="1.0.1"'));
-assert.strictEqual(pkg.version, '1.0.1');
+assert(config.includes('version="1.1.0"'));
+assert.strictEqual(pkg.version, '1.1.0');
 assert.strictEqual(lock.version, pkg.version);
 
 // The application asks GitHub for the latest release of this repository. A release build gets the owner and the name from the workflow,

@@ -132,7 +132,7 @@ for (const key of Object.keys(english)) {
   const placeholders = (text) => (text.match(/%\d+\$[sd]/g) || []).sort().join(',');
   assert.strictEqual(placeholders(polish[key]), placeholders(english[key]), 'placeholders of "' + key.slice(0, 40) + '"');
 }
-assert(/SUPPORTED_LOCALES = \['en-US', 'pl-PL', 'pt-BR'\]/.test(i18n));
+assert(/SUPPORTED_LOCALES = \[[^\]]*'pl-PL'[^\]]*\]/.test(i18n));
 assert(/'pl-PL': 'Polski'/.test(i18n));
 for (const key of ['Where are we playing today?', 'Online', 'Offline', 'Not paired', 'Open library', 'Pair with PIN', 'Options', 'Select']) {
   for (const locale of ['en-US', 'pt-BR', 'pl-PL']) {

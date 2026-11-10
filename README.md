@@ -76,7 +76,7 @@ This project originally started as a **WASM port** for Tizen TV created by the [
 - **A menu during a stream.** Hold **Select** on a gamepad for one second, or press the **green** or **Info** key of the remote. It has: back to the game, volume, statistics, mouse from the controller, disconnect (the game keeps running on the computer), and quit the game and disconnect.
 - **The volume bar of Moonlight during a stream** instead of the bar of the TV. The bar of the system drawn over the picture caused small stutters. It can be turned off in the audio settings to restore old behaviour.
 - **Diagnostic Logs:** the application keeps a log of the current and of the previous session on the TV, and can send it to your computer with `tools/Receive-MoonlightLogs.ps1`. The address of the computer and the port are set with the keys of the remote, so no keyboard is needed. Turning the logs off deletes them.
-- **Polish translation**, next to English and Brazilian Portuguese.
+- **Polish translation**, next to the languages of upstream. The strings that only this fork has are translated to Polish and Brazilian Portuguese, and show in English in the other languages.
 
 ### The stream
 

@@ -310,8 +310,11 @@ function handleMessage(msg) {
         snackbarLogLong('Connection terminated');
         break;
     }
-    // Return to the app list with new current game
-    showApps(api).then(function() {
+    // The app list comes back with the current game. The running app is quit first when the user asked for that and the stream ended
+    // normally; a stream that stopped because the application went to the background keeps its app, so that it can be resumed
+    var quitAppAfterStream = errorCode === 0 && !wasStreamStoppedInBackground && $('#quitAppAfterSwitch').prop('checked');
+    var appListReady = quitAppAfterStream ? stopGame(api) : showApps(api);
+    appListReady.then(function() {
       // Scroll to the current game row
       Navigation.switch();
       // Switch to Apps view

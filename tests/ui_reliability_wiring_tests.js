@@ -32,7 +32,7 @@ assert.match(navigationSource, /normalize\(\)/);
 assert.doesNotMatch(utilsSource, /\.then\(this\.refreshServerInfo\(\)\)/);
 assert.match(utilsSource, /\.then\(\(\)\s*=>\s*this\.refreshServerInfo\(\)\)/);
 assert.doesNotMatch(indexSource, /setTimeout\(\(\)\s*=>\s*startGame\(host,\s*appID\),\s*3000\)/);
-assert.match(messagesSource, /showApps\(api\)\.then/);
+assert.match(messagesSource, /var appListReady = quitAppAfterStream \? stopGame\(api\) : showApps\(api\);\s*appListReady\.then/);
 assert.doesNotMatch(messagesSource, /},\s*1500\);/);
 assert.match(indexSource, /function handleShowAppsNavigationFailure\(error\)[\s\S]*OperationGuard\.isStaleOperationError/);
 assert.strictEqual(

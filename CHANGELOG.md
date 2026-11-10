@@ -2,6 +2,28 @@
 
 All notable changes to Moonlight Tizen Modern are documented in this file. This project is a fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen): its version numbers start again at 1.0.0, and what happened before the fork is kept below under [Upstream changelog](#upstream-changelog).
 
+## v1.1.0
+
+### Added
+- The changes of upstream v1.20.0, except those listed under "Not taken":
+  - The colour space follows the HDR switch: Rec. 709 for SDR instead of Rec. 601, Rec. 2020 for HDR
+  - An optional setting quits the app on the host when a stream ends normally (off by default)
+  - A stream stops when the application goes to the background, and a message says so when it comes back
+  - Video HDR is switched off and locked on a TV that cannot show HDR
+  - The Game Mode switch is locked in the ForceGM variant
+  - Albanian, French, German, Italian and Spanish. The strings that only this fork has show in English in these languages
+- The diagnostic log counts the FEC status reports that go to the host every 10 seconds (blocks recovered and blocks lost). A host that adapts its packet pacing to the client, such as Vibepollo with `host_adaptive_pacing`, uses these reports
+
+### Changed
+- With the setting that quits the app on the host, a stream that stopped because the application went to the background keeps its app running, so that it can be resumed
+
+### Removed
+- The 144 FPS option: the TV cannot start a stream at that frame rate
+
+### Not taken from upstream v1.20.0
+- The stream menu opened with the Play/Pause key: this fork has its own stream menu
+- The recognition of controllers with zero timestamps on Tizen 5.5: this fork supports Tizen 9 and has a different controller path
+
 ## v1.0.1
 
 ### Fixed
@@ -55,6 +77,26 @@ The first release of the fork. It is based on upstream v1.19.0 (plus the Embind 
 # Upstream changelog
 
 The changelog of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen) up to v1.19.0, which is where this fork started.
+
+## v1.20.0
+
+### Added
+- Introduced a new 'Quit app on host' setting to close the running app after the streaming ends
+- Added Albanian (sq-AL) and Spanish (es-ES) language support to the language selector
+- Added color space configuration to properly handle HDR and standard HD video streams
+
+### Changed
+- Disabled 'Video HDR' setting for incompatible TVs due to lack of display capabilities
+- Disabled 'Game mode' setting in the ForceGM variant to avoid conflicts with its metadata
+
+### Removed
+- Removed the unsupported '144 FPS' option as it causes streaming initialization to fail
+
+### Fixed
+- Fixed a heap corruption that occasionally caused freezes during the streaming session
+- Fixed an issue where gamepads reporting zero timestamps were not detected during streaming
+- Fixed an issue where the Wake-on-LAN dialog could remain open after the host became available
+- Fixed an issue where the stream continued running in the background when Moonlight was hidden
 
 ## v1.19.0
 

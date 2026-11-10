@@ -248,6 +248,8 @@ function createSettingsHarness(storedValues, platformVersion) {
     $: jquery,
     platformVer: platformVersion,
     maxSupportedWidth: 3840,
+    isHdrCapable: true,
+    checkForceGMVariant: () => false,
     getData(key, callback) { callback({ [key]: storedValues[key] }); },
     storeData(key, value) { stores.push({ key, value }); },
     handleUnlockAllFps() {},

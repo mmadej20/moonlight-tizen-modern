@@ -79,8 +79,9 @@ guard test enforces that). `wasm/platform/*.js`, `wasm/index.html` and `wasm/sta
 - **Logs:** native lines go to a ring buffer (`diagnostic_log.cpp`) that `platform/diagnostic_logs.js` drains once a second into a
   file on the TV; JS adds lines with `logDiagnostic()`. `tools/Receive-MoonlightLogs.ps1` (port 48150) receives a log sent from
   the TV into `tools/moonlight-tv-logs/`.
-- **Translations:** `wasm/static/locales/{en-US,pl-PL,pt-BR}.json`; `en-US` is the source and the key is the English text, which is
-  also the content of the element with `data-i18n`. Add every new string to all three files.
+- **Translations:** `wasm/static/locales/*.json`; `en-US` is the source and the key is the English text, which is also the
+  content of the element with `data-i18n`. Add every new string to `en-US`, `pl-PL` and `pt-BR`. The other languages come from
+  upstream and may lack strings (they fall back to English), but must not have a key that `en-US` lacks.
 
 ## Things that are not obvious
 
@@ -88,8 +89,12 @@ guard test enforces that). `wasm/platform/*.js`, `wasm/index.html` and `wasm/sta
   interface is built and tested only for Tizen 9. The build pins jQuery 2.2.0 (from the lockfile) and the Samsung toolchain.
 - The remote handler calls `preventDefault()` on Enter to stop the TV from sending a second, native click (upstream added it).
   That click seems to be what opens the on-screen keyboard for a text field, so Enter on a text field is let through
-  (`remote_controller.js`). This is the working explanation for the keyboard that did not open in the Add Host dialog and is not
-  confirmed on a TV yet: the log lines `Add Host text field: focus|click|blur trusted=... readOnly=...` show what the TV did.
+  (`remote_controller.js`). This fixed the keyboard that did not open in the Add Host dialog (confirmed on a TV); the log lines
+  `Add Host text field: focus|click|blur trusted=... readOnly=...` show what the TV did.
+- Vibepollo's UDP link calibration and adaptive FEC work only with its PyroWave codec, which a TV cannot decode. For H.264, HEVC
+  and AV1 the host option `host_adaptive_pacing` adapts the packet pacing from the FEC status reports that this client already
+  sends; the log line `Loss Stats: FEC status reports sent in the last 10 s` counts them (`FecStatusTally.h`).
+- Upstream has its own stream menu (Play/Pause key). It is left out on purpose when merging: this fork has its own menu.
 - A Docker build step patches the generated `moonlight-wasm.js` (`tools/patch-embind-string.js`, the Embind `std::string` read
   that wrote a byte past its buffer). The patch fails the build when its target is not found exactly once.
 - Speculative loss reporting (RFI) is gated on the decoder advertising RFI (`RtpVideoQueuePolicy.h`); without that gate one late

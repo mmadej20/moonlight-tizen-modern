@@ -1,4 +1,5 @@
 #include "Limelight-internal.h"
+#include "FecStatusTally.h"
 
 // This is a private header, but it just contains some time macros
 #include <enet/time.h>
@@ -1311,6 +1312,9 @@ static void lossStatsThreadFunc(void* context) {
 
     if (usePeriodicPing) {
         char periodicPingPayload[8];
+        FEC_STATUS_TALLY fecStatusTally;
+
+        memset(&fecStatusTally, 0, sizeof(fecStatusTally));
 
         BbInitializeWrappedBuffer(&byteBuffer, periodicPingPayload, 0, sizeof(periodicPingPayload), BYTE_ORDER_LITTLE);
         BbPut16(&byteBuffer, 4); // Length of payload
@@ -1338,7 +1342,20 @@ static void lossStatsThreadFunc(void* context) {
                         return;
                     }
 
+                    fecStatusTallyAdd(&fecStatusTally, fecStatusBlockRecovered(
+                        BE16(queuedFrameStatus->fecStatus.totalDataPackets),
+                        BE16(queuedFrameStatus->fecStatus.receivedDataPackets),
+                        BE16(queuedFrameStatus->fecStatus.receivedParityPackets)));
                     free(queuedFrameStatus);
+                }
+
+                // The log shows that the host gets loss feedback; a link without losses gives no line
+                {
+                    uint32_t recoveredBlocks, unrecoverableBlocks;
+                    if (fecStatusTallyTake(&fecStatusTally, PltGetMillis(), &recoveredBlocks, &unrecoverableBlocks)) {
+                        Limelog("Loss Stats: FEC status reports sent in the last %d s: %u recovered, %u unrecoverable\n",
+                                FEC_STATUS_TALLY_INTERVAL_MS / 1000, recoveredBlocks, unrecoverableBlocks);
+                    }
                 }
             }
 
