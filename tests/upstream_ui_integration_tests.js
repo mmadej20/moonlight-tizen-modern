@@ -434,6 +434,7 @@ function createPollingHarness() {
   const context = {
     activePolls: {},
     pollGenerations: {},
+    hostStatusChecks: {},
     console: { log() {}, error() {} },
     updateHostStatusIndicator(host) { statusUpdates.push(host); },
     window: {

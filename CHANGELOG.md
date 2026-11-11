@@ -2,6 +2,17 @@
 
 All notable changes to Moonlight Tizen Modern are documented in this file. This project is a fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen): its version numbers start again at 1.0.0, and what happened before the fork is kept below under [Upstream changelog](#upstream-changelog).
 
+## v1.1.1
+
+### Fixed
+- A computer that was switched off showed as online when the application started, until the first request to it timed out: the state of the last session was loaded with the host. A card now shows no status until its host has answered, and a card that is chosen before that waits for the answer
+- Two cards were highlighted on the screen of the hosts after the start: the add host card, which is alone at first, kept its mark when the stored host took its place in the selection. One card is selected now, and the first host takes the selection from the add host card
+- Coming back to the hosts selects the host that was opened last (it was looked up by an id that no card has)
+- The details of a host said "online" whatever its state was
+
+### Changed
+- The ForceGM variant does not show the Game Mode setting: the TV uses its Game Mode by itself there, and the setting does not go together with that. The streams of this variant run with the setting off, whatever was chosen before; the choice is kept for the standard variant
+
 ## v1.1.0
 
 ### Added

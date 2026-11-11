@@ -232,6 +232,13 @@ function focusTile(target, behavior) {
   centerInRow(element, behavior);
 }
 
+// Whether the page hides the row of a setting (a setting that does not apply to this build)
+function isSettingRowHidden(id) {
+  const element = document.getElementById(id);
+  const row = element && typeof element.closest === 'function' ? element.closest('.setting-option') : null;
+  return !!row && row.classList.contains('hide-container');
+}
+
 // Safely remove focus from an element
 function blurElement(target) {
   if (target === undefined || target === null) return;
@@ -1483,12 +1490,13 @@ const Views = {
     },
   },
   VideoSettings: {
+    // The Game Mode row is hidden in the ForceGM variant, and a hidden row is not a stop
     view: new ListView(() => [
       'selectCodec',
       'hdrModeBtn',
       'fullRangeBtn',
       'gameModeBtn'
-    ]),
+    ].filter((id) => !isSettingRowHidden(id))),
     up: function() {
       this.view.prevOption();
       focusElement(this.view.current());

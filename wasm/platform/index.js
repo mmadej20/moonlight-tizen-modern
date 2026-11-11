@@ -35,6 +35,7 @@ try {
 var hosts = {}; // Hosts is an associative array of NvHTTP objects, keyed by server UID
 var removedHostUids = {}; // Hosts explicitly removed during this app session must not be revived by late discovery callbacks
 var isHostOpening = false; // Prevents concurrent hostChosen executions, initial value is false
+var hostStatusChecks = {}; // The request that asks each host whether it is online, keyed by server UID, for a card that is chosen before the answer
 var isHostsLoaded = false; // Indicates if IndexedDB has finished loading hosts
 var isSubnetScanFinished = false; // Indicates if the initial subnet scan has completed
 var activePolls = {}; // Hosts currently being polled. An associated array of polling IDs, keyed by server UID
@@ -405,7 +406,7 @@ function beginBackgroundPollingOfHost(host) {
   };
 
   // Refresh server info before attempting to start background polling of the host
-  return host.refreshServerInfo().then(function(ret) {
+  var statusCheck = host.refreshServerInfo().then(function(ret) {
     if (!isCurrentPoll()) return;
     console.log('%c[index.js, beginBackgroundPollingOfHost]', 'color: green;', 'Starting background polling of host ' + host.serverUid, host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
 
@@ -469,6 +470,8 @@ function beginBackgroundPollingOfHost(host) {
       scheduleNextPoll(0);
     }
   });
+  hostStatusChecks[serverUid] = statusCheck;
+  return statusCheck;
 }
 
 function startPollingHosts() {
@@ -581,10 +584,11 @@ function showHosts() {
     var lastOpenedHost = localStorage.getItem('lastOpenedHost');
     // `Views` is a constant of the page, not a property of window: the check used to be `window.Views` and never passed
     if (lastOpenedHost && typeof Views !== 'undefined' && Views.Hosts && Views.Hosts.view) {
+      // The cards of the row are the containers of the hosts (the id used to be the one of a part of the card, which is never found here)
       var children = Views.Hosts.view.func();
       for (var i = 0; i < children.length; i++) {
-        if (children[i].id === 'host-' + lastOpenedHost) {
-          Views.Hosts.view.index = i;
+        if (children[i].id === 'host-container-' + lastOpenedHost) {
+          selectHostCard(i);
           break;
         }
       }
@@ -660,6 +664,17 @@ function hostChosen(host, onSuccessCallback) {
     return;
   }
   localStorage.setItem('lastOpenedHost', host.serverUid);
+
+  // The host was not heard from yet (the application just started): its answer decides, not a guess that it is offline
+  if (host.online == null && hostStatusChecks[host.serverUid]) {
+    isHostOpening = false;
+    hostStatusChecks[host.serverUid].then(function() {
+      if (host.online != null) {
+        hostChosen(host, onSuccessCallback);
+      }
+    });
+    return;
+  }
 
   // If the host is already offline or fails to connect, notify the user.
   if (!host.online) {
@@ -1300,6 +1315,26 @@ function autoWolDialog(host, onSuccess, onCancel) {
   sendWakeRequest();
 }
 
+// Selects the card at the given place of the row of hosts. The mark and the focus move with the selection when the row shows them,
+// so that one card is highlighted and it is the one that the A button acts on
+function selectHostCard(index) {
+  var view = Views.Hosts.view;
+  var cards = Array.prototype.slice.call(view.func());
+  if (cards.length === 0) {
+    return;
+  }
+  var marked = cards.filter(function(card) { return card.classList.contains('hovered'); });
+  var focused = cards.indexOf(document.activeElement) >= 0;
+  marked.forEach(function(card) { unmark(card); });
+  view.index = Math.max(0, Math.min(index, cards.length - 1));
+  if (marked.length > 0) {
+    mark(cards[view.index]);
+  }
+  if (focused) {
+    focusElement(cards[view.index]);
+  }
+}
+
 // Add the new NvHTTP Host object inside the host grid
 function addHostToGrid(host, ismDNSDiscovered) {
   // Create the host card with the appropriate attributes; its state is set by updateHostStatusIndicator()
@@ -1374,8 +1409,18 @@ function addHostToGrid(host, ismDNSDiscovered) {
     hostMenuDialog(host);
   });
 
-  // The add host card stays the last one in the row
+  // The add host card stays the last one in the row. A card that is put before the selected one moves it one place on: the row
+  // starts with the add host card alone and marked, and the first host used to take its place in the selection while the mark stayed
+  // where it was, so two cards were highlighted. The selection stays on the card that had it, except that the first host of the row
+  // takes it from the add host card, and so does the host that was opened last while the stored hosts are loaded.
+  var cardsBefore = Array.prototype.slice.call(Views.Hosts.view.func());
+  var selectedBefore = cardsBefore[Views.Hosts.view.index];
   $('#addHostContainer').before(hostContainer);
+  var cardsAfter = Array.prototype.slice.call(Views.Hosts.view.func());
+  var isFirstHost = cardsBefore.length <= 1;
+  var isLastOpenedHost = !isHostsLoaded && localStorage.getItem('lastOpenedHost') === String(host.serverUid);
+  var selectedAfter = (isFirstHost || isLastOpenedHost) ? cardsAfter.indexOf(hostContainer[0]) : cardsAfter.indexOf(selectedBefore);
+  selectHostCard(selectedAfter >= 0 ? selectedAfter : 0);
 
   // Store the host object in the hosts array using its server UID as the key
   hosts[host.serverUid] = host;
@@ -1705,7 +1750,7 @@ function hostDetailsDialog(host) {
     class: 'host-details-text',
     html: [
       t('Name: %1$s', escapeHTML(host.hostname)),
-      t('State: %1$s', escapeHTML(host.online) ? t('ONLINE') : t('OFFLINE')),
+      t('State: %1$s', host.online === true ? t('ONLINE') : t('OFFLINE')),
       t('Active Address: %1$s', escapeHTML(host.address) && escapeHTML(host.externalPort) ? escapeHTML(host.address) + ':' + escapeHTML(host.externalPort) : t('NULL')),
       t('UUID: %1$s', escapeHTML(host.serverUid) ? escapeHTML(host.serverUid) : t('NULL')),
       t('Local Address: %1$s', escapeHTML(host.localAddress) && escapeHTML(host.externalPort) ? escapeHTML(host.localAddress) + ':' + escapeHTML(host.externalPort) : t('NULL')),
@@ -4850,6 +4895,13 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored gameMode preferences.');
   getData('gameMode', function(previousValue) {
     const isForceGMVariant = checkForceGMVariant();
+    if (isForceGMVariant) {
+      // The ForceGM variant makes the TV use its Game Mode by itself, and the setting does not go together with that: it is off for
+      // the streams of this variant and its row is not shown. The stored choice is kept for the standard variant.
+      document.querySelector('#gameModeBtn').MaterialSwitch.off();
+      $('#gameModeMenu').closest('.setting-option').addClass('hide-container');
+      return;
+    }
     if (previousValue.gameMode == null) {
       document.querySelector('#gameModeBtn').MaterialSwitch.off(); // Never force Game Mode without an explicit user choice
       if (isForceGMVariant || parseFloat(platformVer) === 5.5) {
@@ -4974,6 +5026,9 @@ function loadHTTPCertsCb() {
           revivedHost.hostname = hosts[hostUID].hostname;
           revivedHost.ppkstr = hosts[hostUID].ppkstr;
           revivedHost.autoWolEnabled = hosts[hostUID].autoWolEnabled || false;
+          // Whether the host is online is not known until it answers: what was stored is the state of the last session, and a
+          // computer that is switched off showed as online until the first request to it timed out
+          revivedHost.online = null;
           hosts[hostUID] = revivedHost;
           addHostToGrid(revivedHost);
         }
